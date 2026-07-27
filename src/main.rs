@@ -23,7 +23,7 @@ fn main() {
             Ok(mut stream) => {
                 tracing::trace!("accepted new connection");
 
-                if let Err(err) = stream.write_all("HTTP/1.1 200 OK \r\n\r\n".as_bytes()) {
+                if let Err(err) = stream.write_all("HTTP/1.1 200 OK\r\n\r\n".as_bytes()) {
                     tracing::error!("Failed to send data back to TPC stream: {err}");
                 }
             }
