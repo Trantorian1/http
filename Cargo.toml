@@ -8,7 +8,7 @@ rust-version = "1.96"
 path = "./src/lib.rs"
 
 [[bin]]
-name = "server"
+name = "http-server"
 path = "./src/main.rs"
 
 [dependencies]
