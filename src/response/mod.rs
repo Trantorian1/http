@@ -5,10 +5,8 @@
 //!
 //! [`Buffer`]: buffer::Buffer
 
-pub mod buffer;
 pub mod code;
 
-pub use buffer::Buffer;
 pub use code::Status;
 
 // HTTP protocol version
@@ -41,11 +39,11 @@ const CRLF: &[u8] = b"\r\n";
 pub struct Response<'a, const SIZE: usize> {
     stream: std::net::TcpStream,
     status: code::Status,
-    buffer: &'a mut buffer::Buffer<SIZE>,
+    buffer: &'a mut crate::buffer::Buffer<SIZE>,
 }
 
 impl<'a, const SIZE: usize> Response<'a, SIZE> {
-    pub fn new(stream: std::net::TcpStream, buffer: &'a mut buffer::Buffer<SIZE>) -> Self {
+    pub fn new(stream: std::net::TcpStream, buffer: &'a mut crate::buffer::Buffer<SIZE>) -> Self {
         Self {
             stream,
             status: code::Status::default(),

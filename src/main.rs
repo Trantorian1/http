@@ -31,7 +31,7 @@ fn main() {
     let listener = TcpListener::bind(ADDRESS).unwrap();
     tracing::info!("Listening on {ADDRESS}");
 
-    let mut global_response_buffer = http_server::response::Buffer::<{ 64 * KB }>::new();
+    let mut global_response_buffer = http_server::Buffer::<{ 64 * KB }>::new();
 
     // == Main TCP data loop =======================================================================
 

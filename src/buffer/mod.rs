@@ -1,3 +1,6 @@
+pub mod read;
+pub mod write;
+
 /// Stack buffer implementation which guards against invalid writes and ensures proper flushing.
 pub struct Buffer<const SIZE: usize> {
     buffer: [u8; SIZE],
@@ -13,12 +16,12 @@ impl<const SIZE: usize> Buffer<SIZE> {
         }
     }
 
-    /// Writes out a set of bytes to a [`Writer`], guaranteeing proper flushing. See [`BufView`] for
+    /// Writes out a set of bytes to a [`Writer`], guaranteeing proper flushing. See [`write::BufWriter`] for
     /// a list of available writing methods.
     ///
     /// ```rust
     /// # const KB: usize = 1_000;
-    /// # let mut buffer = http_server::response::Buffer::<{64 * KB}>::new();
+    /// # let mut buffer = http_server::Buffer::<{64 * KB}>::new();
     /// # let stream = Vec::<u8>::new();
     /// buffer.write_out(stream, |writer| {
     ///     writer.write(b"HTTP/1.1 200 OK\r\n")
@@ -29,9 +32,9 @@ impl<const SIZE: usize> Buffer<SIZE> {
     pub fn write_out<W: std::io::Write>(
         &mut self,
         writer: W,
-        apply_writes: impl FnOnce(&mut BufView<'_, SIZE, W>) -> std::io::Result<()>,
+        apply_writes: impl FnOnce(&mut write::BufWriter<'_, SIZE, W>) -> std::io::Result<()>,
     ) -> std::io::Result<()> {
-        let mut view = BufView::new(self, writer);
+        let mut view = write::BufWriter::new(self, writer);
         apply_writes(&mut view)?;
         view.flush()
     }
@@ -78,49 +81,5 @@ impl<const SIZE: usize> Default for Buffer<SIZE> {
 impl<const SIZE: usize> AsRef<[u8]> for Buffer<SIZE> {
     fn as_ref(&self) -> &[u8] {
         &self.buffer[..self.index]
-    }
-}
-
-/// Misuse-resistant [`Buffer`] mutator. Allows the user to specify which parts of the HTTP message
-/// to push to a given [`Writer`] while handling flushing and other buffering operations.
-///
-/// [`Writer`]: std::io::Write
-pub struct BufView<'a, const SIZE: usize, W: std::io::Write> {
-    view: &'a mut Buffer<SIZE>,
-    writer: W,
-}
-
-impl<'a, const SIZE: usize, W: std::io::Write> BufView<'a, SIZE, W> {
-    /// Writes new data to a [`Buffer`], handling flushing and buffering.
-    pub fn write(&mut self, mut data: &[u8]) -> std::io::Result<()> {
-        assert!(!data.is_empty());
-
-        loop {
-            data = self.view.append(data);
-
-            if !data.is_empty() {
-                self.writer.write_all(self.view.as_ref())?;
-                self.view.reset();
-            } else {
-                break Ok(());
-            }
-        }
-    }
-
-    /// Force-flushes the [`Buffer`]. This should not need to be called by the end user but is
-    /// exposed just in case.
-    pub fn flush(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(self.view.as_ref())?;
-        self.view.reset();
-
-        Ok(())
-    }
-
-    /// New [`BufView`]s cannot be created by the user: they are only exposed by [`write_out`] as a
-    /// safe writing interface.
-    ///
-    /// [`write_out`]: Buffer::write_out
-    fn new(view: &'a mut Buffer<SIZE>, writer: W) -> Self {
-        Self { view, writer }
     }
 }
