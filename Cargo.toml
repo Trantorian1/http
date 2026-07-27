@@ -6,4 +6,8 @@ edition = "2024"
 rust-version = "1.96"
 
 [dependencies]
+# Logging
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
 bytes = "1.3.0" # helps manage buffers
