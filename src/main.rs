@@ -31,21 +31,34 @@ fn main() {
     let listener = TcpListener::bind(ADDRESS).unwrap();
     tracing::info!("Listening on {ADDRESS}");
 
-    let mut global_response_buffer = http_server::Buffer::<{ 64 * KB }>::new();
+    let mut global_request_buffer = http_server::Buffer::<{ 8 * KB }, _>::for_reading();
+    let mut global_response_buffer = http_server::Buffer::<{ 64 * KB }, _>::for_writing();
 
     // == Main TCP data loop =======================================================================
 
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => {
-                tracing::trace!("accepted new connection");
+            Ok(mut stream) => {
+                let request = http_server::Request::new(&mut stream, &mut global_request_buffer)
+                    .process()
+                    .unwrap();
 
-                if let Err(err) = http_server::Response::new(stream, &mut global_response_buffer)
-                    .with_status_code(http_server::response::Status::Ok)
-                    .respond()
-                {
+                tracing::info!(?request, "received new request");
+
+                let response = match request.target {
+                    b"/" => http_server::Response::new(&mut stream, &mut global_response_buffer)
+                        .with_status_code(http_server::response::Status::Ok)
+                        .respond(),
+                    _ => http_server::Response::new(&mut stream, &mut global_response_buffer)
+                        .with_status_code(http_server::response::Status::NotFound)
+                        .respond(),
+                };
+
+                if let Err(err) = response {
                     tracing::error!("Failed to send data back to TPC stream: {err}");
                 }
+
+                global_request_buffer.clear();
             }
             Err(e) => {
                 println!("error: {}", e);

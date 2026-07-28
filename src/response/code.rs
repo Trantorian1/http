@@ -3,6 +3,7 @@
 pub enum Status {
     #[default]
     Ok,
+    NotFound,
 }
 
 impl Status {
@@ -15,6 +16,7 @@ impl Status {
     pub fn code(&self) -> &'static [u8] {
         match self {
             Self::Ok => b"200 ",
+            Self::NotFound => b"404 ",
         }
     }
 
@@ -27,6 +29,7 @@ impl Status {
     pub fn reason(&self) -> &'static [u8] {
         match self {
             Status::Ok => b"OK",
+            Status::NotFound => b"Not Found",
         }
     }
 }
