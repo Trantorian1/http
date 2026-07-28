@@ -1,25 +1,92 @@
-use super::Buffer;
+use super::*;
+
+pub struct WriteOut;
 
 /// Misuse-resistant [`Buffer`] mutator. Allows the user to specify which parts of the HTTP message
 /// to push to a given [`Writer`] while handling flushing and other buffering operations.
 ///
 /// [`Writer`]: std::io::Write
-pub struct BufWriter<'a, const SIZE: usize, W: std::io::Write> {
-    view: &'a mut Buffer<SIZE>,
-    writer: W,
+pub struct BufWriter<'a, 'b, const SIZE: usize, W: std::io::Write> {
+    buffer: &'a mut Buffer<SIZE, WriteOut>,
+    writer: &'b mut W,
 }
 
-impl<'a, const SIZE: usize, W: std::io::Write> BufWriter<'a, SIZE, W> {
+impl<const SIZE: usize> Buffer<SIZE, write::WriteOut> {
+    pub fn for_writing() -> Self {
+        Buffer::new()
+    }
+
+    /// Writes out a set of bytes to a [`Writer`], guaranteeing proper flushing. See [`write::BufWriter`] for
+    /// a list of available writing methods.
+    ///
+    /// ```rust
+    /// # const KB: usize = 1_000;
+    /// # let mut buffer = http_server::Buffer::<{64 * KB}, _>::for_writing();
+    /// # let mut stream = Vec::<u8>::new();
+    /// buffer.write_out(&mut stream, |writer| {
+    ///     writer.write(b"HTTP/1.1 200 OK\r\n")
+    /// });
+    /// ```
+    ///
+    /// [`Writer`]: std::io::Write
+    pub fn write_out<'a, 'b, W: std::io::Write>(
+        &'a mut self,
+        writer: &'b mut W,
+        apply_writes: impl FnOnce(&mut write::BufWriter<'a, 'b, SIZE, W>) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        let mut buf_writer = BufWriter::new(self, writer);
+        apply_writes(&mut buf_writer)?;
+        buf_writer.flush()
+    }
+
+    /// Appends data to the [`Buffer`], returning any bytes which could not be written. If this
+    /// happens the buffer will have to be manually flushed.
+    fn append_to<'a>(&mut self, data: &'a [u8]) -> &'a [u8] {
+        let index_start = self.window.end;
+        let index_stop = self.window.end + data.len();
+
+        if index_stop < SIZE {
+            // Buffer is large enough to fit all of `data`, copy it in.
+
+            self.buffer[index_start..index_stop].copy_from_slice(data);
+            self.window.end += data.len();
+
+            &data[0..0]
+        } else {
+            // Too little free space, `data` will have to be partitioned and flushed in parts.
+
+            let available_space = SIZE - index_start;
+
+            self.buffer[index_start..].copy_from_slice(&data[..available_space]);
+            self.window.end = SIZE;
+
+            &data[available_space..]
+        }
+    }
+}
+
+impl<'a, 'b, const SIZE: usize, W: std::io::Write> BufWriter<'a, 'b, SIZE, W> {
+    /// New [`BufWriter`]s cannot be created by the user: they are only exposed by [`write_out`] as
+    /// a safe writing interface.
+    ///
+    /// [`write_out`]: Buffer::write_out
+    pub(crate) fn new(view: &'a mut Buffer<SIZE, WriteOut>, writer: &'b mut W) -> Self {
+        Self {
+            buffer: view,
+            writer,
+        }
+    }
+
     /// Writes new data to a [`Buffer`], handling flushing and buffering.
     pub fn write(&mut self, mut data: &[u8]) -> std::io::Result<()> {
         assert!(!data.is_empty());
 
         loop {
-            data = self.view.append(data);
+            data = self.buffer.append_to(data);
 
             if !data.is_empty() {
-                self.writer.write_all(self.view.as_ref())?;
-                self.view.reset();
+                self.writer.write_all(self.buffer.as_ref())?;
+                self.buffer.clear();
             } else {
                 break Ok(());
             }
@@ -29,17 +96,9 @@ impl<'a, const SIZE: usize, W: std::io::Write> BufWriter<'a, SIZE, W> {
     /// Force-flushes the [`Buffer`]. This should not need to be called by the end user but is
     /// exposed just in case.
     pub fn flush(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(self.view.as_ref())?;
-        self.view.reset();
+        self.writer.write_all(self.buffer.as_ref())?;
+        self.buffer.clear();
 
         Ok(())
-    }
-
-    /// New [`BufView`]s cannot be created by the user: they are only exposed by [`write_out`] as a
-    /// safe writing interface.
-    ///
-    /// [`write_out`]: Buffer::write_out
-    pub(crate) fn new(view: &'a mut Buffer<SIZE>, writer: W) -> Self {
-        Self { view, writer }
     }
 }

@@ -9,12 +9,6 @@ pub mod code;
 
 pub use code::Status;
 
-// HTTP protocol version
-const PROTOCOL: &[u8] = b"HTTP/1.1 ";
-
-// Carriage Return + Line Feed
-const CRLF: &[u8] = b"\r\n";
-
 /// See [RFC9112], message format.
 ///
 /// >  _"An HTTP/1.1 message consists of a start-line followed by a CRLF and a sequence of octets in
@@ -36,14 +30,17 @@ const CRLF: &[u8] = b"\r\n";
 ///
 /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#section-2.1
 /// [RFC5322]: https://datatracker.ietf.org/doc/html/rfc5322
-pub struct Response<'a, const SIZE: usize> {
-    stream: std::net::TcpStream,
+pub struct Response<'a, 'b, const SIZE: usize, W: std::io::Write> {
+    stream: &'a mut W,
     status: code::Status,
-    buffer: &'a mut crate::buffer::Buffer<SIZE>,
+    buffer: &'b mut crate::Buffer<SIZE, crate::buffer::WriteOut>,
 }
 
-impl<'a, const SIZE: usize> Response<'a, SIZE> {
-    pub fn new(stream: std::net::TcpStream, buffer: &'a mut crate::buffer::Buffer<SIZE>) -> Self {
+impl<'a, 'b, const SIZE: usize, W: std::io::Write> Response<'a, 'b, SIZE, W> {
+    pub fn new(
+        stream: &'a mut W,
+        buffer: &'b mut crate::Buffer<SIZE, crate::buffer::WriteOut>,
+    ) -> Self {
         Self {
             stream,
             status: code::Status::default(),
@@ -60,11 +57,12 @@ impl<'a, const SIZE: usize> Response<'a, SIZE> {
     /// Sends out the [`Response`] to the connected HTTP client.
     pub fn respond(self) -> std::io::Result<()> {
         self.buffer.write_out(self.stream, |writer| {
-            writer.write(PROTOCOL)?;
+            writer.write(crate::PROTOCOL)?;
+            writer.write(crate::SP)?;
             writer.write(self.status.code())?;
             writer.write(self.status.reason())?;
-            writer.write(CRLF)?;
-            writer.write(CRLF)?;
+            writer.write(crate::CRLF)?;
+            writer.write(crate::CRLF)?;
             Ok(())
         })
     }
