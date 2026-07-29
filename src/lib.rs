@@ -3,7 +3,7 @@
 //! See [RFC9112] for an overview of the specs.
 //!
 //! [build your own HTTP server]: https://app.codecrafters.io/courses/http-server/overview
-//! [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#section-2.1
+//! [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112
 
 pub mod buffer;
 pub mod code;
