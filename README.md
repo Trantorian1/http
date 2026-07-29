@@ -1,38 +1,7 @@
-[![progress-banner](https://backend.codecrafters.io/progress/http-server/ac027200-c10c-4cdd-abcb-d58629d185f4)](https://app.codecrafters.io/users/Trantorian1?r=2qF)
+# Http/1.1
 
-This is a starting point for Rust solutions to the
-["Build Your Own HTTP server" Challenge](https://app.codecrafters.io/courses/http-server/overview).
+A simple stack-based zerocopy implementation of the [HTTP/1.1] spec, based off Codecrafter's 
+[build your own HTTP server] challenge.
 
-[HTTP](https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol) is the
-protocol that powers the web. In this challenge, you'll build a HTTP/1.1 server
-that is capable of serving multiple clients.
-
-Along the way you'll learn about TCP servers,
-[HTTP request syntax](https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html),
-and more.
-
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
-
-# Passing the first stage
-
-The entry point for your HTTP server implementation is in `src/main.rs`. Study
-and uncomment the relevant code, and then run the command below to execute the
-tests on our servers:
-
-```sh
-codecrafters submit
-```
-
-Time to move on to the next stage!
-
-# Stage 2 & beyond
-
-Note: This section is for stages 2 and beyond.
-
-1. Ensure you have `cargo (1.96)` installed locally
-1. Run `./your_program.sh` to run your program, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Run `codecrafters submit` to submit your solution to CodeCrafters. Test
-   output will be streamed to your terminal.
+[HTTP/1.1]: https://datatracker.ietf.org/doc/html/rfc9112
+[build your own HTTP server]: https://app.codecrafters.io/courses/http-server/overview
