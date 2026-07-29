@@ -15,8 +15,8 @@ impl<const SIZE: usize> Buffer<SIZE, ReadIn> {
     pub fn read_in<'a, 'b, R: std::io::Read, T>(
         &'a mut self,
         reader: &'b mut R,
-        apply_reads: impl FnOnce(&mut BufReader<'a, 'b, SIZE, R>) -> Result<T, Error>,
-    ) -> Result<T, Error> {
+        apply_reads: impl FnOnce(&mut BufReader<'a, 'b, SIZE, R>) -> Result<T, crate::code::Status>,
+    ) -> Result<T, crate::code::Status> {
         let mut buf_reader = BufReader::new(self, reader);
         let reads = apply_reads(&mut buf_reader);
 
@@ -52,8 +52,8 @@ impl<'a, 'b, const SIZE: usize, R: std::io::Read> BufReader<'a, 'b, SIZE, R> {
 
     pub fn read(
         &mut self,
-        parse: fn(&[u8]) -> Result<Option<std::num::NonZeroUsize>, Error>,
-    ) -> Result<std::ops::Range<usize>, Error> {
+        parse: fn(&[u8]) -> Result<Option<std::num::NonZeroUsize>, crate::code::Status>,
+    ) -> Result<std::ops::Range<usize>, crate::code::Status> {
         loop {
             if let Some(index) = parse(self.buffer.as_ref())? {
                 break Ok(self.buffer.process(index));
@@ -62,12 +62,12 @@ impl<'a, 'b, const SIZE: usize, R: std::io::Read> BufReader<'a, 'b, SIZE, R> {
             let new_bytes = self
                 .buffer
                 .append_from(&mut self.reader)
-                .map_err(Error::Io)?;
+                .map_err(crate::code::Status::internal)?;
 
             if self.buffer.len() == SIZE {
-                return Err(Error::NoSpaceLeft);
+                return Err(crate::code::Status::ContentTooLarge);
             } else if new_bytes == 0 {
-                return Err(Error::EndOfStream);
+                return Err(crate::code::Status::RequestTimetout);
             }
         }
     }
