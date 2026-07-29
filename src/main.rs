@@ -39,20 +39,34 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                let request = http_server::Request::new(&mut stream, &mut global_request_buffer)
-                    .process()
-                    .unwrap();
+                let response =
+                    match http_server::Request::new(&mut stream, &mut global_request_buffer)
+                        .process()
+                    {
+                        Err(status) => {
+                            http_server::Response::new(&mut stream, &mut global_response_buffer)
+                                .with_status_code(status)
+                                .respond()
+                        }
+                        Ok(request) => {
+                            tracing::info!(?request, "received new request");
 
-                tracing::info!(?request, "received new request");
-
-                let response = match request.target {
-                    b"/" => http_server::Response::new(&mut stream, &mut global_response_buffer)
-                        .with_status_code(http_server::response::Status::Ok)
-                        .respond(),
-                    _ => http_server::Response::new(&mut stream, &mut global_response_buffer)
-                        .with_status_code(http_server::response::Status::NotFound)
-                        .respond(),
-                };
+                            match request.target {
+                                b"/" => http_server::Response::new(
+                                    &mut stream,
+                                    &mut global_response_buffer,
+                                )
+                                .with_status_code(http_server::code::Status::Ok)
+                                .respond(),
+                                _ => http_server::Response::new(
+                                    &mut stream,
+                                    &mut global_response_buffer,
+                                )
+                                .with_status_code(http_server::code::Status::NotFound)
+                                .respond(),
+                            }
+                        }
+                    };
 
                 if let Err(err) = response {
                     tracing::error!("Failed to send data back to TPC stream: {err}");

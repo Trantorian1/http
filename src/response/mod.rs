@@ -3,11 +3,7 @@
 //! All responses are written to a fixed-size [`Buffer`] and are only flushed as capacity is
 //! reached.
 //!
-//! [`Buffer`]: buffer::Buffer
-
-pub mod code;
-
-pub use code::Status;
+//! [`Buffer`]: crate::Buffer
 
 /// See [RFC9112], message format.
 ///
@@ -32,7 +28,7 @@ pub use code::Status;
 /// [RFC5322]: https://datatracker.ietf.org/doc/html/rfc5322
 pub struct Response<'a, 'b, const SIZE: usize, W: std::io::Write> {
     stream: &'a mut W,
-    status: code::Status,
+    status: crate::code::Status,
     buffer: &'b mut crate::Buffer<SIZE, crate::buffer::WriteOut>,
 }
 
@@ -43,19 +39,20 @@ impl<'a, 'b, const SIZE: usize, W: std::io::Write> Response<'a, 'b, SIZE, W> {
     ) -> Self {
         Self {
             stream,
-            status: code::Status::default(),
+            status: crate::code::Status::default(),
             buffer,
         }
     }
 
     /// Sets the [`Response`] status code.
-    pub fn with_status_code(mut self, status: code::Status) -> Self {
+    pub fn with_status_code(mut self, status: crate::code::Status) -> Self {
         self.status = status;
         self
     }
 
     /// Sends out the [`Response`] to the connected HTTP client.
     pub fn respond(self) -> std::io::Result<()> {
+        self.status.log();
         self.buffer.write_out(self.stream, |writer| {
             writer.write(crate::PROTOCOL)?;
             writer.write(crate::SP)?;

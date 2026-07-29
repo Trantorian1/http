@@ -1,9 +1,37 @@
-mod error;
-
-pub use error::Error;
+//! Stack-allocated HTTP request helpers.
+//!
+//! All requests are written to a fixed-size [`Buffer`]. Keep in mind that parsing **WILL** fail in
+//! case the buffer is too small to process the entire request.
+//!
+//! [`Buffer`]: crate::buffer
 
 mod parsers;
 
+/// See [RFC9112], request line.
+///
+/// > _" A request-line begins with a method token, followed by a single space (SP), the
+/// > request-target, and another single space (SP), and ends with the protocol version.
+/// >
+/// > ```
+/// > request-line   = method SP request-target SP HTTP-version
+/// > ```
+/// >
+/// > _Although the request-line grammar rule requires that each of the component elements be
+/// > separated by a single SP octet, recipients MAY instead parse on whitespace-delimited word
+/// > boundaries and, aside from the CRLF terminator, treat any form of whitespace as the SP
+/// > separator while ignoring preceding or trailing whitespace; such whitespace includes one or
+/// > more of the following octets: SP, HTAB, VT (%x0B), FF (%x0C), or bare CR. However, lenient
+/// > parsing can result in request smuggling security vulnerabilities if there are multiple
+/// > recipients of the message and each has its own unique interpretation of robustness (see
+/// > [Section 11.2]).
+///
+/// Note that since the request implements buffer-based parsing, it will fail if the content of the
+/// request cannot fit in the target buffer, in which case the server will respond with a
+/// [`ContentTooLarge`] error code.
+///
+/// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#name-request-line
+/// [Section 11.2]: https://datatracker.ietf.org/doc/html/rfc9112#request.smuggling
+/// [`ContentTooLarge`]: crate::code::Status::ContentTooLarge
 pub struct Request<'a, 'b, const SIZE: usize, R: std::io::Read> {
     stream: &'a mut R,
     buffer: &'b mut crate::Buffer<SIZE, crate::buffer::ReadIn>,
@@ -17,19 +45,21 @@ impl<'a, 'b, const SIZE: usize, R: std::io::Read> Request<'a, 'b, SIZE, R> {
         Self { stream, buffer }
     }
 
-    pub fn process(self) -> Result<RequestInfo<'b>, crate::buffer::Error> {
+    pub fn process(self) -> Result<RequestInfo<'b>, crate::code::Status> {
         let (method, target) = self.buffer.read_in(self.stream, |reader| {
             let method = reader.read(parsers::method)?;
+
+            reader.read(parsers::sp)?;
+
             let target = reader.read(parsers::target)?;
 
+            reader.read(parsers::sp)?;
             reader.read(parsers::protocol)?;
             reader.read(parsers::crlf)?;
 
             // while let Some(header) = reader.read(header)? {
             //     // process header
             // }
-
-            reader.read(parsers::crlf)?;
 
             Ok((method, target))
         })?;
