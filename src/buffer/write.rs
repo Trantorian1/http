@@ -1,4 +1,4 @@
-use super::*;
+use crate::prelude::*;
 
 pub struct WriteOut;
 
@@ -11,17 +11,12 @@ pub struct BufWriter<'a, 'b, const SIZE: usize, W: std::io::Write> {
     writer: &'b mut W,
 }
 
-impl<const SIZE: usize> Buffer<SIZE, write::WriteOut> {
-    pub fn for_writing() -> Self {
-        Buffer::new()
-    }
-
-    /// Writes out a set of bytes to a [`Writer`], guaranteeing proper flushing. See [`write::BufWriter`] for
-    /// a list of available writing methods.
+impl<const SIZE: usize> Buffer<SIZE, WriteOut> {
+    /// Writes out a set of bytes to a [`Writer`], guaranteeing proper flushing. See [`BufWriter`]
+    /// for a list of available writing methods.
     ///
     /// ```rust
-    /// # const KB: usize = 1_000;
-    /// # let mut buffer = http_server::Buffer::<{64 * KB}, _>::for_writing();
+    /// # let mut buffer = http1::BufferForWriting::<{64 * http1::size::KB}>::new();
     /// # let mut stream = Vec::<u8>::new();
     /// buffer.write_out(&mut stream, |writer| {
     ///     writer.write(b"HTTP/1.1 200 OK\r\n")
@@ -32,8 +27,11 @@ impl<const SIZE: usize> Buffer<SIZE, write::WriteOut> {
     pub fn write_out<'a, 'b, W: std::io::Write>(
         &'a mut self,
         writer: &'b mut W,
-        apply_writes: impl FnOnce(&mut write::BufWriter<'a, 'b, SIZE, W>) -> std::io::Result<()>,
+        apply_writes: impl FnOnce(&mut BufWriter<'a, 'b, SIZE, W>) -> std::io::Result<()>,
     ) -> std::io::Result<()> {
+        // Make sure we are not re-using data from previous requests/responses.
+        self.clear();
+
         let mut buf_writer = BufWriter::new(self, writer);
         apply_writes(&mut buf_writer)?;
         buf_writer.flush()
@@ -93,12 +91,7 @@ impl<'a, 'b, const SIZE: usize, W: std::io::Write> BufWriter<'a, 'b, SIZE, W> {
         }
     }
 
-    /// Force-flushes the [`Buffer`]. This should not need to be called by the end user but is
-    /// exposed just in case.
-    pub fn flush(&mut self) -> std::io::Result<()> {
-        self.writer.write_all(self.buffer.as_ref())?;
-        self.buffer.clear();
-
-        Ok(())
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.writer.write_all(self.buffer.as_ref())
     }
 }

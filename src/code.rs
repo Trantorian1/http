@@ -1,3 +1,12 @@
+//! HTTP status codes, see [RFC9110].
+//!
+//! > _"The status code of a response is a three-digit integer code that describes the result of the
+//! > request and the semantics of the response, including whether the request was successful and
+//! > what content is enclosed (if any). All valid status codes are within the range of 100 to 599,
+//! > inclusive."_
+//!
+//! [RFC9110]: https://www.rfc-editor.org/info/rfc9110/#name-status-codes
+
 /// HTTP status code.
 #[repr(u16)]
 #[derive(Debug, Default)]
@@ -9,6 +18,15 @@ pub enum Status {
     ///
     /// [RFC9110]: https://www.rfc-editor.org/info/rfc9110/#name-200-ok
     Ok = 200,
+
+    /// See [RFC9110], 400 Bad Request
+    ///
+    /// > _"The 400 (Bad Request) status code indicates that the server cannot or will not process
+    /// > the request due to something that is perceived to be a client error (e.g., malformed
+    /// > request syntax, invalid request message framing, or deceptive request routing)."_
+    ///
+    /// [RFC9110]: https://www.rfc-editor.org/info/rfc9110/#name-400-bad-request
+    BadRequest = 400,
 
     /// See [RFC9110], 404 Not Found
     ///
@@ -26,7 +44,7 @@ pub enum Status {
     /// See [RFC9110], 408 Request Timeout
     ///
     /// > _"The 408 (Request Timeout) status code indicates that the server did not receive a
-    /// > complete request message within the time that it was prepared to wait."_"
+    /// > complete request message within the time that it was prepared to wait."_
     ///
     /// [RFC9110]: https://www.rfc-editor.org/info/rfc9110/#name-408-request-timeout
     RequestTimetout = 408,
@@ -35,8 +53,8 @@ pub enum Status {
     ///
     /// > _"The 413 (Content Too Large) status code indicates that the server is refusing to process
     /// > a request because the request content is larger than the server is willing or able to
-    /// > process. The server MAY terminate the request, if the protocol version in use allows it;
-    /// > otherwise, the server MAY close the connection.
+    /// > process. The server **MAY** terminate the request, if the protocol version in use allows
+    /// > it; otherwise, the server **MAY** close the connection."_
     ///
     /// [RFC9110]: https://www.rfc-editor.org/info/rfc9110/#name-413-content-too-large
     ContentTooLarge = 413,
@@ -73,14 +91,15 @@ impl Status {
 
     /// See [RFC9112], status line.
     ///
-    /// > _"The first line of a response message is the status-line, consisting of [..] the status
-    /// > code."_
+    /// > _"The first line of a response message is the status-line, consisting of [..] **the status
+    /// > code**."_
     ///
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#name-status-line
     pub fn code(&self) -> &'static [u8] {
         match self {
             Self::Ok => b"200 ",
 
+            Self::BadRequest => b"400 ",
             Self::NotFound => b"404 ",
             Self::RequestTimetout => b"408 ",
             Self::ContentTooLarge => b"413 ",
@@ -92,14 +111,15 @@ impl Status {
 
     /// See [RFC9112], status line.
     ///
-    /// > _"The first line of a response message is the status-line [...] ending with an OPTIONAL
-    /// > textual phrase describing the status code."_
+    /// > _"The first line of a response message is the status-line [...] **ending with an OPTIONAL
+    /// > textual phrase describing the status code**."_
     ///
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#name-status-line
     pub fn reason(&self) -> &'static [u8] {
         match self {
             Status::Ok => b"OK",
 
+            Status::BadRequest => b"Bad Request",
             Status::NotFound => b"Not Found",
             Status::RequestTimetout => b"Request Timeout",
             Status::ContentTooLarge => b"Content Too Large",
