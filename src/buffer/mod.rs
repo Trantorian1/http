@@ -1,8 +1,13 @@
-pub mod read;
-pub mod write;
+//! Stack-based statically allocated sliding [`Buffer`]s.
 
-pub use read::ReadIn;
-pub use write::WriteOut;
+mod read;
+mod write;
+
+pub use read::BufReader;
+pub use write::BufWriter;
+
+pub type BufferForReading<const SIZE: usize> = Buffer<SIZE, read::ReadIn>;
+pub type BufferForWriting<const SIZE: usize> = Buffer<SIZE, write::WriteOut>;
 
 /// Sliding view stack buffer which guards against invalid writes and ensures proper flushing.
 pub struct Buffer<const SIZE: usize, RW> {
@@ -13,7 +18,15 @@ pub struct Buffer<const SIZE: usize, RW> {
 }
 
 impl<const SIZE: usize, RW> Buffer<SIZE, RW> {
-    /// Stack-allocates a new [`Buffer`] of the given size.
+    /// Stack-allocates a new [`Buffer`] of the given `SIZE`.
+    ///
+    /// ```rust
+    /// let buffer = http1::BufferForReading::{ 8 * http1::size::KB }::new();
+    /// ```
+    ///
+    /// [`BufferForReading`] can only be used to read from byte streams, while [`BufferForWriting`]
+    /// can only be used to write back to those streams. This prevents the user from re-using the
+    /// same buffer for reading and writing and potentially jumbling data.
     pub fn new() -> Self {
         assert!(SIZE > 0);
 
@@ -25,13 +38,13 @@ impl<const SIZE: usize, RW> Buffer<SIZE, RW> {
         }
     }
 
+    /// Returns the length of the buffer. This is different from a buffer's full size and only
+    /// counts data which has already been written to it.
     fn len(&self) -> usize {
         self.window.len()
     }
 
-    // Clears the buffer. In theory we could omit resetting all the bytes to 0, but this way feels
-    // more secure in case we mess up indexing further down the line.
-    pub fn clear(&mut self) {
+    fn clear(&mut self) {
         self.buffer.fill(0);
         self.window = 0..0;
     }

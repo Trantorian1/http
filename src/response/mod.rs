@@ -3,7 +3,9 @@
 //! All responses are written to a fixed-size [`Buffer`] and are only flushed as capacity is
 //! reached.
 //!
-//! [`Buffer`]: crate::Buffer
+//! [`Buffer`]: Buffer
+
+use crate::prelude::*;
 
 /// See [RFC9112], message format.
 ///
@@ -28,38 +30,36 @@
 /// [RFC5322]: https://datatracker.ietf.org/doc/html/rfc5322
 pub struct Response<'a, 'b, const SIZE: usize, W: std::io::Write> {
     stream: &'a mut W,
-    status: crate::code::Status,
-    buffer: &'b mut crate::Buffer<SIZE, crate::buffer::WriteOut>,
+    status: code::Status,
+    buffer: &'b mut BufferForWriting<SIZE>,
 }
 
 impl<'a, 'b, const SIZE: usize, W: std::io::Write> Response<'a, 'b, SIZE, W> {
-    pub fn new(
-        stream: &'a mut W,
-        buffer: &'b mut crate::Buffer<SIZE, crate::buffer::WriteOut>,
-    ) -> Self {
+    /// Initializes a new [`Response`]
+    pub fn new(stream: &'a mut W, buffer: &'b mut BufferForWriting<SIZE>) -> Self {
         Self {
             stream,
-            status: crate::code::Status::default(),
+            status: code::Status::default(),
             buffer,
         }
     }
 
-    /// Sets the [`Response`] status code.
-    pub fn with_status_code(mut self, status: crate::code::Status) -> Self {
+    /// Sets the response status code.
+    pub fn with_status_code(mut self, status: code::Status) -> Self {
         self.status = status;
         self
     }
 
-    /// Sends out the [`Response`] to the connected HTTP client.
+    /// Sends out the response to the connected HTTP client.
     pub fn respond(self) -> std::io::Result<()> {
         self.status.log();
         self.buffer.write_out(self.stream, |writer| {
-            writer.write(crate::PROTOCOL)?;
-            writer.write(crate::SP)?;
+            writer.write(PROTOCOL)?;
+            writer.write(SP)?;
             writer.write(self.status.code())?;
             writer.write(self.status.reason())?;
-            writer.write(crate::CRLF)?;
-            writer.write(crate::CRLF)?;
+            writer.write(CRLF)?;
+            writer.write(CRLF)?;
             Ok(())
         })
     }
