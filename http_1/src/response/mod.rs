@@ -6,6 +6,7 @@
 //! [`Buffer`]: Buffer
 
 use crate::prelude::*;
+use http_core::prelude::*;
 
 /// See [RFC9112], message format.
 ///
@@ -30,7 +31,7 @@ use crate::prelude::*;
 /// [RFC5322]: https://datatracker.ietf.org/doc/html/rfc5322
 pub struct Response<'a, 'b, const SIZE: usize, W: std::io::Write> {
     stream: &'a mut W,
-    status: code::Status,
+    status: Status,
     buffer: &'b mut BufferForWriting<SIZE>,
 }
 
@@ -39,20 +40,23 @@ impl<'a, 'b, const SIZE: usize, W: std::io::Write> Response<'a, 'b, SIZE, W> {
     pub fn new(stream: &'a mut W, buffer: &'b mut BufferForWriting<SIZE>) -> Self {
         Self {
             stream,
-            status: code::Status::default(),
+            status: Status::default(),
             buffer,
         }
     }
 
     /// Sets the response status code.
-    pub fn with_status_code(mut self, status: code::Status) -> Self {
+    pub fn with_status_code(mut self, status: Status) -> Self {
         self.status = status;
         self
     }
 
     /// Sends out the response to the connected HTTP client.
     pub fn respond(self) -> std::io::Result<()> {
-        self.status.log();
+        if let Status::InternalServerError(err) = &self.status {
+            tracing::error!(err);
+        };
+
         self.buffer.write_out(self.stream, |writer| {
             writer.write(PROTOCOL)?;
             writer.write(SP)?;

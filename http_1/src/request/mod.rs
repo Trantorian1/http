@@ -4,10 +4,10 @@
 //! case the buffer is too small to process the entire request, in which case the server **SHOULD**
 //! return [`413`].
 //!
-//! [`Buffer`]: buffer
-//! [`413`]: code::Status::ContentTooLarge
+//! [`Buffer`]: Buffer
+//! [`413`]: Status::ContentTooLarge
 
-use crate::prelude::*;
+use http_core::prelude::*;
 
 pub mod parsers;
 
@@ -35,7 +35,7 @@ pub mod parsers;
 ///
 /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#name-request-line
 /// [Section 11.2]: https://datatracker.ietf.org/doc/html/rfc9112#request.smuggling
-/// [`413`]: code::Status::ContentTooLarge
+/// [`413`]: Status::ContentTooLarge
 pub struct Request<'a, 'b, const SIZE: usize, R: std::io::Read> {
     stream: &'a mut R,
     buffer: &'b mut BufferForReading<SIZE>,
@@ -48,7 +48,7 @@ impl<'a, 'b, const SIZE: usize, R: std::io::Read> Request<'a, 'b, SIZE, R> {
     }
 
     /// Parses a byte stream into an HTTP/1.1 request, validating format along the way.
-    pub fn process(self) -> Result<RequestInfo<'b>, code::Status> {
+    pub fn process(self) -> Result<RequestInfo<'b>, Status> {
         let (method, target) = self.buffer.read_in(self.stream, |reader| {
             let method = reader.read(parsers::method)?;
 
@@ -124,7 +124,7 @@ pub struct RequestInfo<'a> {
     /// > more than one Host header field line or a Host header field with an invalid field value."_
     ///
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#section-3.2
-    /// [`400`]: code::Status::BadRequest
+    /// [`400`]: Status::BadRequest
     pub target: &'a [u8],
 }
 

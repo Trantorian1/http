@@ -1,0 +1,20 @@
+[package]
+name = "http_1"
+version = "0.0.1"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# http
+http_core.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Parsing
+memchr.workspace = true
+
+# [dev-dependencies]
+# rstest = "0.26.1"
+# pretty_assertions = "1.4.1"

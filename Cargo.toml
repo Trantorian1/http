@@ -1,17 +1,25 @@
-[package]
-name = "http1"
+[workspace]
+resolver = "3"
+members = ["core", "http_1"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.96"
 
-[lib]
-path = "./src/lib.rs"
 
-[[bin]]
-name = "server"
-path = "./src/main.rs"
+# [lib]
+# path = "./src/lib.rs"
+#
+# [[bin]]
+# name = "server"
+# path = "./src/main.rs"
 
-[dependencies]
+[workspace.dependencies]
+# http
+http_core.path = "core"
+http_1.path = "http_1"
+
 # Logging
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
@@ -19,6 +27,6 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # Parsing
 memchr = "2.8.3"
 
-[dev-dependencies]
+# Testing
 rstest = "0.26.1"
 pretty_assertions = "1.4.1"
