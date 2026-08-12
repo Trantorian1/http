@@ -79,8 +79,14 @@ where
     ///
     /// ```rust
     /// # use http_core::prelude::*;
-    /// # let mut stream = http_1::testing::MockTCP::new(*b"GET / HTTP/1.1\r\n\r\n");
-    /// # let mut server = http_1::Server::default();
+    /// # use http_1::prelude::*;
+    /// #
+    /// # use std::io::Write as _;
+    ///
+    /// # let mut stream = ByteStream::<{8 * KB}>::new();
+    /// # stream.write(b"GET / HTTP/1.1\r\n\r\n").unwrap();
+    /// #
+    /// # let mut server = Server::default();
     /// server
     ///     .process(stream)
     ///     .respond(|request, response| match request.target {

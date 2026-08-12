@@ -12,9 +12,6 @@ pub mod request;
 pub mod response;
 pub mod server;
 
-// TODO: find a better solution than this
-pub mod testing;
-
 pub mod prelude {
     pub use super::*;
 
