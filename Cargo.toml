@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "http_1"]
+members = ["http_core", "http_1"]
 
 [workspace.package]
 version = "0.1.0"
@@ -17,7 +17,7 @@ rust-version = "1.96"
 
 [workspace.dependencies]
 # http
-http_core.path = "core"
+http_core.path = "http_core"
 http_1.path = "http_1"
 
 # Logging

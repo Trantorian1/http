@@ -1,0 +1,9 @@
+[package]
+name = "http_core"
+version = "0.0.1"
+edition.workspace = true
+rust-version.workspace = true
+
+[dev-dependencies]
+rstest.workspace = true
+pretty_assertions.workspace = true
