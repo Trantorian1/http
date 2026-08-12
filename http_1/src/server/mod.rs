@@ -6,6 +6,7 @@
 //! form of locking or memory contention.
 
 use crate::prelude::*;
+use http_core::prelude::*;
 
 /// HTTP/1.1 server instance, handles connection responses and ensures proper flushing between
 /// requests.
@@ -51,7 +52,7 @@ impl<const S1: usize, const S2: usize> Server<S1, S2> {
     }
 }
 
-impl Default for Server<{ 8 * size::KB }, { 64 * size::KB }> {
+impl Default for Server<{ 8 * KB }, { 64 * KB }> {
     fn default() -> Self {
         Self {
             global_request_buffer: Buffer::new(),
@@ -77,16 +78,17 @@ where
     /// Respond to a TCP [`Request`].
     ///
     /// ```rust
-    /// # let mut stream = http1::testing::MockTCP::new(*b"GET / HTTP/1.1\r\n\r\n");
-    /// # let mut server = http1::Server::default();
+    /// # use http_core::prelude::*;
+    /// # let mut stream = http_1::testing::MockTCP::new(*b"GET / HTTP/1.1\r\n\r\n");
+    /// # let mut server = http_1::Server::default();
     /// server
     ///     .process(stream)
     ///     .respond(|request, response| match request.target {
     ///         b"/" => response
-    ///             .with_status_code(http1::code::Status::Ok)
+    ///             .with_status_code(Status::Ok)
     ///             .respond(),
     ///         _ => response
-    ///             .with_status_code(http1::code::Status::NotFound)
+    ///             .with_status_code(Status::NotFound)
     ///             .respond(),
     ///     });
     /// ```

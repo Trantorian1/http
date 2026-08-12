@@ -1,4 +1,4 @@
-//! Stack-based statically allocated sliding [`Buffer`]s.
+//! Stack-based sliding [`Buffer`]s.
 
 mod read;
 mod write;
@@ -6,10 +6,17 @@ mod write;
 pub use read::BufReader;
 pub use write::BufWriter;
 
+/// A buffer which can **ONLY** be used for [reading].
+///
+/// [reading]: BufReader
 pub type BufferForReading<const SIZE: usize> = Buffer<SIZE, read::ReadIn>;
+
+/// A buffer which can **ONLY** be used for [writing].
+///
+/// [writing]: BufWriter
 pub type BufferForWriting<const SIZE: usize> = Buffer<SIZE, write::WriteOut>;
 
-/// Sliding view stack buffer which guards against invalid writes and ensures proper flushing.
+/// Stack-allocated sliding view buffer which guards against invalid writes and ensures proper flushing.
 pub struct Buffer<const SIZE: usize, RW> {
     buffer: [u8; SIZE],
     window: std::ops::Range<usize>,
@@ -21,7 +28,8 @@ impl<const SIZE: usize, RW> Buffer<SIZE, RW> {
     /// Stack-allocates a new [`Buffer`] of the given `SIZE`.
     ///
     /// ```rust
-    /// let buffer = http1::BufferForReading::<{ 8 * http1::size::KB }>::new();
+    /// # use http_core::prelude::*;
+    /// let buffer = BufferForReading::<{ 8 * KB }>::new();
     /// ```
     ///
     /// [`BufferForReading`] can only be used to read from byte streams, while [`BufferForWriting`]

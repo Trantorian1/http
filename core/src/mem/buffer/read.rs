@@ -2,12 +2,12 @@ use crate::prelude::*;
 
 pub struct ReadIn;
 
-/// Misuse-resistant byte stream parser, allows the user to perform zero-copy parsing of incoming
-/// data streams. Because of how memory is statically allocated, byte streams are limited in size to
-/// the capacity of the [`Buffer`] used to parse them. Trying to parse a stream when the underlying
-/// buffer is too small will result in a [`ContentTooLarge`] error.
+/// Misuse-resistant byte stream parser, allowing for zero-copy parsing of incoming data streams.
+/// Because of how memory is statically allocated, byte streams are limited in size to the capacity
+/// of the [`Buffer`] used to parse them. Trying to parse a stream when the underlying buffer is too
+/// small will result in a [`ContentTooLarge`] error.
 ///
-/// [`ContentTooLarge`]: code::Status::ContentTooLarge
+/// [`ContentTooLarge`]: Status::ContentTooLarge
 pub struct BufReader<'a, 'b, const SIZE: usize, R: std::io::Read> {
     buffer: &'a mut Buffer<SIZE, ReadIn>,
     reader: &'b mut R,
@@ -17,20 +17,25 @@ impl<const SIZE: usize> Buffer<SIZE, ReadIn> {
     /// Parse in a byte stream. See [`BufReader`] for a list of available methods.
     ///
     /// ```rust
-    /// # let mut buffer = http1::BufferForReading::<{64 * http1::size::KB}>::new();
+    /// # use http_core::prelude::*;
+    /// # let mut buffer = BufferForReading::<{64 * KB}>::new();
     /// # let mut stream = std::collections::VecDeque::from(*b"GET / HTTP/1.1\r\n\r\n");
-    /// let (method, target) = buffer.read_in(&mut stream, |reader| {
-    ///     let method = reader.read(http1::request::parsers::method)?;
+    /// // Parses in an HTTP/1.1 GET method
+    /// fn parser(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
+    ///     const GET: &[u8] = b"GET";
     ///
-    ///     reader.read(http1::request::parsers::sp)?;
+    ///     if data.len() < GET.len() {
+    ///         return Ok(None);
+    ///     }
     ///
-    ///     let target = reader.read(http1::request::parsers::target)?;
+    ///     match &data[..GET.len()] {
+    ///         GET => Ok(Some(std::num::NonZero::new(GET.len()).unwrap())),
+    ///         _ => Err(Status::NotImplemented),
+    ///     }
+    /// }
     ///
-    ///     reader.read(http1::request::parsers::sp)?;
-    ///     reader.read(http1::request::parsers::protocol)?;
-    ///     reader.read(http1::request::parsers::crlf)?;
-    ///
-    ///     Ok((method, target))
+    /// let method = buffer.read_in(&mut stream, |reader| {
+    ///     reader.read(parser)
     /// }).unwrap();
     /// ```
     ///
@@ -38,8 +43,8 @@ impl<const SIZE: usize> Buffer<SIZE, ReadIn> {
     pub fn read_in<'a, 'b, R: std::io::Read, T>(
         &'a mut self,
         reader: &'b mut R,
-        apply_reads: impl FnOnce(&mut BufReader<'a, 'b, SIZE, R>) -> Result<T, code::Status>,
-    ) -> Result<T, code::Status> {
+        apply_reads: impl FnOnce(&mut BufReader<'a, 'b, SIZE, R>) -> Result<T, Status>,
+    ) -> Result<T, Status> {
         // Make sure we are not re-using data from previous requests/responses.
         self.clear();
 
@@ -84,17 +89,32 @@ impl<'a, 'b, const SIZE: usize, R: std::io::Read> BufReader<'a, 'b, SIZE, R> {
     /// Keeps trying to parse a byte stream with the provided parser.
     ///
     /// ```rust
-    /// # let mut buffer = http1::BufferForReading::<{64 * http1::size::KB}>::new();
+    /// # use http_core::prelude::*;
+    /// # let mut buffer = BufferForReading::<{64 * KB}>::new();
     /// # let mut stream = std::collections::VecDeque::from(*b"GET / HTTP/1.1\r\n\r\n");
     /// # let _ = buffer.read_in(&mut stream, |reader| {
-    /// let method = reader.read(http1::request::parsers::method)?;
+    /// // Parses in an HTTP/1.1 GET method
+    /// fn parser(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
+    ///     const GET: &[u8] = b"GET";
+    ///
+    ///     if data.len() < GET.len() {
+    ///         return Ok(None);
+    ///     }
+    ///
+    ///     match &data[..GET.len()] {
+    ///         GET => Ok(Some(std::num::NonZero::new(GET.len()).unwrap())),
+    ///         _ => Err(Status::NotImplemented),
+    ///     }
+    /// }
+    ///
+    /// let method = reader.read(parser)?;
     /// # Ok(method)
     /// # }).unwrap();
     /// ```
     pub fn read(
         &mut self,
-        parse: fn(&[u8]) -> Result<Option<std::num::NonZeroUsize>, code::Status>,
-    ) -> Result<std::ops::Range<usize>, code::Status> {
+        parse: fn(&[u8]) -> Result<Option<std::num::NonZeroUsize>, Status>,
+    ) -> Result<std::ops::Range<usize>, Status> {
         loop {
             if let Some(index) = parse(self.buffer.as_ref())? {
                 break Ok(self.buffer.process(index));
@@ -103,12 +123,12 @@ impl<'a, 'b, const SIZE: usize, R: std::io::Read> BufReader<'a, 'b, SIZE, R> {
             let new_bytes = self
                 .buffer
                 .append_from(&mut self.reader)
-                .map_err(code::Status::internal)?;
+                .map_err(Status::internal)?;
 
             if self.buffer.len() == SIZE {
-                return Err(code::Status::ContentTooLarge);
+                return Err(Status::ContentTooLarge);
             } else if new_bytes == 0 {
-                return Err(code::Status::RequestTimetout);
+                return Err(Status::RequestTimetout);
             }
         }
     }

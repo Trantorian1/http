@@ -16,7 +16,8 @@ impl<const SIZE: usize> Buffer<SIZE, WriteOut> {
     /// for a list of available writing methods.
     ///
     /// ```rust
-    /// # let mut buffer = http1::BufferForWriting::<{64 * http1::size::KB}>::new();
+    /// # use http_core::prelude::*;
+    /// # let mut buffer = BufferForWriting::<{64 * KB}>::new();
     /// # let mut stream = Vec::<u8>::new();
     /// buffer.write_out(&mut stream, |writer| {
     ///     writer.write(b"HTTP/1.1 200 OK\r\n")

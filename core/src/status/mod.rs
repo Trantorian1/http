@@ -83,12 +83,6 @@ impl Status {
         Self::InternalServerError(error.into())
     }
 
-    pub(crate) fn log(&self) {
-        if let Self::InternalServerError(err) = self {
-            tracing::error!(err);
-        }
-    }
-
     /// See [RFC9112], status line.
     ///
     /// > _"The first line of a response message is the status-line, consisting of [..] **the status

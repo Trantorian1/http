@@ -1,4 +1,7 @@
 use std::net::TcpListener;
+
+use http_1::prelude::*;
+use http_core::prelude::*;
 use tracing_subscriber::prelude::*;
 
 const ADDRESS: &str = "127.0.0.1:4221";
@@ -23,7 +26,7 @@ fn main() {
     let listener = TcpListener::bind(ADDRESS).unwrap();
     tracing::info!("Listening on {ADDRESS}");
 
-    let mut server = http1::Server::default();
+    let mut server = Server::default();
 
     // == Main TCP data loop =======================================================================
 
@@ -33,10 +36,8 @@ fn main() {
                 server
                     .process(stream)
                     .respond(|request, response| match request.target {
-                        b"/" => response.with_status_code(http1::code::Status::Ok).respond(),
-                        _ => response
-                            .with_status_code(http1::code::Status::NotFound)
-                            .respond(),
+                        b"/" => response.with_status_code(Status::Ok).respond(),
+                        _ => response.with_status_code(Status::NotFound).respond(),
                     });
             }
             Err(e) => {
