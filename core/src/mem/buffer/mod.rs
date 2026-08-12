@@ -17,14 +17,14 @@ pub type BufferForReading<const SIZE: usize> = Buffer<SIZE, read::ReadIn>;
 pub type BufferForWriting<const SIZE: usize> = Buffer<SIZE, write::WriteOut>;
 
 /// Stack-allocated sliding view buffer which guards against invalid writes and ensures proper flushing.
-pub struct Buffer<const SIZE: usize, RW> {
+pub struct Buffer<const SIZE: usize, Mode> {
     buffer: [u8; SIZE],
     window: std::ops::Range<usize>,
 
-    _phantom: std::marker::PhantomData<RW>,
+    _phantom: std::marker::PhantomData<Mode>,
 }
 
-impl<const SIZE: usize, RW> Buffer<SIZE, RW> {
+impl<const SIZE: usize, Mode> Buffer<SIZE, Mode> {
     /// Stack-allocates a new [`Buffer`] of the given `SIZE`.
     ///
     /// ```rust

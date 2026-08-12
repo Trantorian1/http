@@ -7,7 +7,7 @@ pub struct WriteOut;
 ///
 /// [`Writer`]: std::io::Write
 pub struct BufWriter<'a, 'b, const SIZE: usize, W: std::io::Write> {
-    buffer: &'a mut Buffer<SIZE, WriteOut>,
+    buffer: &'a mut BufferForWriting<SIZE>,
     writer: &'b mut W,
 }
 

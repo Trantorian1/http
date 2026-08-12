@@ -9,7 +9,7 @@ pub struct ReadIn;
 ///
 /// [`ContentTooLarge`]: Status::ContentTooLarge
 pub struct BufReader<'a, 'b, const SIZE: usize, R: std::io::Read> {
-    buffer: &'a mut Buffer<SIZE, ReadIn>,
+    buffer: &'a mut BufferForReading<SIZE>,
     reader: &'b mut R,
 }
 
@@ -88,6 +88,8 @@ impl<'a, 'b, const SIZE: usize, R: std::io::Read> BufReader<'a, 'b, SIZE, R> {
 
     /// Keeps trying to parse a byte stream with the provided parser.
     ///
+    /// Will return [`ContentTooLarge`] if there is not enough space left in the buffer.
+    ///
     /// ```rust
     /// # use http_core::prelude::*;
     /// # let mut buffer = BufferForReading::<{64 * KB}>::new();
@@ -111,6 +113,8 @@ impl<'a, 'b, const SIZE: usize, R: std::io::Read> BufReader<'a, 'b, SIZE, R> {
     /// # Ok(method)
     /// # }).unwrap();
     /// ```
+    ///
+    /// [`ContentTooLarge`]: Status::ContentTooLarge
     pub fn read(
         &mut self,
         parse: fn(&[u8]) -> Result<Option<std::num::NonZeroUsize>, Status>,
