@@ -33,3 +33,39 @@ macro_rules! assert_leq {
         assert!($left <= $right, concat!("{} <= {}: ", $msg), $left, $right)
     };
 }
+
+/// Assert greater than.
+///
+/// ## Example Usage
+///
+/// ```
+/// # use http_core::prelude::*;
+/// assert_gr!(4, 3);
+/// ```
+#[macro_export]
+macro_rules! assert_gr {
+    ($left:expr,$right:expr) => {
+        assert!($left > $right, "{} > {}", $left, $right)
+    };
+    ($left:expr,$right:expr,$msg:literal) => {
+        assert!($left > $right, concat!("{} > {}: ", $msg), $left, $right)
+    };
+}
+
+/// Assert greater than or equal.
+///
+/// ## Example Usage
+///
+/// ```
+/// # use http_core::prelude::*;
+/// assert_greq!(4, 4);
+/// ```
+#[macro_export]
+macro_rules! assert_greq {
+    ($left:expr,$right:expr) => {
+        assert!($left >= $right, "{} >= {}", $left, $right)
+    };
+    ($left:expr,$right:expr,$msg:literal) => {
+        assert!($left >= $right, concat!("{} >= {}: ", $msg), $left, $right)
+    };
+}

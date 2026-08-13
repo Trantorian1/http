@@ -19,6 +19,8 @@ pub mod prelude {
     pub use super::size::KB;
     pub use super::size::MB;
 
+    pub use super::assert_gr;
+    pub use super::assert_greq;
     pub use super::assert_le;
     pub use super::assert_leq;
 }
