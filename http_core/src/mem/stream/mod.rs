@@ -40,6 +40,10 @@ impl<const SIZE: usize> ByteStream<SIZE> {
         }
     }
 
+    pub fn capacity(&self) -> usize {
+        SIZE
+    }
+
     /// Returns the length of unread data currently in the byte stream.
     pub fn len(&self) -> usize {
         self.size
@@ -59,6 +63,9 @@ impl<const SIZE: usize> Default for ByteStream<SIZE> {
 
 impl<const SIZE: usize> std::io::Read for ByteStream<SIZE> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        assert_leq!(self.start, SIZE);
+        assert_leq!(self.size, SIZE);
+
         let start = self.start;
         let stop = self.start + self.size;
         let bytes = buf.len();
@@ -66,7 +73,6 @@ impl<const SIZE: usize> std::io::Read for ByteStream<SIZE> {
         if stop <= SIZE {
             // Stream data stops before the end of the buffer, no need for wrap-around logic.
             let space_after_start = stop.min(bytes);
-            assert_leq!(space_after_start, buf.len());
 
             // Single-copy, retrieve all data before the end of the buffer.
             buf[..space_after_start]
@@ -79,14 +85,12 @@ impl<const SIZE: usize> std::io::Read for ByteStream<SIZE> {
         } else {
             // Stream data goes past the end of the buffer, we need to handle ring wrap-around.
             let space_after_start = (SIZE - self.start).min(bytes);
-            assert_leq!(space_after_start, buf.len());
 
             // First copy, retrieve all data before the end of the buffer.
             buf[..space_after_start]
                 .copy_from_slice(&self.buffer[start..start + space_after_start]);
 
             let space_before_stop = (stop - SIZE).min(bytes - space_after_start);
-            assert_leq!(space_after_start + space_before_stop, buf.len());
 
             // Second copy, wrap around to the start of the buffer and copy data from there.
             buf[space_after_start..space_after_start + space_before_stop]
@@ -102,6 +106,9 @@ impl<const SIZE: usize> std::io::Read for ByteStream<SIZE> {
 
 impl<const SIZE: usize> std::io::Write for ByteStream<SIZE> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        assert_leq!(self.start, SIZE);
+        assert_leq!(self.size, SIZE);
+
         let start = self.start;
         let stop = self.start + self.size;
         let bytes = buf.len();
@@ -109,7 +116,6 @@ impl<const SIZE: usize> std::io::Write for ByteStream<SIZE> {
         // We always try and append data first. This is a no-op in case there is no space left or a
         // wrap-around is needed.
         let space_after_stop = (SIZE - stop).min(bytes);
-        assert_leq!(space_after_stop, buf.len());
 
         self.buffer[stop..stop + space_after_stop].copy_from_slice(&buf[..space_after_stop]);
 
@@ -117,7 +123,7 @@ impl<const SIZE: usize> std::io::Write for ByteStream<SIZE> {
             // No wrap-around needed.
             self.size += space_after_stop;
 
-            Ok(bytes - space_after_stop)
+            Ok(space_after_stop)
         } else {
             // Wrap-around needed.
             let space_before_start = (start).min(bytes - space_after_stop);
@@ -128,7 +134,7 @@ impl<const SIZE: usize> std::io::Write for ByteStream<SIZE> {
 
             self.size += space_after_stop + space_before_start;
 
-            Ok(bytes - space_after_stop - space_before_start)
+            Ok(space_after_stop - space_before_start)
         }
     }
 
@@ -140,6 +146,7 @@ impl<const SIZE: usize> std::io::Write for ByteStream<SIZE> {
 #[cfg(test)]
 pub mod test {
     use super::*;
+
     use std::io::Read as _;
     use std::io::Write as _;
 
@@ -151,7 +158,7 @@ pub mod test {
     }
 
     #[rstest::rstest]
-    fn stream_read_write(mut stream: ByteStream<SIZE>) {
+    fn stream_init(mut stream: ByteStream<SIZE>) {
         let mut buffer = [0; SIZE];
 
         assert_eq!(stream.len(), 0, "An empty stream must be empty");
@@ -162,7 +169,12 @@ pub mod test {
             .expect("Reading a byte stream must always succeed");
 
         assert_eq!(bytes, 0, "An empty stream must not contain any data");
-        assert_eq!(buffer, [0; SIZE], "Reading an empty stream is pure");
+        assert_eq!(buffer, [0; SIZE], "Reading empty stream has no side effect");
+    }
+
+    #[rstest::rstest]
+    fn stream_read_write(mut stream: ByteStream<SIZE>) {
+        let mut buffer = [0; SIZE];
 
         let message = b"Hello, World";
         assert_le!(message.len(), SIZE, "Message must fit in the stream");
@@ -171,7 +183,7 @@ pub mod test {
             .write(message)
             .expect("Writing to a byte stream of sufficient size must succeed");
 
-        assert_eq!(bytes, 0, "All message bytes must be written to the stream");
+        assert_eq!(bytes, message.len(), "All message bytes must be written");
         assert_eq!(stream.len(), message.len(), "Stream length must update");
         assert_eq!(stream.start, 0, "The stream's start index must not change");
 
@@ -183,5 +195,37 @@ pub mod test {
         assert_eq!(&buffer[..bytes], message, "Buffer should contain message");
         assert_eq!(stream.len(), 0, "Stream reads must consume the data read");
         assert_eq!(stream.start, message.len(), "Stream reads update start idx");
+    }
+
+    #[rstest::rstest]
+    fn stream_write_message_too_big(mut stream: ByteStream<SIZE>) {
+        let message = b"Lorem ipsum dolor si amet";
+        assert_gr!(message.len(), SIZE, "Message must NOT fit in the stream");
+
+        let bytes = stream
+            .write(message)
+            .expect("Writing to a byte stream of sufficient size must succeed");
+
+        assert_eq!(bytes, SIZE);
+
+        let mut buffer = [0; SIZE];
+
+        let bytes = stream
+            .read(&mut buffer)
+            .expect("Reading a byte stream must always succeed");
+
+        assert_eq!(bytes, SIZE, "Byte stream should have been full");
+
+        assert_eq!(
+            buffer,
+            &message[..SIZE],
+            "Part of the message should still have been written"
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn stream_with_capacity_zero_should_panic() {
+        let _stream = ByteStream::<0>::new();
     }
 }
