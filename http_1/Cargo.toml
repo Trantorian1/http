@@ -18,6 +18,6 @@ tracing-subscriber.workspace = true
 # Parsing
 memchr.workspace = true
 
-# [dev-dependencies]
-# rstest = "0.26.1"
-# pretty_assertions = "1.4.1"
+[[example]]
+name = "server"
+doc-scrape-examples = true

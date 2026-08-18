@@ -1,12 +1,24 @@
 //! Shared HTTP primitives.
 
-pub mod macros;
+mod macros;
 pub mod mem;
 pub mod size;
 pub mod status;
 pub mod uri;
 
 pub mod prelude {
+    //! A “prelude” for crates using the `http_core` crate.
+    //!
+    //! This prelude is similar to the standard library’s prelude in that you’ll almost always want
+    //! to import its entire contents, but unlike the standard library’s prelude you’ll have to do
+    //! so manually:
+    //!
+    //! ```rust
+    //! use http_core::prelude::*;
+    //! ```
+    //!
+    //! The prelude may grow over time as additional items see ubiquitous use.
+
     pub use super::mem::buffer::Buffer;
     pub use super::mem::buffer::BufferForReading;
     pub use super::mem::buffer::BufferForWriting;
