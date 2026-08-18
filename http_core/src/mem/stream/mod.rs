@@ -25,15 +25,15 @@ use crate::prelude::*;
 /// [`Read`]: std::io::Read
 /// [`Write`]: std::io::Write
 /// [`TcpStream`]: std::net::TcpStream
-pub struct ByteStream<'a> {
-    buffer: &'a mut [u8],
+pub struct ByteStream<'data> {
+    buffer: &'data mut [u8],
     start: usize,
     size: usize,
 }
 
-impl<'a> ByteStream<'a> {
+impl<'data> ByteStream<'data> {
     /// Creates a new by stream. Will panic if `SIZE` is equal to 0.
-    pub fn new(buffer: &'a mut [u8]) -> Self {
+    pub fn new(buffer: &'data mut [u8]) -> Self {
         assert!(!buffer.is_empty());
 
         // Zero-away the buffer to guard against misuse
@@ -61,7 +61,7 @@ impl<'a> ByteStream<'a> {
     }
 }
 
-impl<'a> std::io::Read for ByteStream<'a> {
+impl<'data> std::io::Read for ByteStream<'data> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         assert_leq!(self.start, self.capacity());
         assert_leq!(self.size, self.capacity());
@@ -104,7 +104,7 @@ impl<'a> std::io::Read for ByteStream<'a> {
     }
 }
 
-impl<'a> std::io::Write for ByteStream<'a> {
+impl<'data> std::io::Write for ByteStream<'data> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         assert_leq!(self.start, self.capacity());
         assert_leq!(self.size, self.capacity());

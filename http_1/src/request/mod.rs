@@ -36,19 +36,25 @@ pub mod parsers;
 /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#name-request-line
 /// [Section 11.2]: https://datatracker.ietf.org/doc/html/rfc9112#request.smuggling
 /// [`413`]: Status::ContentTooLarge
-pub struct Request<'a, 'b, const SIZE: usize, R: std::io::Read> {
-    stream: &'a mut R,
-    buffer: &'b mut BufferForReading<SIZE>,
+pub struct Request<'buf, 'data, 'reader, R: std::io::Read>
+where
+    'data: 'buf,
+{
+    buffer: &'buf mut BufferForReading<'data>,
+    stream: &'reader mut R,
 }
 
-impl<'a, 'b, const SIZE: usize, R: std::io::Read> Request<'a, 'b, SIZE, R> {
+impl<'buf, 'data, 'reader, R: std::io::Read> Request<'buf, 'data, 'reader, R>
+where
+    'data: 'buf,
+{
     /// Initializes a new [`Request`].
-    pub fn new(stream: &'a mut R, buffer: &'b mut BufferForReading<SIZE>) -> Self {
+    pub fn new(buffer: &'buf mut BufferForReading<'data>, stream: &'reader mut R) -> Self {
         Self { stream, buffer }
     }
 
     /// Parses a byte stream into an HTTP/1.1 request, validating format along the way.
-    pub fn process(self) -> Result<RequestInfo<'b>, Status> {
+    pub fn process(self) -> Result<RequestInfo<'buf>, Status> {
         let (method, target) = self.buffer.read_in(self.stream, |reader| {
             let method = reader.read(parsers::method)?;
 
@@ -76,7 +82,7 @@ impl<'a, 'b, const SIZE: usize, R: std::io::Read> Request<'a, 'b, SIZE, R> {
 
 /// Zero-copy slice of the parsed [`Request`] data, allows to index into specific parts of the
 /// request.
-pub struct RequestInfo<'a> {
+pub struct RequestInfo<'buf> {
     /// See [RFC9112], method.
     ///
     /// > _"The method token indicates the request method to be performed on the target resource.
@@ -93,7 +99,7 @@ pub struct RequestInfo<'a> {
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#name-method
     /// [Section 9]: https://www.rfc-editor.org/rfc/rfc9110#section-9
     /// [\[HTTP\]]: https://datatracker.ietf.org/doc/html/rfc9110
-    pub method: &'a [u8],
+    pub method: &'buf [u8],
 
     /// See [RFC9112], request target.
     ///
@@ -125,10 +131,10 @@ pub struct RequestInfo<'a> {
     ///
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#section-3.2
     /// [`400`]: Status::BadRequest
-    pub target: &'a [u8],
+    pub target: &'buf [u8],
 }
 
-impl<'a> std::fmt::Debug for RequestInfo<'a> {
+impl<'data> std::fmt::Debug for RequestInfo<'data> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RequestInfo")
             .field("method", &std::str::from_utf8(self.method).unwrap())

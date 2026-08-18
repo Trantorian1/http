@@ -10,37 +10,25 @@ use http_core::prelude::*;
 
 /// HTTP/1.1 server instance, handles connection responses and ensures proper flushing between
 /// requests.
-pub struct Server<const S1: usize, const S2: usize> {
-    global_request_buffer: BufferForReading<S1>,
-    global_response_buffer: BufferForWriting<S2>,
+pub struct Server<'data> {
+    global_request_buffer: BufferForReading<'data>,
+    global_response_buffer: BufferForWriting<'data>,
 }
 
-impl<const S1: usize, const S2: usize> Server<S1, S2> {
-    /// Sets the [`Buffer`]  to be used for handling [`Request`]s.
-    pub fn with_global_request_buffer<const S1P: usize>(
-        self,
-        global_request_buffer: BufferForReading<S1P>,
-    ) -> Server<S1P, S2> {
-        Server {
-            global_request_buffer,
-            global_response_buffer: self.global_response_buffer,
-        }
-    }
-
-    /// Sets the [`Buffer`] to be used for handling [`Response`]s.
-    pub fn with_global_response_buffer<const S2P: usize>(
-        self,
-        global_response_buffer: BufferForWriting<S2P>,
-    ) -> Server<S1, S2P> {
-        Server {
-            global_request_buffer: self.global_request_buffer,
-            global_response_buffer,
+impl<'data> Server<'data> {
+    pub fn new(
+        global_request_buffer: &'data mut [u8],
+        global_response_buffer: &'data mut [u8],
+    ) -> Self {
+        Self {
+            global_request_buffer: BufferForReading::new(global_request_buffer),
+            global_response_buffer: BufferForWriting::new(global_response_buffer),
         }
     }
 
     /// Processes a stream of bytes into a [`RequestHandle`] which can be used to send back a
     /// [`Response`].
-    pub fn process<RW>(&mut self, stream: RW) -> RequestHandle<'_, S1, S2, RW>
+    pub fn process<RW>(&mut self, stream: RW) -> RequestHandle<'_, 'data, RW>
     where
         RW: std::io::Read + std::io::Write,
     {
@@ -52,27 +40,20 @@ impl<const S1: usize, const S2: usize> Server<S1, S2> {
     }
 }
 
-impl Default for Server<{ 8 * KB }, { 64 * KB }> {
-    fn default() -> Self {
-        Self {
-            global_request_buffer: Buffer::new(),
-            global_response_buffer: Buffer::new(),
-        }
-    }
-}
-
 /// TPC input stream parser and response handler.
-pub struct RequestHandle<'a, const S1: usize, const S2: usize, RW>
+pub struct RequestHandle<'buf, 'data, RW>
 where
+    'data: 'buf,
     RW: std::io::Read + std::io::Write,
 {
     stream: RW,
-    global_request_buffer: &'a mut BufferForReading<S1>,
-    global_response_buffer: &'a mut BufferForWriting<S2>,
+    global_request_buffer: &'buf mut BufferForReading<'data>,
+    global_response_buffer: &'buf mut BufferForWriting<'data>,
 }
 
-impl<'a, const S1: usize, const S2: usize, RW> RequestHandle<'a, S1, S2, RW>
+impl<'buf, 'data, RW> RequestHandle<'buf, 'data, RW>
 where
+    'data: 'buf,
     RW: std::io::Read + std::io::Write,
 {
     /// Respond to a TCP [`Request`].
@@ -87,28 +68,30 @@ where
     /// # let mut stream = ByteStream::new(&mut stream_buffer);
     /// # stream.write(b"GET / HTTP/1.1\r\n\r\n").unwrap();
     /// #
-    /// # let mut server = Server::default();
+    /// # let mut global_request_buffer = [0; 8 * KB];
+    /// # let mut global_response_buffer = [0; 64 * KB];
+    /// # let mut server = Server::new(&mut global_request_buffer, &mut global_response_buffer);
     /// server
     ///     .process(stream)
     ///     .respond(|request, response| match request.target {
     ///         b"/" => response
     ///             .with_status_code(Status::Ok)
-    ///             .respond(),
+    ///             .send(),
     ///         _ => response
     ///             .with_status_code(Status::NotFound)
-    ///             .respond(),
+    ///             .send(),
     ///     });
     /// ```
     pub fn respond(
         mut self,
-        f: fn(RequestInfo<'_>, Response<'_, '_, S2, RW>) -> std::io::Result<()>,
+        f: fn(RequestInfo<'buf>, Response<'buf, 'data, '_, RW>) -> std::io::Result<()>,
     ) {
-        let res = match Request::new(&mut self.stream, self.global_request_buffer).process() {
-            Err(status) => Response::new(&mut self.stream, self.global_response_buffer)
+        let res = match Request::new(self.global_request_buffer, &mut self.stream).process() {
+            Err(status) => Response::new(self.global_response_buffer, &mut self.stream)
                 .with_status_code(status)
-                .respond(),
+                .send(),
             Ok(request) => {
-                let response = Response::new(&mut self.stream, self.global_response_buffer);
+                let response = Response::new(self.global_response_buffer, &mut self.stream);
                 f(request, response)
             }
         };
