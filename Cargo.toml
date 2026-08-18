@@ -7,12 +7,22 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.96"
 
+# Kani
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
+[workspace.metadata.kani.unstable]
+quantifiers = true
+loop-contracts = true
+
+# Bolero
+
 [profile.fuzz]
 inherits = "dev"
 opt-level = 3
 incremental = false
 codegen-units = 1
-
 
 [workspace.dependencies]
 # http

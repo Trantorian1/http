@@ -1,0 +1,30 @@
+start_time        : 1787048151
+last_update       : 1787048161
+fuzzer_pid        : 61006
+cycles_done       : 3
+execs_done        : 288935
+execs_per_sec     : 18666.67
+paths_total       : 41
+paths_favored     : 1
+paths_found       : 17
+paths_imported    : 0
+max_depth         : 4
+cur_path          : 40
+pending_favs      : 0
+pending_total     : 20
+variable_paths    : 12
+stability         : 68.89%
+bitmap_cvg        : 0.14%
+unique_crashes    : 0
+unique_hangs      : 0
+last_path         : 1787048153
+last_crash        : 0
+last_hang         : 0
+execs_since_crash : 288935
+exec_timeout      : 20
+afl_banner        : http_core-a87076a974d1ed15
+afl_version       : 2.57b
+target_mode       : persistent deferred 
+command_line      : /nix/store/v9xsfk2s8mwv3zab8hbi1415077zkvbx-cargo-bolero-0.13.4/bin/cargo-bolero -i /home/dev/Documents/code/rust/codecrafters/http-server/http_core/src/mem/stream/__fuzz__/mem__stream__validate__stream_harness/corpus -o /home/dev/Documents/code/rust/codecrafters/http-server/http_core/src/mem/stream/__fuzz__/mem__stream__validate__stream_harness/afl_state -- /home/dev/Documents/code/rust/codecrafters/http-server/target/fuzz/build_9c882a4a03ce3de1/x86_64-unknown-linux-gnu/fuzz/deps/http_core-a87076a974d1ed15 mem::stream::validate::stream_harness --exact --nocapture --quiet --test-threads 1
+slowest_exec_ms   : 1
+peak_rss_mb       : 179

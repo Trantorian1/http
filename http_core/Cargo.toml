@@ -3,12 +3,14 @@ name = "http_core"
 version = "0.0.1"
 edition.workspace = true
 rust-version.workspace = true
+metadata.workspace = true
+
+[lints]
+workspace = true
+
+# Testing
 
 [dev-dependencies]
 rstest.workspace = true
 pretty_assertions.workspace = true
 bolero.workspace = true
-
-[[test]]
-name = "stream"
-harness = false
