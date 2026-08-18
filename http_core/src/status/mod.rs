@@ -79,7 +79,13 @@ pub enum Status {
 }
 
 impl Status {
+    /// Builds a new [`InternalServerError`].
+    ///
+    /// [`InternalServerError`]: Self::InternalServerError
     pub fn internal(error: impl std::error::Error + 'static) -> Self {
+        // FIXME: this is the only part of the crate which allocates at runtime. It would be nice if
+        // we could either define some common error interface or find some other way to handle
+        // generic error encapsulation without allocating. By using a pointer perhaps?
         Self::InternalServerError(error.into())
     }
 

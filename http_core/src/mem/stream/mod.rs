@@ -46,6 +46,7 @@ impl<'data> ByteStream<'data> {
         }
     }
 
+    /// Total available memory the stream has access to.
     pub fn capacity(&self) -> usize {
         self.buffer.len()
     }

@@ -25,7 +25,7 @@ pub struct Buffer<'data, Mode> {
 }
 
 impl<'data, Mode> Buffer<'data, Mode> {
-    /// Stack-allocates a new [`Buffer`] of the given `'data`.
+    /// Stack-allocates a new [`Buffer`].
     ///
     /// ```rust
     /// # use http_core::prelude::*;
@@ -52,12 +52,12 @@ impl<'data, Mode> Buffer<'data, Mode> {
         }
     }
 
-    /// Stack allocates a new [`Buffer`], keeping the initialized memory. This can be useful for
+    /// Stack allocates a new [`Buffer`], keeping the initialized memory. This can be useful in
     /// testing for example.
     ///
     /// ```rust
     /// # use http_core::prelude::*;
-    /// let mut array: [u8; 8] = std::array::from_fn(|i| i as u8);
+    /// let mut array: [u8; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
     /// let buffer = BufferForReading::pre_populate(&mut array);
     ///
     /// assert_eq!(buffer.as_ref(), &[0, 1, 2, 3, 4, 5, 6, 7]);
