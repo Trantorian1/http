@@ -1,0 +1,5 @@
+[unstable]
+rustdoc-scrape-examples = true
+
+[build]
+rustdocflags = ["-Zunstable-options", "--generate-link-to-definition"]
