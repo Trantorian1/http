@@ -82,8 +82,9 @@ where
     /// # use http_1::prelude::*;
     /// #
     /// # use std::io::Write as _;
-    ///
-    /// # let mut stream = ByteStream::<{8 * KB}>::new();
+    /// #
+    /// # let mut stream_buffer = [0; 8 * KB];
+    /// # let mut stream = ByteStream::new(&mut stream_buffer);
     /// # stream.write(b"GET / HTTP/1.1\r\n\r\n").unwrap();
     /// #
     /// # let mut server = Server::default();
