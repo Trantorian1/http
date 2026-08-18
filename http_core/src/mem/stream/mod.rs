@@ -1,7 +1,9 @@
+//! Stack-based [`ByteStream`]s.
+
 use crate::prelude::*;
 
-/// Stack-based single-threaded ring buffer which implements [`Read`] and [`Write`]. Can be used as
-/// a mock [`TcpStream`].
+/// Stack-based ring buffer which implements [`Read`] and [`Write`]. Can be used as a mock
+/// [`TcpStream`].
 ///
 /// ## Example Usage
 ///
@@ -9,39 +11,43 @@ use crate::prelude::*;
 /// # use http_core::prelude::*;
 /// # use std::io::Read as _;
 /// # use std::io::Write as _;
-/// let mut stream = ByteStream::<16>::new();
-/// let mut buffer = [0; 16];
+/// let mut stream_buffer = [0; 16];
+/// let mut stream = ByteStream::new(&mut stream_buffer);
 ///
 /// let message = b"Hello, World";
 /// stream.write(message).unwrap();
 ///
-/// let bytes = stream.read(&mut buffer).unwrap();
-/// assert_eq!(&buffer[..bytes], message);
+/// let mut read_buffer = [0; 16];
+/// let bytes = stream.read(&mut read_buffer).unwrap();
+/// assert_eq!(&read_buffer[..bytes], message);
 /// ```
 ///
 /// [`Read`]: std::io::Read
 /// [`Write`]: std::io::Write
 /// [`TcpStream`]: std::net::TcpStream
-pub struct ByteStream<const SIZE: usize> {
-    buffer: [u8; SIZE],
+pub struct ByteStream<'a> {
+    buffer: &'a mut [u8],
     start: usize,
     size: usize,
 }
 
-impl<const SIZE: usize> ByteStream<SIZE> {
+impl<'a> ByteStream<'a> {
     /// Creates a new by stream. Will panic if `SIZE` is equal to 0.
-    pub fn new() -> Self {
-        assert!(SIZE > 0);
+    pub fn new(buffer: &'a mut [u8]) -> Self {
+        assert!(!buffer.is_empty());
+
+        // Zero-away the buffer to guard against misuse
+        buffer.fill(0);
 
         Self {
-            buffer: [0; SIZE],
+            buffer,
             start: 0,
             size: 0,
         }
     }
 
     pub fn capacity(&self) -> usize {
-        SIZE
+        self.buffer.len()
     }
 
     /// Returns the length of unread data currently in the byte stream.
@@ -55,22 +61,16 @@ impl<const SIZE: usize> ByteStream<SIZE> {
     }
 }
 
-impl<const SIZE: usize> Default for ByteStream<SIZE> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<const SIZE: usize> std::io::Read for ByteStream<SIZE> {
+impl<'a> std::io::Read for ByteStream<'a> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        assert_leq!(self.start, SIZE);
-        assert_leq!(self.size, SIZE);
+        assert_leq!(self.start, self.capacity());
+        assert_leq!(self.size, self.capacity());
 
         let start = self.start;
         let stop = self.start + self.size;
         let bytes = buf.len();
 
-        if stop <= SIZE {
+        if stop <= self.capacity() {
             // Stream data stops before the end of the buffer, no need for wrap-around logic.
             let space_after_start = stop.min(bytes);
 
@@ -84,19 +84,19 @@ impl<const SIZE: usize> std::io::Read for ByteStream<SIZE> {
             Ok(space_after_start)
         } else {
             // Stream data goes past the end of the buffer, we need to handle ring wrap-around.
-            let space_after_start = (SIZE - self.start).min(bytes);
+            let space_after_start = (self.capacity() - self.start).min(bytes);
 
             // First copy, retrieve all data before the end of the buffer.
             buf[..space_after_start]
                 .copy_from_slice(&self.buffer[start..start + space_after_start]);
 
-            let space_before_stop = (stop - SIZE).min(bytes - space_after_start);
+            let space_before_stop = (stop - self.capacity()).min(bytes - space_after_start);
 
             // Second copy, wrap around to the start of the buffer and copy data from there.
             buf[space_after_start..space_after_start + space_before_stop]
                 .copy_from_slice(&self.buffer[..space_before_stop]);
 
-            self.start = (self.start + space_after_start + space_before_stop) % SIZE;
+            self.start = (self.start + space_after_start + space_before_stop) % self.capacity();
             self.size -= space_after_start - space_before_stop;
 
             Ok(space_after_start + space_before_stop)
@@ -104,10 +104,10 @@ impl<const SIZE: usize> std::io::Read for ByteStream<SIZE> {
     }
 }
 
-impl<const SIZE: usize> std::io::Write for ByteStream<SIZE> {
+impl<'a> std::io::Write for ByteStream<'a> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        assert_leq!(self.start, SIZE);
-        assert_leq!(self.size, SIZE);
+        assert_leq!(self.start, self.capacity());
+        assert_leq!(self.size, self.capacity());
 
         let start = self.start;
         let stop = self.start + self.size;
@@ -115,11 +115,11 @@ impl<const SIZE: usize> std::io::Write for ByteStream<SIZE> {
 
         // We always try and append data first. This is a no-op in case there is no space left or a
         // wrap-around is needed.
-        let space_after_stop = (SIZE - stop).min(bytes);
+        let space_after_stop = (self.capacity() - stop).min(bytes);
 
         self.buffer[stop..stop + space_after_stop].copy_from_slice(&buf[..space_after_stop]);
 
-        if stop <= SIZE {
+        if stop <= self.capacity() {
             // No wrap-around needed.
             self.size += space_after_stop;
 
@@ -152,13 +152,11 @@ pub mod test {
 
     const SIZE: usize = 16;
 
-    #[rstest::fixture]
-    fn stream() -> ByteStream<SIZE> {
-        ByteStream::new()
-    }
+    #[test]
+    fn stream_init() {
+        let mut stream_buffer = [0; SIZE];
+        let mut stream = ByteStream::new(&mut stream_buffer);
 
-    #[rstest::rstest]
-    fn stream_init(mut stream: ByteStream<SIZE>) {
         let mut buffer = [0; SIZE];
 
         assert_eq!(stream.len(), 0, "An empty stream must be empty");
@@ -172,8 +170,11 @@ pub mod test {
         assert_eq!(buffer, [0; SIZE], "Reading empty stream has no side effect");
     }
 
-    #[rstest::rstest]
-    fn stream_read_write(mut stream: ByteStream<SIZE>) {
+    #[test]
+    fn stream_read_write() {
+        let mut stream_buffer = [0; SIZE];
+        let mut stream = ByteStream::new(&mut stream_buffer);
+
         let mut buffer = [0; SIZE];
 
         let message = b"Hello, World";
@@ -197,8 +198,11 @@ pub mod test {
         assert_eq!(stream.start, message.len(), "Stream reads update start idx");
     }
 
-    #[rstest::rstest]
-    fn stream_write_message_too_big(mut stream: ByteStream<SIZE>) {
+    #[test]
+    fn stream_write_message_too_big() {
+        let mut stream_buffer = [0; SIZE];
+        let mut stream = ByteStream::new(&mut stream_buffer);
+
         let message = b"Lorem ipsum dolor si amet";
         assert_gr!(message.len(), SIZE, "Message must NOT fit in the stream");
 
@@ -226,6 +230,68 @@ pub mod test {
     #[test]
     #[should_panic]
     fn stream_with_capacity_zero_should_panic() {
-        let _stream = ByteStream::<0>::new();
+        let mut stream_buffer = [0; 0];
+        let _stream = ByteStream::new(&mut stream_buffer);
+    }
+}
+
+#[cfg(test)]
+mod validate {
+    use std::io::Read as _;
+    use std::io::Write as _;
+
+    use super::*;
+
+    // It probably doesn't make sense to increase this too much as then we would just be polluting
+    // the problem space with garbage data which likely does not contain any new edge cases. The
+    // most interesting targets probably lie around small array sizes anyway.
+    const MAX_SIZE: usize = 16;
+
+    /// ## Libfuzzer
+    ///
+    /// ```bash
+    /// cargo bolero test -p http_core mem::stream::validate::stream_harness
+    /// ```
+    ///
+    /// ## AFL
+    ///
+    /// ```bash
+    /// cargo bolero test -p http_core mem::stream::validate::stream_harness --engine afl --sanitizer NONE
+    /// ```
+    ///
+    /// ## Kani
+    ///
+    /// ```bash
+    /// cargo bolero test -p http_core mem::stream::validate::stream_harness --engine kani
+    /// ```
+    #[test]
+    #[cfg_attr(kani, kani::proof)]
+    #[cfg_attr(kani, kani::unwind(17))]
+    fn stream_harness() {
+        let generator = (
+            // Random byte buffer used for writing
+            bolero::produce::<[u8; MAX_SIZE]>(),
+            // Number of bytes to write
+            bolero::produce::<usize>().with().bounds(..MAX_SIZE),
+            // Stream capacity, cannot be 0
+            bolero::produce::<usize>().with().bounds(1..MAX_SIZE),
+        );
+
+        bolero::check!()
+            .with_generator(generator)
+            .cloned()
+            .for_each(|(bytes, n, size)| {
+                let mut backing = [0u8; MAX_SIZE];
+                let mut read_buffer = [0u8; MAX_SIZE];
+
+                let mut stream = ByteStream::new(&mut backing[..size]);
+
+                let written = stream.write(&bytes[..n]).unwrap();
+                assert_eq!(written, n.min(size));
+
+                let read = stream.read(&mut read_buffer[..]).unwrap();
+                assert_eq!(read, written);
+                assert_eq!(&read_buffer[..read], &bytes[..read]);
+            })
     }
 }
