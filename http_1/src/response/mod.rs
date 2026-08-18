@@ -29,15 +29,23 @@ use http_core::prelude::*;
 ///
 /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#section-2.1
 /// [RFC5322]: https://datatracker.ietf.org/doc/html/rfc5322
-pub struct Response<'a, 'b, const SIZE: usize, W: std::io::Write> {
-    stream: &'a mut W,
+pub struct Response<'buf, 'data, 'reader, W>
+where
+    'data: 'buf,
+    W: std::io::Write,
+{
+    buffer: &'buf mut BufferForWriting<'data>,
+    stream: &'reader mut W,
     status: Status,
-    buffer: &'b mut BufferForWriting<SIZE>,
 }
 
-impl<'a, 'b, const SIZE: usize, W: std::io::Write> Response<'a, 'b, SIZE, W> {
+impl<'buf, 'data, 'reader, W> Response<'buf, 'data, 'reader, W>
+where
+    'data: 'buf,
+    W: std::io::Write,
+{
     /// Initializes a new [`Response`]
-    pub fn new(stream: &'a mut W, buffer: &'b mut BufferForWriting<SIZE>) -> Self {
+    pub fn new(buffer: &'buf mut BufferForWriting<'data>, stream: &'reader mut W) -> Self {
         Self {
             stream,
             status: Status::default(),
@@ -51,8 +59,8 @@ impl<'a, 'b, const SIZE: usize, W: std::io::Write> Response<'a, 'b, SIZE, W> {
         self
     }
 
-    /// Sends out the response to the connected HTTP client.
-    pub fn respond(self) -> std::io::Result<()> {
+    /// Sends out the response back to the connected HTTP client.
+    pub fn send(self) -> std::io::Result<()> {
         if let Status::InternalServerError(err) = &self.status {
             tracing::error!(err);
         };

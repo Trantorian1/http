@@ -6,18 +6,23 @@ pub struct WriteOut;
 /// to push to a given [`Writer`] while handling flushing and other buffering operations.
 ///
 /// [`Writer`]: std::io::Write
-pub struct BufWriter<'a, 'b, const SIZE: usize, W: std::io::Write> {
-    buffer: &'a mut BufferForWriting<SIZE>,
-    writer: &'b mut W,
+pub struct BufWriter<'buf, 'data, 'writer, W>
+where
+    'data: 'buf,
+    W: std::io::Write,
+{
+    buffer: &'buf mut BufferForWriting<'data>,
+    writer: &'writer mut W,
 }
 
-impl<const SIZE: usize> Buffer<SIZE, WriteOut> {
+impl<'data> Buffer<'data, WriteOut> {
     /// Writes out a set of bytes to a [`Writer`], guaranteeing proper flushing. See [`BufWriter`]
     /// for a list of available writing methods.
     ///
     /// ```rust
     /// # use http_core::prelude::*;
-    /// # let mut buffer = BufferForWriting::<{64 * KB}>::new();
+    /// # let mut backing = [0; 64 * KB];
+    /// # let mut buffer = BufferForWriting::new(&mut backing);
     /// # let mut stream = Vec::<u8>::new();
     /// buffer.write_out(&mut stream, |writer| {
     ///     writer.write(b"HTTP/1.1 200 OK\r\n")
@@ -25,10 +30,10 @@ impl<const SIZE: usize> Buffer<SIZE, WriteOut> {
     /// ```
     ///
     /// [`Writer`]: std::io::Write
-    pub fn write_out<'a, 'b, W: std::io::Write>(
-        &'a mut self,
-        writer: &'b mut W,
-        apply_writes: impl FnOnce(&mut BufWriter<'a, 'b, SIZE, W>) -> std::io::Result<()>,
+    pub fn write_out<'buf, 'writer, W: std::io::Write>(
+        &'buf mut self,
+        writer: &'writer mut W,
+        apply_writes: impl FnOnce(&mut BufWriter<'buf, 'data, 'writer, W>) -> std::io::Result<()>,
     ) -> std::io::Result<()> {
         // Make sure we are not re-using data from previous requests/responses.
         self.clear();
@@ -40,11 +45,12 @@ impl<const SIZE: usize> Buffer<SIZE, WriteOut> {
 
     /// Appends data to the [`Buffer`], returning any bytes which could not be written. If this
     /// happens the buffer will have to be manually flushed.
-    fn append_to<'a>(&mut self, data: &'a [u8]) -> &'a [u8] {
+    fn append_to<'b>(&mut self, data: &'b [u8]) -> &'b [u8] {
         let index_start = self.window.end;
         let index_stop = self.window.end + data.len();
+        let capacity = self.capacity();
 
-        if index_stop < SIZE {
+        if index_stop < capacity {
             // Buffer is large enough to fit all of `data`, copy it in.
 
             self.buffer[index_start..index_stop].copy_from_slice(data);
@@ -54,26 +60,27 @@ impl<const SIZE: usize> Buffer<SIZE, WriteOut> {
         } else {
             // Too little free space, `data` will have to be partitioned and flushed in parts.
 
-            let available_space = SIZE - index_start;
+            let available_space = capacity - index_start;
 
             self.buffer[index_start..].copy_from_slice(&data[..available_space]);
-            self.window.end = SIZE;
+            self.window.end = capacity;
 
             &data[available_space..]
         }
     }
 }
 
-impl<'a, 'b, const SIZE: usize, W: std::io::Write> BufWriter<'a, 'b, SIZE, W> {
+impl<'buf, 'data, 'writer, W> BufWriter<'buf, 'data, 'writer, W>
+where
+    'data: 'buf,
+    W: std::io::Write,
+{
     /// New [`BufWriter`]s cannot be created by the user: they are only exposed by [`write_out`] as
     /// a safe writing interface.
     ///
     /// [`write_out`]: Buffer::write_out
-    pub(crate) fn new(view: &'a mut Buffer<SIZE, WriteOut>, writer: &'b mut W) -> Self {
-        Self {
-            buffer: view,
-            writer,
-        }
+    pub(crate) fn new(buffer: &'buf mut BufferForWriting<'data>, writer: &'writer mut W) -> Self {
+        Self { buffer, writer }
     }
 
     /// Writes new data to a [`Buffer`], handling flushing and buffering.

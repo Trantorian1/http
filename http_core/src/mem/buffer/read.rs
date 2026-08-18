@@ -8,17 +8,18 @@ pub struct ReadIn;
 /// small will result in a [`ContentTooLarge`] error.
 ///
 /// [`ContentTooLarge`]: Status::ContentTooLarge
-pub struct BufReader<'a, 'b, const SIZE: usize, R: std::io::Read> {
-    buffer: &'a mut BufferForReading<SIZE>,
-    reader: &'b mut R,
+pub struct BufReader<'buf, 'data, 'reader, R: std::io::Read> {
+    buffer: &'buf mut BufferForReading<'data>,
+    reader: &'reader mut R,
 }
 
-impl<const SIZE: usize> Buffer<SIZE, ReadIn> {
+impl<'data> Buffer<'data, ReadIn> {
     /// Parse in a byte stream. See [`BufReader`] for a list of available methods.
     ///
     /// ```rust
     /// # use http_core::prelude::*;
-    /// # let mut buffer = BufferForReading::<{64 * KB}>::new();
+    /// # let mut backing = [0; 8 * KB];
+    /// # let mut buffer = BufferForReading::new(&mut backing);
     /// # let mut stream = std::collections::VecDeque::from(*b"GET / HTTP/1.1\r\n\r\n");
     /// // Parses in an HTTP/1.1 GET method
     /// fn parser(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
@@ -40,11 +41,14 @@ impl<const SIZE: usize> Buffer<SIZE, ReadIn> {
     /// ```
     ///
     /// [`Reader`]: std::io::Read
-    pub fn read_in<'a, 'b, R: std::io::Read, T>(
-        &'a mut self,
-        reader: &'b mut R,
-        apply_reads: impl FnOnce(&mut BufReader<'a, 'b, SIZE, R>) -> Result<T, Status>,
-    ) -> Result<T, Status> {
+    pub fn read_in<'buf, 'reader, R: std::io::Read, T>(
+        &'buf mut self,
+        reader: &'reader mut R,
+        apply_reads: impl FnOnce(&mut BufReader<'buf, 'data, 'reader, R>) -> Result<T, Status>,
+    ) -> Result<T, Status>
+    where
+        'data: 'buf,
+    {
         // Make sure we are not re-using data from previous requests/responses.
         self.clear();
 
@@ -61,8 +65,8 @@ impl<const SIZE: usize> Buffer<SIZE, ReadIn> {
         let stop = self.window.start + n.get();
         let start = std::mem::replace(&mut self.window.start, stop);
 
-        assert!(start < stop, "{start} < {stop}");
-        assert!(stop <= SIZE, "{stop} < {SIZE}");
+        assert_le!(start, stop);
+        assert_leq!(stop, self.capacity());
         start..stop
     }
 
@@ -78,12 +82,9 @@ impl<const SIZE: usize> Buffer<SIZE, ReadIn> {
     }
 }
 
-impl<'a, 'b, const SIZE: usize, R: std::io::Read> BufReader<'a, 'b, SIZE, R> {
-    pub(crate) fn new(view: &'a mut Buffer<SIZE, ReadIn>, reader: &'b mut R) -> Self {
-        Self {
-            buffer: view,
-            reader,
-        }
+impl<'buf, 'data, 'reader, R: std::io::Read> BufReader<'buf, 'data, 'reader, R> {
+    pub(crate) fn new(buffer: &'buf mut BufferForReading<'data>, reader: &'reader mut R) -> Self {
+        Self { buffer, reader }
     }
 
     /// Keeps trying to parse a byte stream with the provided parser.
@@ -92,7 +93,8 @@ impl<'a, 'b, const SIZE: usize, R: std::io::Read> BufReader<'a, 'b, SIZE, R> {
     ///
     /// ```rust
     /// # use http_core::prelude::*;
-    /// # let mut buffer = BufferForReading::<{64 * KB}>::new();
+    /// # let mut backing = [0; 8 * KB];
+    /// # let mut buffer = BufferForReading::new(&mut backing);
     /// # let mut stream = std::collections::VecDeque::from(*b"GET / HTTP/1.1\r\n\r\n");
     /// # let _ = buffer.read_in(&mut stream, |reader| {
     /// // Parses in an HTTP/1.1 GET method
@@ -129,7 +131,7 @@ impl<'a, 'b, const SIZE: usize, R: std::io::Read> BufReader<'a, 'b, SIZE, R> {
                 .append_from(&mut self.reader)
                 .map_err(Status::internal)?;
 
-            if self.buffer.len() == SIZE {
+            if self.buffer.is_full() {
                 return Err(Status::ContentTooLarge);
             } else if new_bytes == 0 {
                 return Err(Status::RequestTimetout);
