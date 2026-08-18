@@ -26,7 +26,9 @@ fn main() {
     let listener = TcpListener::bind(ADDRESS).unwrap();
     tracing::info!("Listening on {ADDRESS}");
 
-    let mut server = Server::default();
+    let mut global_request_buffer = [0; 8 * KB];
+    let mut global_response_buffer = [0; 64 * KB];
+    let mut server = Server::new(&mut global_request_buffer, &mut global_response_buffer);
 
     // == Main TCP data loop =======================================================================
 
@@ -36,8 +38,8 @@ fn main() {
                 server
                     .process(stream)
                     .respond(|request, response| match request.target {
-                        b"/" => response.with_status_code(Status::Ok).respond(),
-                        _ => response.with_status_code(Status::NotFound).respond(),
+                        b"/" => response.with_status_code(Status::Ok).send(),
+                        _ => response.with_status_code(Status::NotFound).send(),
                     });
             }
             Err(e) => {
