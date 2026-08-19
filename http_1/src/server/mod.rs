@@ -6,7 +6,7 @@
 //! memory contention.
 
 use crate::prelude::*;
-use http_core::prelude::*;
+use http_primitives::prelude::*;
 
 /// HTTP/1.1 server instance, handles connection responses and ensures proper flushing between
 /// requests.

@@ -8,7 +8,7 @@ use crate::prelude::*;
 /// ## Example Usage
 ///
 /// ```
-/// # use http_core::prelude::*;
+/// # use http_primitives::prelude::*;
 /// # use std::io::Read as _;
 /// # use std::io::Write as _;
 /// let mut stream_buffer = [0; 16];
@@ -251,19 +251,19 @@ mod validate {
     /// ## Libfuzzer
     ///
     /// ```bash
-    /// cargo bolero test -p http_core mem::stream::validate::stream_harness
+    /// cargo bolero test -p http_primitives mem::stream::validate::stream_harness
     /// ```
     ///
     /// ## AFL
     ///
     /// ```bash
-    /// cargo bolero test -p http_core mem::stream::validate::stream_harness --engine afl --sanitizer NONE
+    /// cargo bolero test -p http_primitives mem::stream::validate::stream_harness --engine afl --sanitizer NONE
     /// ```
     ///
     /// ## Kani
     ///
     /// ```bash
-    /// cargo bolero test -p http_core mem::stream::validate::stream_harness --engine kani
+    /// cargo bolero test -p http_primitives mem::stream::validate::stream_harness --engine kani
     /// ```
     #[test]
     #[cfg_attr(kani, kani::proof)]

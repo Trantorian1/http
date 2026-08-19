@@ -6,7 +6,7 @@
 //! [`Buffer`]: Buffer
 
 use crate::prelude::*;
-use http_core::prelude::*;
+use http_primitives::prelude::*;
 
 /// See [RFC9112], message format.
 ///

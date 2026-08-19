@@ -9,7 +9,7 @@ workspace = true
 
 [dependencies]
 # http
-http_core.workspace = true
+http_primitives.workspace = true
 
 # Logging
 tracing.workspace = true
