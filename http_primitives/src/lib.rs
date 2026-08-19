@@ -7,14 +7,14 @@ pub mod status;
 pub mod uri;
 
 pub mod prelude {
-    //! A “prelude” for crates using the `http_core` crate.
+    //! A “prelude” for crates using the `http_primitives` crate.
     //!
     //! This prelude is similar to the standard library’s prelude in that you’ll almost always want
     //! to import its entire contents, but unlike the standard library’s prelude you’ll have to do
     //! so manually:
     //!
     //! ```rust
-    //! use http_core::prelude::*;
+    //! use http_primitives::prelude::*;
     //! ```
     //!
     //! The prelude may grow over time as additional items see ubiquitous use.

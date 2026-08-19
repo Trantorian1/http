@@ -28,7 +28,7 @@ impl<'data, Mode> Buffer<'data, Mode> {
     /// Stack-allocates a new [`Buffer`].
     ///
     /// ```rust
-    /// # use http_core::prelude::*;
+    /// # use http_primitives::prelude::*;
     /// let mut read_backing = [0; 8 * KB];
     /// let read_buffer = BufferForReading::pre_populate(&mut read_backing);
     ///
@@ -56,7 +56,7 @@ impl<'data, Mode> Buffer<'data, Mode> {
     /// testing for example.
     ///
     /// ```rust
-    /// # use http_core::prelude::*;
+    /// # use http_primitives::prelude::*;
     /// let mut array: [u8; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
     /// let buffer = BufferForReading::pre_populate(&mut array);
     ///

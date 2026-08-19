@@ -1,7 +1,7 @@
 use std::net::TcpListener;
 
 use http_1::prelude::*;
-use http_core::prelude::*;
+use http_primitives::prelude::*;
 use tracing_subscriber::prelude::*;
 
 const ADDRESS: &str = "127.0.0.1:4221";

@@ -20,7 +20,7 @@ impl<'data> Buffer<'data, WriteOut> {
     /// for a list of available writing methods.
     ///
     /// ```rust
-    /// # use http_core::prelude::*;
+    /// # use http_primitives::prelude::*;
     /// # let mut backing = [0; 64 * KB];
     /// # let mut buffer = BufferForWriting::new(&mut backing);
     /// # let mut stream = Vec::<u8>::new();

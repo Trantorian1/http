@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["http_core", "http_1"]
+members = ["http_1", "http_primitives"]
 
 [workspace.package]
 version = "0.1.0"
@@ -26,8 +26,8 @@ codegen-units = 1
 
 [workspace.dependencies]
 # http
-http_core.path = "http_core"
 http_1.path = "http_1"
+http_primitives.path = "http_primitives"
 
 # Logging
 tracing = "0.1.44"

@@ -7,7 +7,7 @@
 //! [`Buffer`]: Buffer
 //! [`413`]: Status::ContentTooLarge
 
-use http_core::prelude::*;
+use http_primitives::prelude::*;
 
 pub mod parsers;
 

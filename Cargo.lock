@@ -220,14 +220,14 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 name = "http_1"
 version = "0.0.1"
 dependencies = [
- "http_core",
+ "http_primitives",
  "memchr",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
-name = "http_core"
+name = "http_primitives"
 version = "0.0.1"
 dependencies = [
  "bolero",

@@ -3,7 +3,7 @@
 /// ## Example Usage
 ///
 /// ```
-/// # use http_core::prelude::*;
+/// # use http_primitives::prelude::*;
 /// assert_le!(3, 4);
 /// ```
 #[macro_export]
@@ -21,7 +21,7 @@ macro_rules! assert_le {
 /// ## Example Usage
 ///
 /// ```
-/// # use http_core::prelude::*;
+/// # use http_primitives::prelude::*;
 /// assert_leq!(4, 4);
 /// ```
 #[macro_export]
@@ -39,7 +39,7 @@ macro_rules! assert_leq {
 /// ## Example Usage
 ///
 /// ```
-/// # use http_core::prelude::*;
+/// # use http_primitives::prelude::*;
 /// assert_gr!(4, 3);
 /// ```
 #[macro_export]
@@ -57,7 +57,7 @@ macro_rules! assert_gr {
 /// ## Example Usage
 ///
 /// ```
-/// # use http_core::prelude::*;
+/// # use http_primitives::prelude::*;
 /// assert_greq!(4, 4);
 /// ```
 #[macro_export]
