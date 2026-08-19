@@ -17,7 +17,7 @@ impl<'data> Buffer<'data, ReadIn> {
     /// Parse in a byte stream. See [`BufReader`] for a list of available methods.
     ///
     /// ```rust
-    /// # use http_core::prelude::*;
+    /// # use http_primitives::prelude::*;
     /// # let mut backing = [0; 8 * KB];
     /// # let mut buffer = BufferForReading::new(&mut backing);
     /// # let mut stream = std::collections::VecDeque::from(*b"GET / HTTP/1.1\r\n\r\n");
@@ -92,7 +92,7 @@ impl<'buf, 'data, 'reader, R: std::io::Read> BufReader<'buf, 'data, 'reader, R> 
     /// Will return [`ContentTooLarge`] if there is not enough space left in the buffer.
     ///
     /// ```rust
-    /// # use http_core::prelude::*;
+    /// # use http_primitives::prelude::*;
     /// # let mut backing = [0; 8 * KB];
     /// # let mut buffer = BufferForReading::new(&mut backing);
     /// # let mut stream = std::collections::VecDeque::from(*b"GET / HTTP/1.1\r\n\r\n");
