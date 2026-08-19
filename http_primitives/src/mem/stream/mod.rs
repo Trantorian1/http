@@ -62,10 +62,10 @@ impl<'data> ByteStream<'data> {
     /// let mut array: [u8; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
     /// let mut stream = ByteStream::pre_populate(&mut array);
     ///
-    /// let read_buffer = [0; 8];
+    /// let mut read_buffer = [0; 8];
     /// let bytes = stream.read(&mut read_buffer).unwrap();
     ///
-    /// assert_eq!(&read_buffer[..bytes], &[0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    /// assert_eq!(&read_buffer[..bytes], &[0, 1, 2, 3, 4, 5, 6, 7]);
     /// ```
     pub fn pre_populate(buffer: &'data mut [u8]) -> Self {
         assert!(!buffer.is_empty());
@@ -119,6 +119,7 @@ impl<'data> std::io::Read for ByteStream<'data> {
 
             self.start += space_after_start;
             self.size -= space_after_start;
+            assert_leq!(self.size, self.capacity());
 
             Ok(space_after_start)
         } else {
@@ -137,6 +138,7 @@ impl<'data> std::io::Read for ByteStream<'data> {
 
             self.start = (self.start + space_after_start + space_before_stop) % self.capacity();
             self.size -= space_after_start + space_before_stop;
+            assert_leq!(self.size, self.capacity());
 
             Ok(space_after_start + space_before_stop)
         }
@@ -151,30 +153,31 @@ impl<'data> std::io::Write for ByteStream<'data> {
         let start = self.start;
         let stop = self.start + self.size;
         let bytes = buf.len();
+        let mut written = 0;
 
-        // We always try and append data first. This is a no-op in case there is no space left or a
-        // wrap-around is needed.
-        let space_after_stop = (self.capacity() - stop).min(bytes);
+        if stop < self.capacity() {
+            // Try and append to the inner buffer if there is space at the end
+            let space_after_stop = (self.capacity() - stop).min(bytes);
+            self.buffer[stop..stop + space_after_stop].copy_from_slice(&buf[..space_after_stop]);
 
-        self.buffer[stop..stop + space_after_stop].copy_from_slice(&buf[..space_after_stop]);
-
-        if start + bytes <= self.capacity() {
-            // No wrap-around needed.
-            self.size += space_after_stop;
-
-            Ok(space_after_stop)
-        } else {
-            // Wrap-around needed.
-            let space_before_start = (start).min(bytes - space_after_stop);
-
-            // Append the rest of the data to the start of the buffer.
-            self.buffer[..space_before_start]
-                .copy_from_slice(&buf[space_after_stop..space_after_stop + space_before_start]);
-
-            self.size += space_after_stop + space_before_start;
-
-            Ok(space_after_stop + space_before_start)
+            written += space_after_stop;
+            assert_leq!(written, bytes);
         }
+
+        if start > 0 && written < bytes {
+            // Wrap around to the front if there is any space left
+            let space_before_start = start.min(bytes - written);
+            self.buffer[..space_before_start]
+                .copy_from_slice(&buf[written..written + space_before_start]);
+
+            written += space_before_start;
+            assert_leq!(written, bytes);
+        }
+
+        self.size += written;
+        assert_leq!(self.size, self.capacity());
+
+        Ok(written)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -286,7 +289,7 @@ pub mod test {
     }
 
     #[test]
-    fn stream_read_offset() {
+    fn stream_read_write_offset() {
         let mut stream_buffer = [0; 2];
         let mut stream = ByteStream::new_with_offset(&mut stream_buffer, 1);
 
@@ -398,6 +401,7 @@ mod validate {
     // the problem space with garbage data which likely does not contain any new edge cases. The
     // most interesting targets probably lie around small array sizes anyway.
     const MAX_SIZE: usize = 16;
+    const _: () = assert!(MAX_SIZE > 0);
 
     /// ## Libfuzzer
     ///
@@ -439,7 +443,7 @@ mod validate {
             })
             .cloned()
             .for_each(|(n, size, offset)| {
-                let bytes = [1; MAX_SIZE];
+                let bytes: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
                 let mut backing = [0; MAX_SIZE];
                 let mut read_buffer = [0; MAX_SIZE];
 
@@ -477,7 +481,7 @@ mod validate {
             })
             .cloned()
             .for_each(|(n, size, offset)| {
-                let bytes = [1; MAX_SIZE];
+                let bytes: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
                 let mut backing = [0; MAX_SIZE];
                 let mut stream = ByteStream::new_with_offset(&mut backing[..size], offset);
 
@@ -488,6 +492,8 @@ mod validate {
                 for n in &bytes[..written] {
                     assert_eq!(Some(*n), iter.next());
                 }
+
+                assert!(stream.is_empty());
             });
     }
 }
