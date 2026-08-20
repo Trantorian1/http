@@ -85,8 +85,6 @@ where
 
     /// Writes new data to a [`Buffer`], handling flushing and buffering.
     pub fn write(&mut self, mut data: &[u8]) -> std::io::Result<()> {
-        assert!(!data.is_empty());
-
         loop {
             data = self.buffer.append_to(data);
 
@@ -101,5 +99,51 @@ where
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.writer.write_all(self.buffer.as_ref())
+    }
+}
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+
+    // This still passes for MAX_SIZE = 16 but takes 1h40min to validate and 72GB of RAM :P
+    const MAX_SIZE: usize = 2;
+    const _: () = assert!(MAX_SIZE > 0);
+
+    #[test]
+    #[cfg_attr(kani, kani::proof)]
+    #[cfg_attr(kani, kani::unwind(17))]
+    // #[cfg_attr(kani, kani::stub_verified(ByteStream::read_impl))]
+    // #[cfg_attr(kani, kani::stub_verified(ByteStream::write_impl))]
+    fn buf_write_harness() {
+        let generator = (
+            // Number of bytes to write
+            bolero::produce::<usize>().with().bounds(..MAX_SIZE),
+            // Write buffer capacity, cannot be 0
+            bolero::produce::<usize>().with().bounds(1..MAX_SIZE),
+        );
+
+        bolero::check!()
+            .with_generator(generator)
+            .cloned()
+            .for_each(|(n, size)| {
+                let bytes: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
+                let mut stream_backing = [0; MAX_SIZE];
+                let mut stream = ByteStream::new(&mut stream_backing);
+
+                let mut buffer_backing = [0; MAX_SIZE];
+                let mut buffer = BufferForWriting::new(&mut buffer_backing[..size]);
+
+                buffer
+                    .write_out(&mut stream, |writer| writer.write(&bytes[..n]))
+                    .unwrap();
+
+                let mut iter = stream.iter();
+                for n in &bytes[..n] {
+                    assert_eq!(Some(*n), iter.next());
+                }
+
+                assert!(stream.is_empty());
+            });
     }
 }
