@@ -106,7 +106,7 @@ where
 mod property_tests {
     use super::*;
 
-    // This still passes for MAX_SIZE = 16 but takes 1h40min to validate and 72GB of RAM :P
+    // This still passes as for MAX_SIZE = 16 but takes 1h40min to validate and 72GB of RAM :P
     const MAX_SIZE: usize = 2;
     const _: () = assert!(MAX_SIZE > 0);
 
