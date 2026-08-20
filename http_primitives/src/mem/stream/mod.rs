@@ -23,7 +23,7 @@ use crate::prelude::*;
 /// ```
 ///
 /// [`Read`]: std::io::Read
-// [`Write`]: std::io::Write
+/// [`Write`]: std::io::Write
 /// [`TcpStream`]: std::net::TcpStream
 pub struct ByteStream<'data> {
     buffer: &'data mut [u8],
@@ -464,7 +464,7 @@ pub mod test {
 }
 
 #[cfg(test)]
-mod validate {
+mod fixtures {
     use std::io::Read as _;
     use std::io::Write as _;
 
@@ -473,8 +473,107 @@ mod validate {
     // It probably doesn't make sense to increase this too much as then we would just be polluting
     // the problem space with garbage data which likely does not contain any new edge cases. The
     // most interesting targets probably lie around small array sizes anyway.
-    const MAX_SIZE: usize = 16;
+    pub const MAX_SIZE: usize = 16;
     const _: () = assert!(MAX_SIZE > 0);
+
+    /// Simulates stream read-write operations under the following conditions:
+    ///
+    /// - Partial reads.
+    /// - Partial writes.
+    /// - Varying stream capacity.
+    /// - Varying stream size.
+    /// - Wrapped and contiguous data.
+    ///
+    pub fn stream_invariant_problem(
+        n_read: usize,   // number of bytes read
+        n_write: usize,  // number of bytes written
+        capacity: usize, // stream capacity
+        start: usize,    // stream start index, causes wrap-around
+        size: usize,     // initial stream size, data in the backing buffer which is kept
+    ) {
+        // Initial stream data. The number of bytes kept is informed by `size`. The rest will be
+        // overwritten during subsequent writes.
+        let mut backing: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
+        let mut read_buffer = [0; MAX_SIZE];
+
+        // Bytes to be written to the stream. The actual number of writes is determined by
+        // `n_write` and by the initial stream `size`.
+        let bytes_new: [u8; MAX_SIZE] = std::array::from_fn(|i| (i + MAX_SIZE) as u8);
+        let bytes_prev = backing;
+
+        // The system under test
+        let mut stream = ByteStream::any(&mut backing[..capacity], start, size);
+
+        // Invariant test 1:
+        //
+        // We write UP TO `n_write` bytes to the stream. The actual number of bytes we manage to
+        // write will depend on the stream capacity as well as it's start size. If there is not
+        // enough space left to write `n_write` bytes, as many bytes as possible should still be
+        // written to the stream.
+        let written = stream.write(&bytes_new[..n_write]).unwrap();
+        assert_eq!(written, n_write.min(capacity - size));
+
+        // Invariant test 2:
+        //
+        // We read UP TO `n_read` bytes from the stream. The actual number of bytes we manage to read
+        // will depend on the initial size of the stream as well as the number of bytes which were
+        // previously written. If there is not enough space in `read_buffer` to read all of the
+        // stream's data, as many bytes as possible should still be read.
+        let read = stream.read(&mut read_buffer[..n_read]).unwrap();
+        let processed = (written + size).min(n_read);
+
+        assert_eq!(read, processed);
+        assert_eq!(stream.len(), written + size - processed);
+
+        // Invariant test 3:
+        //
+        // Bytes which were initially present in the stream should not have been overwritten if they
+        // could be read.
+        for i in 0..size.min(n_read) {
+            assert_eq!(read_buffer[i], bytes_prev[(i + start) % capacity]);
+        }
+
+        // Invariant test 4:
+        //
+        // Bytes which were later written to the stream should also be present in `read_buffer` if
+        // they could be read.
+        for i in 0..written.min(n_read.saturating_sub(size)) {
+            assert_eq!(read_buffer[size + i], bytes_new[i]);
+        }
+    }
+
+    /// Number of bytes to read.
+    #[rstest::fixture]
+    pub fn generate_n_read() -> impl bolero::generator::ValueGenerator<Output = usize> {
+        bolero::produce::<usize>().with().bounds(..MAX_SIZE)
+    }
+
+    /// Number of bytes to write.
+    #[rstest::fixture]
+    pub fn generate_n_write() -> impl bolero::generator::ValueGenerator<Output = usize> {
+        bolero::produce::<usize>().with().bounds(..MAX_SIZE)
+    }
+
+    /// Stream capacity, cannot be 0.
+    #[rstest::fixture]
+    pub fn generate_capacity() -> impl bolero::generator::ValueGenerator<Output = usize> {
+        bolero::produce::<usize>().with().bounds(1..MAX_SIZE)
+    }
+
+    #[rstest::fixture]
+    pub fn generate_stream(
+        generate_n_read: impl bolero::generator::ValueGenerator<Output = usize>,
+        generate_n_write: impl bolero::generator::ValueGenerator<Output = usize>,
+        generate_capacity: impl bolero::generator::ValueGenerator<Output = usize>,
+    ) -> impl bolero::generator::ValueGenerator<Output = (usize, usize, usize)> {
+        (generate_n_read, generate_n_write, generate_capacity)
+    }
+}
+
+#[cfg(test)]
+mod validate {
+    use super::fixtures::*;
+    use super::*;
 
     /// ## Libfuzzer
     ///
@@ -493,56 +592,28 @@ mod validate {
     /// ```bash
     /// cargo bolero test -p http_primitives mem::stream::validate::stream_harness --engine kani
     /// ```
-    #[test]
+    #[rstest::rstest]
     #[cfg_attr(kani, kani::proof)]
     #[cfg_attr(kani, kani::unwind(17))]
-    fn stream_harness() {
-        let generator = (
-            // Number of bytes to write
-            bolero::produce::<usize>().with().bounds(..MAX_SIZE),
-            // Stream capacity, cannot be 0
-            bolero::produce::<usize>().with().bounds(1..MAX_SIZE),
-        );
-
+    fn stream_harness(
+        generate_stream: impl bolero::generator::ValueGenerator<Output = (usize, usize, usize)>,
+    ) {
         bolero::check!()
-            .with_generator(generator)
-            .and_then(|(n, capacity)| {
+            .with_generator(generate_stream)
+            .and_then(|(n_read, n_write, capacity)| {
                 (
-                    n,
+                    n_read,
+                    n_write,
                     capacity,
                     // Initial stream start index
                     bolero::produce::<usize>().with().bounds(..capacity),
                     // Initial stream size
-                    bolero::produce::<usize>().with().bounds(..capacity),
+                    bolero::produce::<usize>().with().bounds(..=capacity),
                 )
             })
             .cloned()
-            .for_each(|(n, capacity, start, size)| {
-                let mut backing: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
-                let mut read_buffer = [0; MAX_SIZE];
-
-                let bytes_prev = backing;
-                let bytes_new: [u8; MAX_SIZE] = std::array::from_fn(|i| (i + MAX_SIZE) as u8);
-
-                let mut stream = ByteStream::any(&mut backing[..capacity], start, size);
-
-                let written = stream.write(&bytes_new[..n]).unwrap();
-                assert_eq!(written, n.min(capacity - size));
-
-                let read = stream.read(&mut read_buffer).unwrap();
-
-                assert_eq!(read, written + size);
-                assert!(stream.is_empty());
-
-                // Make sure that previous data has not been overwritten
-                for i in 0..size {
-                    assert_eq!(read_buffer[i], bytes_prev[(i + start) % capacity]);
-                }
-
-                // Check that new data has been written correctly
-                for i in 0..written {
-                    assert_eq!(read_buffer[size + i], bytes_new[i]);
-                }
+            .for_each(|(n_read, n_write, capacity, start, size)| {
+                stream_invariant_problem(n_read, n_write, capacity, start, size);
             })
     }
 
@@ -563,50 +634,31 @@ mod validate {
     /// ```bash
     /// cargo bolero test -p http_primitives mem::stream::validate::stream_iter --engine kani
     /// ```
-    #[test]
+    #[rstest::rstest]
     #[cfg_attr(kani, kani::proof)]
     #[cfg_attr(kani, kani::unwind(17))]
-    fn stream_iter() {
-        let generator = (
-            // Number of bytes to write
-            bolero::produce::<usize>().with().bounds(..MAX_SIZE),
-            // Stream capacity, cannot be 0
-            bolero::produce::<usize>().with().bounds(1..MAX_SIZE),
-        );
-
+    fn stream_iter(generate_capacity: impl bolero::generator::ValueGenerator<Output = usize>) {
         bolero::check!()
-            .with_generator(generator)
-            .and_then(|(n, capacity)| {
+            .with_generator(generate_capacity)
+            .and_then(|capacity| {
                 (
-                    n,
                     capacity,
                     // Initial stream start index
                     bolero::produce::<usize>().with().bounds(..capacity),
                     // Initial stream size
-                    bolero::produce::<usize>().with().bounds(..capacity),
+                    bolero::produce::<usize>().with().bounds(..=capacity),
                 )
             })
             .cloned()
-            .for_each(|(n, capacity, start, size)| {
-                let mut backing = [0; MAX_SIZE];
-                let bytes_new: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
+            .for_each(|(capacity, start, size)| {
+                let mut backing: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
                 let bytes_prev = backing;
 
                 let mut stream = ByteStream::any(&mut backing[..capacity], start, size);
-
-                let written = stream.write(&bytes_new[..n]).unwrap();
-                assert_eq!(written, n.min(capacity - size));
-
                 let mut iter = stream.iter();
 
-                // Make sure that previous data has not been overwritten
                 for i in 0..size {
                     assert_eq!(iter.next(), Some(bytes_prev[(i + start) % capacity]));
-                }
-
-                // Check that new data has been written correctly
-                for i in 0..written {
-                    assert_eq!(iter.next(), Some(bytes_new[i]));
                 }
 
                 assert!(stream.is_empty());
@@ -614,11 +666,12 @@ mod validate {
     }
 }
 
-#[cfg(kani)]
+#[cfg(all(test, kani))]
 /// See [function contracts].
 ///
 /// [function contracts]: https://model-checking.github.io/kani/crates/doc/kani/contracts/index.html
 mod contracts {
+    use super::fixtures::*;
     use super::*;
 
     use std::io::Read as _;
