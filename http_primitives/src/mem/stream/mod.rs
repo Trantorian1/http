@@ -104,25 +104,25 @@ impl<'data> std::io::Read for ByteStream<'data> {
     //
     // -- Mutations
     //
-    #[cfg_attr(kani, kani::modifies(&self.start, &self.size, buf))]
+    #[cfg_attr(all(test, kani), kani::modifies(&self.start, &self.size, buf))]
     //
     // -- Pre-conditions
     //
-    #[cfg_attr(kani, kani::requires(contracts::common_preconditions(self)))]
+    #[cfg_attr(all(test, kani), kani::requires(self.invariants()))]
     //
     // -- Post-conditions
     //
     // Start index must wrap around the buffer.
     //
-    #[cfg_attr(kani, kani::ensures(|_| self.start == (old(self.start) + old(self.size).min(buf.len())) % self.capacity()))]
+    #[cfg_attr(all(test, kani), kani::ensures(|_| self.start == (old(self.start) + old(self.size).min(buf.len())) % self.capacity()))]
     //
     // Bytes are consumed as they are read.
     //
-    #[cfg_attr(kani, kani::ensures(|_| self.size == old(self.size) - old(self.size).min(buf.len())))]
+    #[cfg_attr(all(test, kani), kani::ensures(|_| self.size == old(self.size) - old(self.size).min(buf.len())))]
     //
     // Results are coherent with the data being read and can never error out.
     //
-    #[cfg_attr(kani, kani::ensures(|result| match result  {
+    #[cfg_attr(all(test, kani), kani::ensures(|result| match result  {
         Ok(read) => *read == old(self.size).min(buf.len())
             && self.size == old(self.size) - *read,
         Err(_) => false
@@ -179,25 +179,25 @@ impl<'data> std::io::Write for ByteStream<'data> {
     //
     // -- Mutations
     //
-    #[cfg_attr(kani, kani::modifies(&self.start, &self.size, self.buffer))]
+    #[cfg_attr(all(test, kani), kani::modifies(&self.start, &self.size, self.buffer))]
     //
     // -- Pre-conditions
     //
-    #[cfg_attr(kani, kani::requires(contracts::common_preconditions(self)))]
+    #[cfg_attr(all(test, kani), kani::requires(self.invariants()))]
     //
     // -- Post-conditions
     //
     // Start index cannot be mutated by stream writes, only stream reads.
     //
-    #[cfg_attr(kani, kani::ensures(|_| self.start == old(self.start)))]
+    #[cfg_attr(all(test, kani), kani::ensures(|_| self.start == old(self.start)))]
     //
     // Stream size grows with the number of bytes written.
     //
-    #[cfg_attr(kani, kani::ensures(|_| self.size == old(self.size) + old(self.space_left()).min(buf.len())))]
+    #[cfg_attr(all(test, kani), kani::ensures(|_| self.size == old(self.size) + old(self.space_left()).min(buf.len())))]
     //
     // Results are coherent with the data being written and can never error out.
     //
-    #[cfg_attr(kani, kani::ensures(|result| match result {
+    #[cfg_attr(all(test, kani), kani::ensures(|result| match result {
         Ok(written) => *written == old(self.space_left()).min(buf.len())
             && self.size == old(self.size) + *written,
         Err(_) => false
@@ -666,10 +666,10 @@ mod validate {
     }
 }
 
-#[cfg(all(test, kani))]
 /// See [function contracts].
 ///
 /// [function contracts]: https://model-checking.github.io/kani/crates/doc/kani/contracts/index.html
+#[cfg(all(test, kani))]
 mod contracts {
     use super::fixtures::*;
     use super::*;
@@ -677,95 +677,77 @@ mod contracts {
     use std::io::Read as _;
     use std::io::Write as _;
 
-    const MAX_SIZE: usize = 16;
-    const _: () = assert!(MAX_SIZE > 0);
-
-    /// General [`ByteStream`] pre-conditions, shared between [`Read`] and [`Write`] function
-    /// contracts.
-    ///
-    /// [`ByteStream`]: ByteStream
-    /// [`Read`]: std::io::Read
-    /// [`Write`]: std::io::Write
-    pub fn common_preconditions<'stream, 'data>(stream: &'stream mut ByteStream<'data>) -> bool {
-        !stream.buffer.is_empty()  // Stream buffer cannot have size 0
-            && stream.start < stream.capacity() // Start index must be less than stream capacity
-            && stream.size <= stream.capacity() // Stream size cannot exceed stream capacity
+    impl<'data> ByteStream<'data> {
+        /// General [`ByteStream`] pre-conditions, shared between [`Read`] and [`Write`] function
+        /// contracts.
+        ///
+        /// [`ByteStream`]: ByteStream
+        /// [`Read`]: std::io::Read
+        /// [`Write`]: std::io::Write
+        pub fn invariants(&self) -> bool {
+            !self.buffer.is_empty()  // Stream buffer cannot have size 0
+            && self.start < self.capacity() // Start index must be less than stream capacity
+            && self.size <= self.capacity() // Stream size cannot exceed stream capacity
+        }
     }
 
     /// Contract validation tests MUST be run with `kani`.
     ///
     /// ```bash
-    /// cargo bolero test -p http_primitives mem::stream::contracts::check_read_contract --engine kani
+    /// cargo bolero test -p http_primitives mem::stream::contracts::check_contract_read --engine kani
     /// ```
+    #[rstest::rstest]
     #[kani::proof_for_contract(<ByteStream as std::io::Read>::read)]
     #[kani::unwind(17)]
-    fn check_read_contract() {
-        let capacity = kani::any();
-        let start = kani::any();
-        let size = kani::any();
-
-        kani::assume(capacity > 0 && capacity < MAX_SIZE);
-        kani::assume(start < capacity);
-        kani::assume(size < capacity);
-
-        let mut backing: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
-        let mut read_buffer = [0; MAX_SIZE];
-        let bytes_prev = backing;
-
-        let mut stream = ByteStream::any(&mut backing[..capacity], start, size);
-
-        let read = stream.read(&mut read_buffer).unwrap();
-
-        assert_eq!(read, size);
-        assert!(stream.is_empty());
-
-        for i in 0..read {
-            assert_eq!(read_buffer[i], bytes_prev[(i + start) % capacity]);
-        }
+    fn check_contract_read(
+        generate_stream: impl bolero::generator::ValueGenerator<Output = (usize, usize, usize)>,
+    ) {
+        bolero::check!()
+            .with_generator(generate_stream)
+            .and_then(|(n_read, n_write, capacity)| {
+                (
+                    n_read,
+                    n_write,
+                    capacity,
+                    // Initial stream start index
+                    bolero::produce::<usize>().with().bounds(..capacity),
+                    // Initial stream size
+                    bolero::produce::<usize>().with().bounds(..=capacity),
+                )
+            })
+            .cloned()
+            .for_each(|(n_read, n_write, capacity, start, size)| {
+                stream_invariant_problem(n_read, n_write, capacity, start, size);
+            })
     }
 
     /// Contract validation tests MUST be run with `kani`.
     ///
     /// ```bash
-    /// cargo bolero test -p http_primitives mem::stream::contracts::check_write_contract --engine kani
+    /// cargo bolero test -p http_primitives mem::stream::contracts::check_contract_write --engine kani
     /// ```
+    #[rstest::rstest]
     #[kani::proof_for_contract(<ByteStream as std::io::Write>::write)]
     #[kani::unwind(17)]
-    fn check_write_contract() {
-        let n = kani::any();
-        let capacity = kani::any();
-        let start = kani::any();
-        let size = kani::any();
-
-        kani::assume(n < MAX_SIZE);
-        kani::assume(capacity > 0 && capacity < MAX_SIZE);
-        kani::assume(start < capacity);
-        kani::assume(size < capacity);
-
-        let mut backing: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
-        let mut read_buffer = [0; MAX_SIZE];
-
-        let bytes_prev = backing;
-        let bytes_new: [u8; MAX_SIZE] = std::array::from_fn(|i| (i + MAX_SIZE) as u8);
-
-        let mut stream = ByteStream::any(&mut backing[..capacity], start, size);
-
-        let written = stream.write(&bytes_new[..n]).unwrap();
-        assert_eq!(written, n.min(capacity - size));
-
-        let read = stream.read(&mut read_buffer).unwrap();
-
-        assert_eq!(read, written + size);
-        assert!(stream.is_empty());
-
-        // Make sure that previous data has not been overwritten
-        for i in 0..size {
-            assert_eq!(read_buffer[i], bytes_prev[(i + start) % capacity]);
-        }
-
-        // Check that new data has been written correctly
-        for i in 0..written {
-            assert_eq!(read_buffer[size + i], bytes_new[i]);
-        }
+    fn check_contract_write(
+        generate_stream: impl bolero::generator::ValueGenerator<Output = (usize, usize, usize)>,
+    ) {
+        bolero::check!()
+            .with_generator(generate_stream)
+            .and_then(|(n_read, n_write, capacity)| {
+                (
+                    n_read,
+                    n_write,
+                    capacity,
+                    // Initial stream start index
+                    bolero::produce::<usize>().with().bounds(..capacity),
+                    // Initial stream size
+                    bolero::produce::<usize>().with().bounds(..=capacity),
+                )
+            })
+            .cloned()
+            .for_each(|(n_read, n_write, capacity, start, size)| {
+                stream_invariant_problem(n_read, n_write, capacity, start, size);
+            })
     }
 }
