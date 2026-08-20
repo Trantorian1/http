@@ -101,6 +101,12 @@ impl<'data> ByteStream<'data> {
 }
 
 impl<'data> std::io::Read for ByteStream<'data> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        Ok(self.read_impl(buf))
+    }
+}
+
+impl<'data> ByteStream<'data> {
     //
     // -- Mutations
     //
@@ -122,16 +128,15 @@ impl<'data> std::io::Read for ByteStream<'data> {
     //
     // Results are coherent with the data being read and can never error out.
     //
-    #[cfg_attr(all(test, kani), kani::ensures(|result| match result  {
-        Ok(read) => *read == old(self.size).min(buf.len())
-            && self.size == old(self.size) - *read,
-        Err(_) => false
-    }))]
+    #[cfg_attr(all(test, kani), kani::ensures(|read|
+        *read == old(self.size).min(buf.len())
+            && self.size == old(self.size) - *read
+    ))]
     ///
     /// If this seems confusing to you, check out the `kani` docs on [function contracts]
     ///
     /// [function contracts]: https://model-checking.github.io/kani/crates/doc/kani/contracts/index.html
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+    fn read_impl(&mut self, buf: &mut [u8]) -> usize {
         assert_leq!(self.start, self.capacity());
         assert_leq!(self.size, self.capacity());
 
@@ -151,7 +156,7 @@ impl<'data> std::io::Read for ByteStream<'data> {
             self.size -= space_after_start;
             assert_leq!(self.size, self.capacity());
 
-            Ok(space_after_start)
+            space_after_start
         } else {
             // Stream data goes past the end of the buffer, we need to handle ring wrap-around.
             let space_after_start = (self.capacity() - self.start).min(bytes);
@@ -170,12 +175,22 @@ impl<'data> std::io::Read for ByteStream<'data> {
             self.size -= space_after_start + space_before_stop;
             assert_leq!(self.size, self.capacity());
 
-            Ok(space_after_start + space_before_stop)
+            space_after_start + space_before_stop
         }
     }
 }
 
 impl<'data> std::io::Write for ByteStream<'data> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        Ok(self.write_impl(buf))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'data> ByteStream<'data> {
     //
     // -- Mutations
     //
@@ -197,16 +212,15 @@ impl<'data> std::io::Write for ByteStream<'data> {
     //
     // Results are coherent with the data being written and can never error out.
     //
-    #[cfg_attr(all(test, kani), kani::ensures(|result| match result {
-        Ok(written) => *written == old(self.space_left()).min(buf.len())
-            && self.size == old(self.size) + *written,
-        Err(_) => false
-    }))]
+    #[cfg_attr(all(test, kani), kani::ensures(|written|
+        *written == old(self.space_left()).min(buf.len())
+            && self.size == old(self.size) + *written
+    ))]
     ///
     /// If this seems confusing to you, check out the `kani` docs on [function contracts]
     ///
     /// [function contracts]: https://model-checking.github.io/kani/crates/doc/kani/contracts/index.html
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    fn write_impl(&mut self, buf: &[u8]) -> usize {
         assert_leq!(self.start, self.capacity());
         assert_leq!(self.size, self.capacity());
 
@@ -227,7 +241,7 @@ impl<'data> std::io::Write for ByteStream<'data> {
 
             self.size += space_after_stop + space_before_start;
 
-            Ok(space_after_stop + space_before_start)
+            space_after_stop + space_before_start
         } else {
             // The data currently in the buffer is NOT contiguous and wraps around. This actually
             // makes our life easier, as we only need a single write to cover the area of memory
@@ -241,12 +255,8 @@ impl<'data> std::io::Write for ByteStream<'data> {
 
             self.size += space_before_start;
 
-            Ok(space_before_start)
+            space_before_start
         }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
     }
 }
 
@@ -674,9 +684,6 @@ mod contracts {
     use super::fixtures::*;
     use super::*;
 
-    use std::io::Read as _;
-    use std::io::Write as _;
-
     impl<'data> ByteStream<'data> {
         /// General [`ByteStream`] pre-conditions, shared between [`Read`] and [`Write`] function
         /// contracts.
@@ -697,7 +704,7 @@ mod contracts {
     /// cargo bolero test -p http_primitives mem::stream::contracts::check_contract_read --engine kani
     /// ```
     #[rstest::rstest]
-    #[kani::proof_for_contract(<ByteStream as std::io::Read>::read)]
+    #[kani::proof_for_contract(ByteStream::read_impl)]
     #[kani::unwind(17)]
     fn check_contract_read(
         generate_stream: impl bolero::generator::ValueGenerator<Output = (usize, usize, usize)>,
@@ -727,7 +734,7 @@ mod contracts {
     /// cargo bolero test -p http_primitives mem::stream::contracts::check_contract_write --engine kani
     /// ```
     #[rstest::rstest]
-    #[kani::proof_for_contract(<ByteStream as std::io::Write>::write)]
+    #[kani::proof_for_contract(ByteStream::write_impl)]
     #[kani::unwind(17)]
     fn check_contract_write(
         generate_stream: impl bolero::generator::ValueGenerator<Output = (usize, usize, usize)>,

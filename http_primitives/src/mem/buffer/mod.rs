@@ -52,8 +52,10 @@ impl<'data, Mode> Buffer<'data, Mode> {
         }
     }
 
-    /// Stack allocates a new [`Buffer`], keeping the initialized memory. This can be useful in
-    /// testing for example.
+    /// Stack allocates a new [`Buffer`], using `buffer` as initialized memory. This can be useful
+    /// in testing for example.
+    ///
+    /// Will panic if `buffer` is empty;
     ///
     /// ```rust
     /// # use http_primitives::prelude::*;
@@ -162,40 +164,35 @@ mod test {
     }
 
     #[rstest::rstest]
-    fn index_range_base(mut array: [u8; SIZE]) {
-        let oracle = array;
+    fn index_range_base(mut array: [u8; SIZE], #[from(array)] oracle: [u8; SIZE]) {
         let buffer = BufferForReading::pre_populate(&mut array);
 
         pretty_assertions::assert_eq!(buffer[1..10], oracle[1..10]);
     }
 
     #[rstest::rstest]
-    fn index_range_inclusive(mut array: [u8; SIZE]) {
-        let oracle = array;
+    fn index_range_inclusive(mut array: [u8; SIZE], #[from(array)] oracle: [u8; SIZE]) {
         let buffer = BufferForReading::pre_populate(&mut array);
 
         pretty_assertions::assert_eq!(buffer[1..=10], oracle[1..=10]);
     }
 
     #[rstest::rstest]
-    fn index_range_from(mut array: [u8; SIZE]) {
-        let oracle = array;
+    fn index_range_from(mut array: [u8; SIZE], #[from(array)] oracle: [u8; SIZE]) {
         let buffer = BufferForReading::pre_populate(&mut array);
 
         pretty_assertions::assert_eq!(buffer[1..], oracle[1..]);
     }
 
     #[rstest::rstest]
-    fn index_range_to(mut array: [u8; SIZE]) {
-        let oracle = array;
+    fn index_range_to(mut array: [u8; SIZE], #[from(array)] oracle: [u8; SIZE]) {
         let buffer = BufferForReading::pre_populate(&mut array);
 
         pretty_assertions::assert_eq!(buffer[..SIZE], oracle[..SIZE]);
     }
 
     #[rstest::rstest]
-    fn index_range_full(mut array: [u8; SIZE]) {
-        let oracle = array;
+    fn index_range_full(mut array: [u8; SIZE], #[from(array)] oracle: [u8; SIZE]) {
         let buffer = BufferForReading::pre_populate(&mut array);
 
         pretty_assertions::assert_eq!(buffer[..], oracle[..])
