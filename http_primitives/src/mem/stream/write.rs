@@ -98,7 +98,7 @@ mod contracts {
     /// Contract validation tests MUST be run with `kani`.
     ///
     /// ```bash
-    /// cargo bolero test -p http_primitives mem::stream::contracts::check_contract_write --engine kani
+    /// cargo bolero test -p http_primitives mem::stream::write::contracts::check_contract_write --engine kani
     /// ```
     #[rstest::rstest]
     #[kani::proof_for_contract(ByteStream::write_impl)]

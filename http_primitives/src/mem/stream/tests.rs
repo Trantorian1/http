@@ -192,28 +192,26 @@ mod validate {
     /// ## Libfuzzer
     ///
     /// ```bash
-    /// cargo bolero test -p http_primitives mem::stream::validate::stream_harness
+    /// cargo bolero test -p http_primitives mem::stream::tests::validate::stream_harness
     /// ```
     ///
     /// ## AFL
     ///
     /// ```bash
-    /// cargo bolero test -p http_primitives mem::stream::validate::stream_harness --engine afl --sanitizer NONE
+    /// cargo bolero test -p http_primitives mem::stream::tests::validate::stream_harness --engine afl --sanitizer NONE
     /// ```
     ///
     /// ## Kani
     ///
     /// ```bash
-    /// cargo bolero test -p http_primitives mem::stream::validate::stream_harness --engine kani
+    /// cargo bolero test -p http_primitives mem::stream::tests::validate::stream_harness --engine kani
     /// ```
-    #[rstest::rstest]
+    #[test]
     #[cfg_attr(kani, kani::proof)]
     #[cfg_attr(kani, kani::unwind(17))]
-    fn stream_harness(
-        generate_stream: impl bolero::generator::ValueGenerator<Output = (usize, usize, usize)>,
-    ) {
+    fn stream_harness() {
         bolero::check!()
-            .with_generator(generate_stream)
+            .with_generator(generate_stream::default())
             .and_then(|(n_read, n_write, capacity)| {
                 (
                     n_read,

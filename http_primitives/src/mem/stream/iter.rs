@@ -45,26 +45,26 @@ mod validate {
     /// ## Libfuzzer
     ///
     /// ```bash
-    /// cargo bolero test -p http_primitives mem::stream::validate::stream_iter
+    /// cargo bolero test -p http_primitives mem::stream::iter::validate::stream_iter
     /// ```
     ///
     /// ## AFL
     ///
     /// ```bash
-    /// cargo bolero test -p http_primitives mem::stream::validate::stream_iter --engine afl --sanitizer NONE
+    /// cargo bolero test -p http_primitives mem::stream::iter::validate::stream_iter --engine afl --sanitizer NONE
     /// ```
     ///
     /// ## Kani
     ///
     /// ```bash
-    /// cargo bolero test -p http_primitives mem::stream::validate::stream_iter --engine kani
+    /// cargo bolero test -p http_primitives mem::stream::iter::validate::stream_iter --engine kani
     /// ```
-    #[rstest::rstest]
+    #[test]
     #[cfg_attr(kani, kani::proof)]
     #[cfg_attr(kani, kani::unwind(17))]
-    fn stream_iter(generate_capacity: impl bolero::generator::ValueGenerator<Output = usize>) {
+    fn stream_iter() {
         bolero::check!()
-            .with_generator(generate_capacity)
+            .with_generator(generate_capacity::default())
             .and_then(|capacity| {
                 (
                     capacity,
