@@ -39,7 +39,7 @@ impl<'data> ByteStream<'data> {
     ///
     /// [function contracts]: https://model-checking.github.io/kani/crates/doc/kani/contracts/index.html
     fn read_impl(&mut self, buf: &mut [u8]) -> usize {
-        assert_leq!(self.start, self.capacity());
+        assert_le!(self.start, self.capacity());
         assert_leq!(self.size, self.capacity());
 
         let start = self.start;

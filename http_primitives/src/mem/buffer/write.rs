@@ -1,5 +1,6 @@
 use crate::prelude::*;
 
+#[derive(Debug)]
 pub struct WriteOut;
 
 /// Misuse-resistant [`Buffer`] mutator. Allows the user to specify which parts of the HTTP message
@@ -145,5 +146,17 @@ mod property_tests {
 
                 assert!(stream.is_empty());
             });
+    }
+}
+
+impl<'buf, 'data, 'writer, W> std::fmt::Debug for BufWriter<'buf, 'data, 'writer, W>
+where
+    'data: 'buf,
+    W: std::io::Write,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufWriter")
+            .field("buffer", &self.buffer)
+            .finish()
     }
 }

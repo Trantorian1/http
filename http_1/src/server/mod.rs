@@ -16,6 +16,7 @@ use http_primitives::prelude::*;
 ///
 /// [`TcpListener`]: std::net::TcpListener
 /// [`process`]: Self::process
+#[derive(Debug)]
 pub struct Server<'data> {
     global_request_buffer: BufferForReading<'data>,
     global_response_buffer: BufferForWriting<'data>,
@@ -83,5 +84,18 @@ where
         if let Err(err) = res {
             tracing::error!("Failed to send data back to TPC stream: {err}");
         }
+    }
+}
+
+impl<'buf, 'data, RW> std::fmt::Debug for RequestHandle<'buf, 'data, RW>
+where
+    'data: 'buf,
+    RW: std::io::Read + std::io::Write,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RequestHandle")
+            .field("global_request_buffer", &self.global_request_buffer)
+            .field("global_response_buffer", &self.global_response_buffer)
+            .finish()
     }
 }

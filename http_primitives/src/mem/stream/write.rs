@@ -43,7 +43,7 @@ impl<'data> ByteStream<'data> {
     ///
     /// [function contracts]: https://model-checking.github.io/kani/crates/doc/kani/contracts/index.html
     fn write_impl(&mut self, buf: &[u8]) -> usize {
-        assert_leq!(self.start, self.capacity());
+        assert_le!(self.start, self.capacity());
         assert_leq!(self.size, self.capacity());
 
         let start = self.start;
@@ -68,11 +68,11 @@ impl<'data> ByteStream<'data> {
             // The data currently in the buffer is NOT contiguous and wraps around. This actually
             // makes our life easier, as we only need a single write to cover the area of memory
             // which we have left.
-            let stop = stop - self.capacity();
-            let space_before_start = (start - stop).min(bytes);
+            let stop_wrapped = stop - self.capacity();
+            let space_before_start = (start - stop_wrapped).min(bytes);
 
             // Write to the middle of the buffer, taking existing data wrap-around into consideration.
-            self.buffer[stop..stop + space_before_start]
+            self.buffer[stop_wrapped..stop_wrapped + space_before_start]
                 .copy_from_slice(&buf[..space_before_start]);
 
             self.size += space_before_start;

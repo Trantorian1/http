@@ -36,9 +36,10 @@ pub mod parsers;
 /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#name-request-line
 /// [Section 11.2]: https://datatracker.ietf.org/doc/html/rfc9112#request.smuggling
 /// [`413`]: Status::ContentTooLarge
-pub struct Request<'buf, 'data, 'reader, R: std::io::Read>
+pub struct Request<'buf, 'data, 'reader, R>
 where
     'data: 'buf,
+    R: std::io::Read,
 {
     buffer: &'buf mut BufferForReading<'data>,
     stream: &'reader mut R,
@@ -77,6 +78,18 @@ where
             method: &self.buffer[method],
             target: &self.buffer[target],
         })
+    }
+}
+
+impl<'buf, 'data, 'reader, R> std::fmt::Debug for Request<'buf, 'data, 'reader, R>
+where
+    'data: 'buf,
+    R: std::io::Read,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Request")
+            .field("buffer", &self.buffer)
+            .finish()
     }
 }
 
