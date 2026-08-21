@@ -228,4 +228,42 @@ mod validate {
                 stream_invariant_problem(n_read, n_write, capacity, start, size);
             })
     }
+
+    /// ## Libfuzzer
+    ///
+    /// ```bash
+    /// cargo bolero test -p http_primitives mem::stream::tests::validate::stream_make_contiguous
+    /// ```
+    ///
+    /// ## AFL
+    ///
+    /// ```bash
+    /// cargo bolero test -p http_primitives mem::stream::tests::validate::stream_make_contiguous --engine afl --sanitizer NONE
+    /// ```
+    ///
+    /// ## Kani
+    ///
+    /// ```bash
+    /// cargo bolero test -p http_primitives mem::stream::tests::validate::stream_make_contiguous --engine kani
+    /// ```
+    #[test]
+    #[cfg_attr(kani, kani::proof)]
+    #[cfg_attr(kani, kani::unwind(17))]
+    fn stream_make_contiguous() {
+        bolero::check!()
+            .with_generator(generate_capacity::default())
+            .and_then(|capacity| {
+                (
+                    capacity,
+                    // Initial stream start index
+                    bolero::produce::<usize>().with().bounds(..capacity),
+                    // Initial stream size
+                    bolero::produce::<usize>().with().bounds(..=capacity),
+                )
+            })
+            .cloned()
+            .for_each(|(capacity, start, size)| {
+                make_contiguous_invariant_problem(capacity, start, size);
+            })
+    }
 }

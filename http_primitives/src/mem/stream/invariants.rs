@@ -26,7 +26,7 @@ impl<'data> ByteStream<'data> {
 /// - Varying stream size.
 /// - Wrapped and contiguous data.
 ///
-pub fn stream_invariant_problem(
+pub(crate) fn stream_invariant_problem(
     n_read: usize,   // number of bytes read
     n_write: usize,  // number of bytes written
     capacity: usize, // stream capacity
@@ -81,5 +81,29 @@ pub fn stream_invariant_problem(
     // they could be read.
     for i in 0..written.min(n_read.saturating_sub(size)) {
         assert_eq!(read_buffer[size + i], bytes_new[i]);
+    }
+}
+
+pub(crate) fn make_contiguous_invariant_problem(capacity: usize, start: usize, size: usize) {
+    let mut backing: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
+    let backing_copy = backing;
+    let oracle = &backing_copy[..capacity];
+
+    let mut stream = ByteStream::any(&mut backing[..capacity], start, size);
+
+    let contiguous = stream.make_contiguous();
+    assert_eq!(contiguous.len(), size);
+
+    if start + size <= capacity {
+        assert_eq!(contiguous[..size], oracle[start..start + size]);
+    } else {
+        let space_after_start = capacity - start;
+        assert_eq!(
+            contiguous[..space_after_start],
+            oracle[start..start + space_after_start]
+        );
+
+        let space_before_stop = start + size - capacity;
+        assert_eq!(contiguous[space_after_start..], oracle[..space_before_stop]);
     }
 }
