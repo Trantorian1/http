@@ -4,6 +4,9 @@
 //!
 //! [`ADDRESS`]
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::print_stdout)]
+
 use std::net::TcpListener;
 
 use http_1::prelude::*;
@@ -33,24 +36,24 @@ fn main() {
     let listener = TcpListener::bind(ADDRESS).unwrap();
     tracing::info!("Listening on {ADDRESS}");
 
-    let mut global_request_buffer = [0; 8 * KB];
-    let mut global_response_buffer = [0; 64 * KB];
+    let mut global_request_buffer = vec![0; 16 * KB].into_boxed_slice();
+    let mut global_response_buffer = vec![0; 64 * KB].into_boxed_slice();
     let mut server = Server::new(&mut global_request_buffer, &mut global_response_buffer);
 
     // == Main TCP data loop =======================================================================
 
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => {
+            Ok(connection) => {
                 server
-                    .process(stream)
+                    .process(connection)
                     .respond(|request, response| match request.target {
                         b"/" => response.with_status_code(Status::Ok).send(),
                         _ => response.with_status_code(Status::NotFound).send(),
                     });
             }
             Err(e) => {
-                println!("error: {}", e);
+                println!("error: {e}");
             }
         }
     }

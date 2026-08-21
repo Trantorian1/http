@@ -19,11 +19,11 @@ mod test {
         assert_eq!(stream.start, 0, "An empty stream must start at index 0");
 
         let mut read_buffer = [0; MAX_SIZE];
-        let bytes = stream
+        let read = stream
             .read(&mut read_buffer)
             .expect("Reading a byte stream must always succeed");
 
-        assert_eq!(bytes, 0, "An empty stream must not contain any data");
+        assert_eq!(read, 0, "An empty stream must not contain any data");
         assert_eq!(
             read_buffer, [0; MAX_SIZE],
             "Reading empty stream has no side effect"
@@ -38,22 +38,22 @@ mod test {
         let message = b"Hello, World";
         assert_leq!(message.len(), MAX_SIZE, "Message must fit in the stream");
 
-        let bytes = stream
+        let written = stream
             .write(message)
             .expect("Writing to a byte stream of sufficient size must succeed");
 
-        assert_eq!(bytes, message.len(), "All message bytes must be written");
+        assert_eq!(written, message.len(), "All message bytes must be written");
         assert_eq!(stream.len(), message.len(), "Stream length must update");
         assert_eq!(stream.start, 0, "The stream's start index must not change");
 
         let mut read_buffer = [0; MAX_SIZE];
-        let bytes = stream
+        let read = stream
             .read(&mut read_buffer)
             .expect("Read on a byte stream should always succeed");
 
-        assert_eq!(bytes, message.len(), "All message bytes must be read");
+        assert_eq!(read, message.len(), "All message bytes must be read");
         assert_eq!(
-            &read_buffer[..bytes],
+            &read_buffer[..read],
             message,
             "Buffer should contain message"
         );
@@ -70,22 +70,22 @@ mod test {
         let message = b"hi";
         assert_leq!(message.len(), 2, "Message must fit in the stream");
 
-        let bytes = stream
+        let written = stream
             .write(message)
             .expect("Writing to a byte stream of sufficient size must succeed");
 
-        assert_eq!(bytes, message.len(), "All message bytes must be written");
+        assert_eq!(written, message.len(), "All message bytes must be written");
         assert_eq!(stream.len(), message.len(), "Stream length must update");
         assert_eq!(stream.start, 1, "The stream's start index must not change");
 
         let mut read_buffer = [0; 2];
-        let bytes = stream
+        let read = stream
             .read(&mut read_buffer)
             .expect("Read on a byte stream should always succeed");
 
-        assert_eq!(bytes, message.len(), "All message bytes must be read");
+        assert_eq!(read, message.len(), "All message bytes must be read");
         assert_eq!(
-            &read_buffer[..bytes],
+            &read_buffer[..read],
             message,
             "Buffer should contain message"
         );
@@ -101,11 +101,11 @@ mod test {
         assert!(stream.is_empty(), "Stream must be empty");
 
         let mut read_buffer = [0; 2];
-        let bytes = stream
+        let read = stream
             .read(&mut read_buffer)
             .expect("Read on byte stream should always succeed");
 
-        assert_eq!(bytes, 0, "No bytes should have been read off empty stream");
+        assert_eq!(read, 0, "No bytes should have been read off empty stream");
         assert!(stream.is_empty(), "Stream should still be emtpy");
         assert_eq!(stream.start, 0, "Reading emtpy stream musn't mutate start");
     }
@@ -118,11 +118,11 @@ mod test {
         assert_eq!(stream.start, 1, "Stream offset must be set");
 
         let mut read_buffer = [0; 2];
-        let bytes = stream
+        let read = stream
             .read(&mut read_buffer)
             .expect("Read on byte stream should always succeed");
 
-        assert_eq!(bytes, 0, "No bytes should have been read off empty stream");
+        assert_eq!(read, 0, "No bytes should have been read off empty stream");
         assert!(stream.is_empty(), "Stream should still be emtpy");
         assert_eq!(stream.start, 1, "Reading emtpy stream musn't mutate start");
     }
@@ -133,11 +133,11 @@ mod test {
         assert_eq!(stream.len(), oracle.len(), "Stream is not empty");
 
         let mut read_buffer = [0; 0];
-        let bytes = stream
+        let read = stream
             .read(&mut read_buffer)
             .expect("Read on byte stream should always succeed");
 
-        assert_eq!(bytes, 0, "No bytes can be read with an empty read buffer");
+        assert_eq!(read, 0, "No bytes can be read with an empty read buffer");
         assert_eq!(stream.len(), oracle.len(), "Stream must not have been read");
         assert_eq!(stream.start, 0, "Empty buffer read musn't mutate start");
     }
@@ -154,19 +154,19 @@ mod test {
             "Message must NOT fit in the stream"
         );
 
-        let bytes = stream
+        let written = stream
             .write(message)
             .expect("Writing to a byte stream of sufficient size must succeed");
 
-        assert_eq!(bytes, MAX_SIZE);
+        assert_eq!(written, MAX_SIZE);
 
         let mut buffer = [0; MAX_SIZE];
 
-        let bytes = stream
+        let read = stream
             .read(&mut buffer)
             .expect("Reading a byte stream must always succeed");
 
-        assert_eq!(bytes, MAX_SIZE, "Byte stream should have been full");
+        assert_eq!(read, MAX_SIZE, "Byte stream should have been full");
 
         assert_eq!(
             buffer,
@@ -181,7 +181,7 @@ mod test {
         #[from(array)] oracle: [u8; MAX_SIZE],
     ) {
         let stream = ByteStream::any(&mut array, 0, MAX_SIZE);
-        assert_eq!(format!("{:?}", stream), format!("{:?}", oracle))
+        assert_eq!(format!("{stream:?}"), format!("{oracle:?}"));
     }
 
     #[rstest::rstest]
@@ -194,11 +194,11 @@ mod test {
         let stream = ByteStream::any(&mut array, 2, MAX_SIZE);
         oracle.rotate_right(MAX_SIZE - 2);
 
-        assert_eq!(format!("{:?}", stream), format!("{:?}", oracle))
+        assert_eq!(format!("{stream:?}"), format!("{oracle:?}"));
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "assertion failed: !backing.is_empty()")]
     fn stream_with_capacity_zero_should_panic() {
         let mut stream_buffer = [0; 0];
         let _stream = ByteStream::new(&mut stream_buffer);
@@ -293,7 +293,7 @@ mod validate {
             .cloned()
             .for_each(|(n_read, n_write, capacity, start, size)| {
                 stream_invariant_problem(n_read, n_write, capacity, start, size);
-            })
+            });
     }
 
     /// ## Libfuzzer
@@ -332,6 +332,6 @@ mod validate {
             .cloned()
             .for_each(|(capacity, start, size)| {
                 make_contiguous_invariant_problem(capacity, start, size);
-            })
+            });
     }
 }

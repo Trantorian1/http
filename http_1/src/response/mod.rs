@@ -54,16 +54,21 @@ where
     }
 
     /// Sets the response status code.
+    #[must_use]
     pub fn with_status_code(mut self, status: Status) -> Self {
         self.status = status;
         self
     }
 
     /// Sends out the response back to the connected HTTP client.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error in case writing the response to the underlying stream fails.
     pub fn send(self) -> std::io::Result<()> {
         if let Status::InternalServerError(err) = &self.status {
             tracing::error!(err);
-        };
+        }
 
         self.buffer.write_out(self.stream, |writer| {
             writer.write(PROTOCOL)?;
@@ -77,7 +82,7 @@ where
     }
 }
 
-impl<'buf, 'data, 'reader, W> std::fmt::Debug for Response<'buf, 'data, 'reader, W>
+impl<'buf, 'data, W> std::fmt::Debug for Response<'buf, 'data, '_, W>
 where
     'data: 'buf,
     W: std::io::Write,

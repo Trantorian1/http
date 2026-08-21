@@ -95,6 +95,7 @@ impl Status {
     /// > code**."_
     ///
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#name-status-line
+    #[must_use]
     pub fn code(&self) -> &'static [u8] {
         match self {
             Self::Ok => b"200 ",
@@ -115,6 +116,7 @@ impl Status {
     /// > textual phrase describing the status code**."_
     ///
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#name-status-line
+    #[must_use]
     pub fn reason(&self) -> &'static [u8] {
         match self {
             Status::Ok => b"OK",

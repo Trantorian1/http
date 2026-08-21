@@ -18,7 +18,7 @@ pub type BufferForWriting<'data> = Buffer<'data, write::WriteOut>;
 
 /// Stack-allocated sliding view buffer which guards against invalid writes and ensures proper flushing.
 pub struct Buffer<'data, Mode> {
-    buffer: &'data mut [u8],
+    backing: &'data mut [u8],
     window: std::ops::Range<usize>,
 
     _phantom: std::marker::PhantomData<Mode>,
@@ -26,6 +26,18 @@ pub struct Buffer<'data, Mode> {
 
 impl<'data, Mode> Buffer<'data, Mode> {
     /// Stack-allocates a new [`Buffer`].
+    ///
+    /// This method should be called from [`BufferForReading`] and [`BufferForWriting`].
+    ///
+    /// [`BufferForReading`] can only be used to read from byte streams, while [`BufferForWriting`]
+    /// can only be used to write back to those streams. This prevents the user from re-using the
+    /// same buffer for reading and writing and potentially jumbling data.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing buffer being provided has length 0.
+    ///
+    /// # Examples
     ///
     /// ```rust
     /// # use http_primitives::prelude::*;
@@ -35,17 +47,13 @@ impl<'data, Mode> Buffer<'data, Mode> {
     /// let mut write_backing = [0; 64 * KB];
     /// let write_buffer = BufferForWriting::pre_populate(&mut write_backing);
     /// ```
-    ///
-    /// [`BufferForReading`] can only be used to read from byte streams, while [`BufferForWriting`]
-    /// can only be used to write back to those streams. This prevents the user from re-using the
-    /// same buffer for reading and writing and potentially jumbling data.
-    pub fn new(buffer: &'data mut [u8]) -> Self {
-        assert!(!buffer.is_empty());
+    pub fn new(backing: &'data mut [u8]) -> Self {
+        assert!(!backing.is_empty());
 
-        buffer.fill(0);
+        backing.fill(0);
 
         Self {
-            buffer,
+            backing,
             window: 0..0,
 
             _phantom: std::marker::PhantomData,
@@ -55,7 +63,9 @@ impl<'data, Mode> Buffer<'data, Mode> {
     /// Stack allocates a new [`Buffer`], using `buffer` as initialized memory. This can be useful
     /// in testing for example.
     ///
-    /// Will panic if `buffer` is empty;
+    /// # Panics
+    ///
+    /// Panics if the backing buffer being provided has length 0.
     ///
     /// ```rust
     /// # use http_primitives::prelude::*;
@@ -64,29 +74,32 @@ impl<'data, Mode> Buffer<'data, Mode> {
     ///
     /// assert_eq!(buffer.as_ref(), &[0, 1, 2, 3, 4, 5, 6, 7]);
     /// ```
-    pub fn pre_populate(buffer: &'data mut [u8]) -> Self {
-        assert!(!buffer.is_empty());
+    pub fn pre_populate(backing: &'data mut [u8]) -> Self {
+        assert!(!backing.is_empty());
 
         Self {
-            window: 0..buffer.len(),
-            buffer,
+            window: 0..backing.len(),
+            backing,
 
             _phantom: std::marker::PhantomData,
         }
     }
 
     /// Total available memory the buffer has access to.
+    #[must_use]
     pub fn capacity(&self) -> usize {
-        self.buffer.len()
+        self.backing.len()
     }
 
     /// Returns the length of the buffer. This is different from a buffer's full size and only
     /// counts data which has already been written to it.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.window.len()
     }
 
     /// Returns true if the buffer contains no elements.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.window.is_empty()
     }
@@ -95,34 +108,35 @@ impl<'data, Mode> Buffer<'data, Mode> {
     /// [`clear`] will reset this.
     ///
     /// [`clear`]: Self::clear
+    #[must_use]
     pub fn is_full(&self) -> bool {
         match self.len().cmp(&self.capacity()) {
             std::cmp::Ordering::Less => false,
             std::cmp::Ordering::Equal => true,
-            std::cmp::Ordering::Greater => panic!("Invariant violated: invalid length"),
+            std::cmp::Ordering::Greater => unreachable!("Invariant violated: invalid length"),
         }
     }
 
     /// Zeros-out the contents of a buffer.
     pub fn clear(&mut self) {
-        self.buffer.fill(0);
+        self.backing.fill(0);
         self.window = 0..0;
     }
 }
 
-impl<'data, Mode> AsRef<[u8]> for Buffer<'data, Mode> {
+impl<Mode> AsRef<[u8]> for Buffer<'_, Mode> {
     fn as_ref(&self) -> &[u8] {
-        &self.buffer[self.window.clone()]
+        &self.backing[self.window.clone()]
     }
 }
 
-impl<'data, Mode> std::fmt::Debug for Buffer<'data, Mode> {
+impl<Mode> std::fmt::Debug for Buffer<'_, Mode> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.as_ref())
     }
 }
 
-impl<'data, Mode> std::ops::Index<std::ops::Range<usize>> for Buffer<'data, Mode> {
+impl<Mode> std::ops::Index<std::ops::Range<usize>> for Buffer<'_, Mode> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::Range<usize>) -> &Self::Output {
@@ -130,7 +144,7 @@ impl<'data, Mode> std::ops::Index<std::ops::Range<usize>> for Buffer<'data, Mode
     }
 }
 
-impl<'data, Mode> std::ops::Index<std::ops::RangeInclusive<usize>> for Buffer<'data, Mode> {
+impl<Mode> std::ops::Index<std::ops::RangeInclusive<usize>> for Buffer<'_, Mode> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::RangeInclusive<usize>) -> &Self::Output {
@@ -138,7 +152,7 @@ impl<'data, Mode> std::ops::Index<std::ops::RangeInclusive<usize>> for Buffer<'d
     }
 }
 
-impl<'data, Mode> std::ops::Index<std::ops::RangeFrom<usize>> for Buffer<'data, Mode> {
+impl<Mode> std::ops::Index<std::ops::RangeFrom<usize>> for Buffer<'_, Mode> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::RangeFrom<usize>) -> &Self::Output {
@@ -146,7 +160,7 @@ impl<'data, Mode> std::ops::Index<std::ops::RangeFrom<usize>> for Buffer<'data, 
     }
 }
 
-impl<'data, Mode> std::ops::Index<std::ops::RangeTo<usize>> for Buffer<'data, Mode> {
+impl<Mode> std::ops::Index<std::ops::RangeTo<usize>> for Buffer<'_, Mode> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::RangeTo<usize>) -> &Self::Output {
@@ -154,7 +168,7 @@ impl<'data, Mode> std::ops::Index<std::ops::RangeTo<usize>> for Buffer<'data, Mo
     }
 }
 
-impl<'data, Mode> std::ops::Index<std::ops::RangeFull> for Buffer<'data, Mode> {
+impl<Mode> std::ops::Index<std::ops::RangeFull> for Buffer<'_, Mode> {
     type Output = [u8];
 
     fn index(&self, _range: std::ops::RangeFull) -> &Self::Output {
@@ -206,6 +220,6 @@ mod test {
     fn index_range_full(mut array: [u8; SIZE], #[from(array)] oracle: [u8; SIZE]) {
         let buffer = BufferForReading::pre_populate(&mut array);
 
-        pretty_assertions::assert_eq!(buffer[..], oracle[..])
+        pretty_assertions::assert_eq!(buffer[..], oracle[..]);
     }
 }

@@ -21,6 +21,12 @@ where
 impl<'data> Buffer<'data, ReadIn> {
     /// Parse in a byte stream. See [`BufReader`] for a list of available methods.
     ///
+    /// # Errors
+    ///
+    /// This method only fails if the underlying reader returns an [`io::Error`] while reading.
+    ///
+    /// # Examples
+    ///
     /// ```rust
     /// # use http_primitives::prelude::*;
     /// # let mut backing = [0; 8 * KB];
@@ -46,6 +52,7 @@ impl<'data> Buffer<'data, ReadIn> {
     /// ```
     ///
     /// [`Reader`]: std::io::Read
+    /// [`io::Error`]: std::io::Error
     pub fn read_in<'buf, 'reader, R: std::io::Read, T>(
         &'buf mut self,
         reader: &'reader mut R,
@@ -80,7 +87,7 @@ impl<'data> Buffer<'data, ReadIn> {
     /// Returns the number of bytes which have been read. A return value of 0 indicates either that
     /// the byte stream is empty or that the buffer is full.
     fn append_from<R: std::io::Read>(&mut self, stream: &mut R) -> std::io::Result<usize> {
-        let bytes_read = stream.read(&mut self.buffer[self.window.end..])?;
+        let bytes_read = stream.read(&mut self.backing[self.window.end..])?;
         self.window.end += bytes_read;
 
         Ok(bytes_read)
@@ -94,7 +101,12 @@ impl<'buf, 'data, 'reader, R: std::io::Read> BufReader<'buf, 'data, 'reader, R> 
 
     /// Keeps trying to parse a byte stream with the provided parser.
     ///
-    /// Will return [`ContentTooLarge`] if there is not enough space left in the buffer.
+    /// # Errors
+    ///
+    /// Returns [`ContentTooLarge`] if there is not enough space left in the buffer to write all
+    /// parsed bytes.
+    ///
+    /// # Examples
     ///
     /// ```rust
     /// # use http_primitives::prelude::*;
@@ -149,7 +161,7 @@ impl<'buf, 'data, 'reader, R: std::io::Read> BufReader<'buf, 'data, 'reader, R> 
     }
 }
 
-impl<'buf, 'data, 'reader, R> std::fmt::Debug for BufReader<'buf, 'data, 'reader, R>
+impl<'buf, 'data, R> std::fmt::Debug for BufReader<'buf, 'data, '_, R>
 where
     'data: 'buf,
     R: std::io::Read,
