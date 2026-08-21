@@ -28,9 +28,13 @@ impl<'data> Buffer<'data, WriteOut> {
     ///
     /// ```rust
     /// # use http_primitives::prelude::*;
-    /// # let mut backing = [0; 64 * KB];
-    /// # let mut buffer = BufferForWriting::new(&mut backing);
-    /// # let mut stream = Vec::<u8>::new();
+    /// #
+    /// # let mut backing_buffer = [0; 8 * KB];
+    /// # let mut buffer = BufferForWriting::new(&mut backing_buffer);
+    /// #
+    /// # let mut backing_stream = [0; 8 * KB];
+    /// # let mut stream = ByteStream::new(&mut backing_stream);
+    /// #
     /// buffer.write_out(&mut stream, |writer| {
     ///     writer.write(b"HTTP/1.1 200 OK\r\n")
     /// });
@@ -96,6 +100,24 @@ where
     /// # Errors
     ///
     /// Errors if the underlying writer returns an [`io::Error`] during flushing.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use http_primitives::prelude::*;
+    /// #
+    /// # let mut backing_buffer = [0; 8 * KB];
+    /// # let mut buffer = BufferForWriting::new(&mut backing_buffer);
+    /// #
+    /// # let mut backing_stream = [0; 8 * KB];
+    /// # let mut stream = ByteStream::new(&mut backing_stream);
+    /// #
+    /// # let _ = buffer.write_out(&mut stream, |writer| {
+    /// #
+    /// writer.write(b"HTTP/1.1 200 OK\r\n\r\n")?;
+    /// #   Ok(())
+    /// # });
+    /// ```
     ///
     /// [`io::Error`]: std::io::Error
     pub fn write(&mut self, mut data: &[u8]) -> std::io::Result<()> {
