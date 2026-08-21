@@ -44,7 +44,7 @@ impl<'data, Mode> Buffer<'data, Mode> {
     /// let mut read_backing = [0; 8 * KB];
     /// let read_buffer = BufferForReading::pre_populate(&mut read_backing);
     ///
-    /// let mut write_backing = [0; 64 * KB];
+    /// let mut write_backing = [0; 8 * KB];
     /// let write_buffer = BufferForWriting::pre_populate(&mut write_backing);
     /// ```
     pub fn new(backing: &'data mut [u8]) -> Self {
