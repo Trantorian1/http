@@ -2,16 +2,41 @@ use crate::prelude::*;
 
 use super::ByteStream;
 
+impl<'data> ByteStream<'data> {
+    /// Returns an iterator over the stream.
+    pub fn iter(&self) -> Iter<'_, 'data> {
+        Iter::new(self)
+    }
+}
+
+/// An iterator over the elements of a `ByteStream`.
+///
+/// This `struct` is created by the [`iter`] method on a [`ByteStream`]. See its documentation for more.
+///
+/// [`iter`]: ByteStream::iter
 pub struct Iter<'stream, 'data>
 where
     'data: 'stream,
 {
-    stream: &'stream mut ByteStream<'data>,
+    stream: &'stream ByteStream<'data>,
+    start: usize,
+    index: usize,
 }
 
 impl<'stream, 'data> Iter<'stream, 'data> {
-    pub fn new(stream: &'stream mut ByteStream<'data>) -> Self {
-        Self { stream }
+    fn new(stream: &'stream ByteStream<'data>) -> Self {
+        Self {
+            start: stream.start,
+            index: 0,
+
+            stream,
+        }
+    }
+}
+
+impl<'stream, 'data> std::fmt::Debug for Iter<'stream, 'data> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Iter").field(self.stream).finish()
     }
 }
 
@@ -22,11 +47,16 @@ impl<'stream, 'data> Iterator for Iter<'stream, 'data> {
         assert_leq!(self.stream.start, self.stream.capacity());
         assert_leq!(self.stream.size, self.stream.capacity());
 
-        if self.stream.size > 0 {
-            let item = self.stream.buffer[self.stream.start];
+        if self.index < self.stream.size {
+            let stop = self.start + self.index;
+            let index = if stop >= self.stream.capacity() {
+                stop - self.stream.capacity()
+            } else {
+                stop
+            };
 
-            self.stream.start = (self.stream.start + 1) % self.stream.capacity();
-            self.stream.size -= 1;
+            let item = self.stream.buffer[index];
+            self.index += 1;
 
             Some(item)
         } else {
@@ -37,6 +67,9 @@ impl<'stream, 'data> Iterator for Iter<'stream, 'data> {
 
 #[cfg(test)]
 use super::fixtures::*;
+
+#[cfg(test)]
+use super::invariants::*;
 
 #[cfg(test)]
 mod validate {
@@ -76,17 +109,7 @@ mod validate {
             })
             .cloned()
             .for_each(|(capacity, start, size)| {
-                let mut backing: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
-                let bytes_prev = backing;
-
-                let mut stream = ByteStream::any(&mut backing[..capacity], start, size);
-                let mut iter = stream.iter();
-
-                for i in 0..size {
-                    assert_eq!(iter.next(), Some(bytes_prev[(i + start) % capacity]));
-                }
-
-                assert!(stream.is_empty());
+                stream_iter_invariant_problems(capacity, start, size);
             });
     }
 }

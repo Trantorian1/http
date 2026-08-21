@@ -158,11 +158,10 @@ impl<'data> ByteStream<'data> {
     pub fn space_left(&self) -> usize {
         self.capacity() - self.size
     }
+}
 
-    /// Returns an iterator over the stream.
-    ///
-    /// The iterator yields all items from start to end, consuming them as it goes.
-    pub fn iter(&mut self) -> Iter<'_, 'data> {
-        Iter::new(self)
+impl<'data> std::fmt::Debug for ByteStream<'data> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
     }
 }

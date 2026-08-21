@@ -1,7 +1,7 @@
 // It probably doesn't make sense to increase this too much as then we would just be polluting
 // the problem space with garbage data which likely does not contain any new edge cases. The
 // most interesting targets probably lie around small array sizes anyway.
-pub const MAX_SIZE: usize = 16;
+pub(crate) const MAX_SIZE: usize = 16;
 const _: () = assert!(MAX_SIZE > 0);
 
 #[rstest::fixture]

@@ -76,3 +76,16 @@ where
         })
     }
 }
+
+impl<'buf, 'data, 'reader, W> std::fmt::Debug for Response<'buf, 'data, 'reader, W>
+where
+    'data: 'buf,
+    W: std::io::Write,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Response")
+            .field("buffer", &self.buffer)
+            .field("status", &self.status)
+            .finish()
+    }
+}

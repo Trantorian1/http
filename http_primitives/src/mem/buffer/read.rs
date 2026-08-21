@@ -1,5 +1,6 @@
 use crate::prelude::*;
 
+#[derive(Debug)]
 pub struct ReadIn;
 
 /// Misuse-resistant byte stream parser, allowing for zero-copy parsing of incoming data streams.
@@ -8,7 +9,11 @@ pub struct ReadIn;
 /// small will result in a [`ContentTooLarge`] error.
 ///
 /// [`ContentTooLarge`]: Status::ContentTooLarge
-pub struct BufReader<'buf, 'data, 'reader, R: std::io::Read> {
+pub struct BufReader<'buf, 'data, 'reader, R>
+where
+    'data: 'buf,
+    R: std::io::Read,
+{
     buffer: &'buf mut BufferForReading<'data>,
     reader: &'reader mut R,
 }
@@ -141,5 +146,17 @@ impl<'buf, 'data, 'reader, R: std::io::Read> BufReader<'buf, 'data, 'reader, R> 
 
     fn flush(&mut self) {
         self.buffer.window.start = 0;
+    }
+}
+
+impl<'buf, 'data, 'reader, R> std::fmt::Debug for BufReader<'buf, 'data, 'reader, R>
+where
+    'data: 'buf,
+    R: std::io::Read,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufReader")
+            .field("buffer", &self.buffer)
+            .finish()
     }
 }
