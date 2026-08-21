@@ -114,7 +114,7 @@ impl<'data> ByteStream<'data> {
             // [ 0, 1, 2, 3, _ ]
             //            ▲
             //       stop─┘
-            self.buffer.rotate_left(self.start)
+            self.buffer.copy_within(start.., 0);
         } else {
             // Buffer wrap-around.
             //
@@ -132,7 +132,7 @@ impl<'data> ByteStream<'data> {
             // [ 0, 1, 2, 3, 4 ]
             //               ▲
             //          stop─┘
-            self.buffer.rotate_right(self.capacity() - start)
+            self.buffer.rotate_left(start);
         }
 
         self.start = 0;
