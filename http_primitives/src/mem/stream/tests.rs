@@ -175,6 +175,28 @@ mod test {
         );
     }
 
+    #[rstest::rstest]
+    fn stream_debug_no_wrap_around(
+        mut array: [u8; MAX_SIZE],
+        #[from(array)] oracle: [u8; MAX_SIZE],
+    ) {
+        let stream = ByteStream::any(&mut array, 0, MAX_SIZE);
+        assert_eq!(format!("{:?}", stream), format!("{:?}", oracle))
+    }
+
+    #[rstest::rstest]
+    fn stream_debug_with_wrap_around(
+        mut array: [u8; MAX_SIZE],
+        #[from(array)] mut oracle: [u8; MAX_SIZE],
+    ) {
+        assert_gr!(MAX_SIZE, 2);
+
+        let stream = ByteStream::any(&mut array, 2, MAX_SIZE);
+        oracle.rotate_right(MAX_SIZE - 2);
+
+        assert_eq!(format!("{:?}", stream), format!("{:?}", oracle))
+    }
+
     #[test]
     #[should_panic]
     fn stream_with_capacity_zero_should_panic() {

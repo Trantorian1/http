@@ -84,6 +84,21 @@ pub(crate) fn stream_invariant_problem(
     }
 }
 
+pub(crate) fn stream_iter_invariant_problems(capacity: usize, start: usize, size: usize) {
+    let mut backing: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
+    let bytes_prev = backing;
+
+    let stream = ByteStream::any(&mut backing[..capacity], start, size);
+    let mut iter = stream.iter();
+
+    for i in 0..size {
+        assert_eq!(iter.next(), Some(bytes_prev[(i + start) % capacity]));
+    }
+
+    assert_eq!(stream.len(), size);
+    assert_eq!(stream.start, start);
+}
+
 pub(crate) fn make_contiguous_invariant_problem(capacity: usize, start: usize, size: usize) {
     let mut backing: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
     let backing_copy = backing;

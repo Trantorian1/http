@@ -86,6 +86,11 @@ impl<'data, Mode> Buffer<'data, Mode> {
         self.window.len()
     }
 
+    /// Returns true if the buffer contains no elements.
+    pub fn is_empty(&self) -> bool {
+        self.window.is_empty()
+    }
+
     /// Returns true if the buffer has reached capacity an can no longer be written to. Calling
     /// [`clear`] will reset this.
     ///
@@ -108,6 +113,12 @@ impl<'data, Mode> Buffer<'data, Mode> {
 impl<'data, Mode> AsRef<[u8]> for Buffer<'data, Mode> {
     fn as_ref(&self) -> &[u8] {
         &self.buffer[self.window.clone()]
+    }
+}
+
+impl<'data, Mode> std::fmt::Debug for Buffer<'data, Mode> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.as_ref())
     }
 }
 

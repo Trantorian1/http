@@ -1,10 +1,17 @@
+//! A simple HTTP/1.1 server example.
+//!
+//! Only accepts requests to [`ADDRESS`] on the default route.
+//!
+//! [`ADDRESS`]
+
 use std::net::TcpListener;
 
 use http_1::prelude::*;
 use http_primitives::prelude::*;
 use tracing_subscriber::prelude::*;
 
-const ADDRESS: &str = "127.0.0.1:4221";
+/// Default listening address.
+pub const ADDRESS: &str = "127.0.0.1:4221";
 
 fn main() {
     // == Logging ==================================================================================
