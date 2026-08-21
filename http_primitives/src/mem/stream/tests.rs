@@ -1,11 +1,9 @@
-use crate::prelude::*;
-
-use super::ByteStream;
-
 use std::io::Read as _;
 use std::io::Write as _;
 
+use super::ByteStream;
 use super::fixtures::*;
+use crate::prelude::*;
 
 mod test {
     use super::*;
@@ -251,10 +249,10 @@ use super::invariants::*;
 
 #[cfg(test)]
 mod validate {
-    use super::*;
-
     #[cfg(all(test, kani))]
     use stubs::*;
+
+    use super::*;
 
     /// ## Libfuzzer
     ///

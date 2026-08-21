@@ -35,9 +35,7 @@ impl<'data> Buffer<'data, WriteOut> {
     /// # let mut backing_stream = [0; 8 * KB];
     /// # let mut stream = ByteStream::new(&mut backing_stream);
     /// #
-    /// buffer.write_out(&mut stream, |writer| {
-    ///     writer.write(b"HTTP/1.1 200 OK\r\n")
-    /// });
+    /// buffer.write_out(&mut stream, |writer| writer.write(b"HTTP/1.1 200 OK\r\n"));
     /// ```
     ///
     /// [`Writer`]: std::io::Write

@@ -1,0 +1,33 @@
+# -- STABLE
+
+# https://rust-lang.github.io/rustfmt/?version=v1.10.0&search=edition#edition
+edition = "2024"
+
+# https://rust-lang.github.io/rustfmt/?version=v1.10.0&search=style_edition#style_edition
+style_edition = "2024"
+
+# https://rust-lang.github.io/rustfmt/?version=v1.10.0&search=max_width#max_width
+max_width = 100
+
+# https://rust-lang.github.io/rustfmt/?version=v1.10.0&search=comment_width#comment_width
+comment_width = 100
+
+# https://rust-lang.github.io/rustfmt/?version=v1.10.0&search=use_field_init_shorthand#use_field_init_shorthand
+use_field_init_shorthand = true
+
+# https://rust-lang.github.io/rustfmt/?version=v1.10.0&search=match_block_trailing_comma#match_block_trailing_comma
+match_block_trailing_comma = true
+
+# -- UNSTABLE
+
+# https://rust-lang.github.io/rustfmt/?version=v1.10.0&search=imports_granularity#imports_granularity
+imports_granularity = "Item"
+
+# https://rust-lang.github.io/rustfmt/?version=v1.10.0&search=group_imports#group_imports
+group_imports = "StdExternalCrate"
+
+# https://rust-lang.github.io/rustfmt/?version=v1.10.0&search=format_code_in_doc_comments#format_code_in_doc_comments
+format_code_in_doc_comments = true
+
+# https://rust-lang.github.io/rustfmt/?version=v1.10.0&search=condense_wildcard_suffixes#condense_wildcard_suffixes
+condense_wildcard_suffixes = true

@@ -1,6 +1,5 @@
-use crate::prelude::*;
-
 use super::ByteStream;
+use crate::prelude::*;
 
 impl<'data> ByteStream<'data> {
     /// Returns an iterator over the stream.
@@ -78,7 +77,6 @@ impl Iterator for Iter<'_, '_> {
 
 #[cfg(test)]
 use super::fixtures::*;
-
 #[cfg(test)]
 use super::invariants::*;
 

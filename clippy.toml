@@ -1,2 +1,5 @@
+# https://rust-lang.github.io/rust-clippy/master/index.html?search=unwrap_used#unwrap_used
 allow-unwrap-in-tests = true
+
+# https://rust-lang.github.io/rust-clippy/master/index.html?search=expect_used#expect_used
 allow-expect-in-tests = true
