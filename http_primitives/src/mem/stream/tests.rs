@@ -205,11 +205,56 @@ mod test {
     }
 }
 
+#[cfg(all(test, kani))]
+mod stubs {
+    /// Rotates `buffer` to the left by `mid` elements, so that the element at index `mid` becomes the
+    /// first element. Equivalent to [`<[u8]>::rotate_left`], using the three-reversal algorithm.
+    ///
+    /// ## Why not [`<[u8]>::rotate_left`]?
+    ///
+    /// `core` picks between three rotation algorithms at runtime, based on `min(mid, len - mid)`. For
+    /// concrete, small byte slices it always lands on the branch which copies through a stack buffer
+    /// and is loop-free.
+    ///
+    /// Under `kani` however, the slice length is symbolic, so that dispatch cannot be resolved and
+    /// CBMC has to explore the cyclic-permutation branch as well (`core::slice::rotate::ptr_rotate_gcd`).
+    /// That branch is a doubly-nested loop over raw pointers whose trip counts are a function of
+    /// `gcd(len, len - mid)`; every unwinding re-enters the loop on a fresh path, and the resulting
+    /// path explosion never terminates in practice.
+    ///
+    /// The three-reversal algorithm has the same semantics but a flat loop shape which `kani`
+    /// unwinds in `len / 2` iterations.
+    pub fn rotate_left<T>(buffer: &mut [T], mid: usize) {
+        reverse(&mut buffer[..mid]);
+        reverse(&mut buffer[mid..]);
+        reverse(buffer);
+    }
+
+    /// Reverses `buffer` in place.
+    ///
+    /// Deliberately written as a flat, index-based loop: this makes it feasible for `kani` to
+    /// validate the use of this method without causing a path explosion.
+    pub fn reverse<T>(buffer: &mut [T]) {
+        let mut i = 0;
+        let mut j = buffer.len();
+
+        while i + 1 < j {
+            j -= 1;
+            buffer.swap(i, j);
+            i += 1;
+        }
+    }
+}
+
+#[cfg(test)]
 use super::invariants::*;
 
 #[cfg(test)]
 mod validate {
     use super::*;
+
+    #[cfg(all(test, kani))]
+    use stubs::*;
 
     /// ## Libfuzzer
     ///
@@ -271,6 +316,7 @@ mod validate {
     #[test]
     #[cfg_attr(kani, kani::proof)]
     #[cfg_attr(kani, kani::unwind(17))]
+    #[cfg_attr(kani, kani::stub(<[u8]>::rotate_left, stubs::rotate_left))]
     fn stream_make_contiguous() {
         bolero::check!()
             .with_generator(generate_capacity::default())
