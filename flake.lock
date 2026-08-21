@@ -1,0 +1,91 @@
+{
+  "nodes": {
+    "kani-flake": {
+      "inputs": {
+        "kani-src": "kani-src",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-overlay": "rust-overlay"
+      },
+      "locked": {
+        "lastModified": 1787335259,
+        "narHash": "sha256-FrbREUoqHC8OM3HKRGDkPBoVJRDZbgJDX8kFW8aTYn0=",
+        "owner": "trantorian1",
+        "repo": "kani-flake",
+        "rev": "bf82d47f006269ed85579eade27a512e874592de",
+        "type": "github"
+      },
+      "original": {
+        "owner": "trantorian1",
+        "repo": "kani-flake",
+        "type": "github"
+      }
+    },
+    "kani-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787268572,
+        "narHash": "sha256-xSxO0QCSll86fODYPrDyukevLpYeGT7JDQnQG78LK2I=",
+        "ref": "main",
+        "rev": "e790e830dd9e4ba55a17ce72fd4cea7e4d142e3c",
+        "revCount": 2524,
+        "submodules": true,
+        "type": "git",
+        "url": "https://github.com/model-checking/kani"
+      },
+      "original": {
+        "ref": "main",
+        "rev": "e790e830dd9e4ba55a17ce72fd4cea7e4d142e3c",
+        "submodules": true,
+        "type": "git",
+        "url": "https://github.com/model-checking/kani"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1787135253,
+        "narHash": "sha256-RD2kNWCG+Bjo6h+JVjWVNntZs2GtRoeY2xHjts/FNkA=",
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "rev": "ffb3c9b700e759be2ef13237c9d8f953b32a1e46",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nixos",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "kani-flake": "kani-flake",
+        "nixpkgs": "nixpkgs"
+      }
+    },
+    "rust-overlay": {
+      "inputs": {
+        "nixpkgs": [
+          "kani-flake",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1787281715,
+        "narHash": "sha256-5yIL5XL31hCZBPWDdUOvUy4cYAl27XZrke7JELhHlnI=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "89abdfd661ea493cde2f73d7b1332cb34150aa43",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
