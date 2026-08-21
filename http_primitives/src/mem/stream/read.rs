@@ -2,13 +2,13 @@ use crate::prelude::*;
 
 use super::ByteStream;
 
-impl<'data> std::io::Read for ByteStream<'data> {
+impl std::io::Read for ByteStream<'_> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         Ok(self.read_impl(buf))
     }
 }
 
-impl<'data> ByteStream<'data> {
+impl ByteStream<'_> {
     //
     // -- Mutations
     //
@@ -52,7 +52,7 @@ impl<'data> ByteStream<'data> {
 
             // Single-copy, retrieve all data before the end of the buffer.
             buf[..space_after_start]
-                .copy_from_slice(&self.buffer[start..start + space_after_start]);
+                .copy_from_slice(&self.backing[start..start + space_after_start]);
 
             self.start = (self.start + space_after_start) % self.capacity();
             self.size -= space_after_start;
@@ -65,13 +65,13 @@ impl<'data> ByteStream<'data> {
 
             // First copy, retrieve all data before the end of the buffer.
             buf[..space_after_start]
-                .copy_from_slice(&self.buffer[start..start + space_after_start]);
+                .copy_from_slice(&self.backing[start..start + space_after_start]);
 
             let space_before_stop = (stop - self.capacity()).min(bytes - space_after_start);
 
             // Second copy, wrap around to the start of the buffer and copy data from there.
             buf[space_after_start..space_after_start + space_before_stop]
-                .copy_from_slice(&self.buffer[..space_before_stop]);
+                .copy_from_slice(&self.backing[..space_before_stop]);
 
             self.start = (self.start + space_after_start + space_before_stop) % self.capacity();
             self.size -= space_after_start + space_before_stop;

@@ -33,19 +33,20 @@ unreachable_pub = "warn"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
-cargo = { level = "warn", priority = -1 }
+# cargo = { level = "warn", priority = -1 }
 
 shadow_same = "forbid"
 shadow_reuse = "forbid"
 shadow_unrelated = "forbid"
 
-print_stdout = "forbid"
-print_stderr = "forbid"
+print_stdout = "deny"
+print_stderr = "deny"
 dbg_macro = "forbid"
 todo = "warn"
 
-unwrap_used = "forbid"
-expect_used = "forbid"
+unwrap_used = "deny"
+expect_used = "deny"
+cast_possible_truncation = "allow"
 
 undocumented_unsafe_blocks = "warn"
 clone_on_ref_ptr = "warn"

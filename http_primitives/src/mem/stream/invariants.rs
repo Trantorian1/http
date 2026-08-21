@@ -4,15 +4,16 @@ use super::fixtures::*;
 use std::io::Read as _;
 use std::io::Write as _;
 
-impl<'data> ByteStream<'data> {
+impl ByteStream<'_> {
     /// General [`ByteStream`] pre-conditions, shared between [`Read`] and [`Write`] function
     /// contracts.
     ///
     /// [`ByteStream`]: ByteStream
     /// [`Read`]: std::io::Read
     /// [`Write`]: std::io::Write
+    #[must_use]
     pub fn invariants(&self) -> bool {
-        !self.buffer.is_empty()  // Stream buffer cannot have size 0
+        !self.backing.is_empty()  // Stream buffer cannot have size 0
             && self.start < self.capacity() // Start index must be less than stream capacity
             && self.size <= self.capacity() // Stream size cannot exceed stream capacity
     }

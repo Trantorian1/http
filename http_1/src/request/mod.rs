@@ -45,16 +45,21 @@ where
     stream: &'reader mut R,
 }
 
-impl<'buf, 'data, 'reader, R: std::io::Read> Request<'buf, 'data, 'reader, R>
+impl<'buf, 'data, 'reader, R> Request<'buf, 'data, 'reader, R>
 where
     'data: 'buf,
+    R: std::io::Read,
 {
     /// Initializes a new [`Request`].
     pub fn new(buffer: &'buf mut BufferForReading<'data>, stream: &'reader mut R) -> Self {
-        Self { stream, buffer }
+        Self { buffer, stream }
     }
 
     /// Parses a byte stream into an HTTP/1.1 request, validating format along the way.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error [`Status`] code if request parsing fails.
     pub fn process(self) -> Result<RequestInfo<'buf>, Status> {
         let (method, target) = self.buffer.read_in(self.stream, |reader| {
             let method = reader.read(parsers::method)?;
@@ -81,7 +86,7 @@ where
     }
 }
 
-impl<'buf, 'data, 'reader, R> std::fmt::Debug for Request<'buf, 'data, 'reader, R>
+impl<'buf, 'data, R> std::fmt::Debug for Request<'buf, 'data, '_, R>
 where
     'data: 'buf,
     R: std::io::Read,
@@ -147,11 +152,17 @@ pub struct RequestInfo<'buf> {
     pub target: &'buf [u8],
 }
 
-impl<'data> std::fmt::Debug for RequestInfo<'data> {
+impl std::fmt::Debug for RequestInfo<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RequestInfo")
-            .field("method", &std::str::from_utf8(self.method).unwrap())
-            .field("target", &std::str::from_utf8(self.target).unwrap())
+            .field(
+                "method",
+                &std::str::from_utf8(self.method).unwrap_or("non-utf8 method"),
+            )
+            .field(
+                "target",
+                &std::str::from_utf8(self.target).unwrap_or("non-utf8 target"),
+            )
             .finish()
     }
 }

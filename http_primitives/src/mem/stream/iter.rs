@@ -4,8 +4,19 @@ use super::ByteStream;
 
 impl<'data> ByteStream<'data> {
     /// Returns an iterator over the stream.
+    #[must_use]
     pub fn iter(&self) -> Iter<'_, 'data> {
         Iter::new(self)
+    }
+}
+
+impl<'stream, 'data> IntoIterator for &'stream ByteStream<'data> {
+    type Item = u8;
+
+    type IntoIter = Iter<'stream, 'data>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
@@ -34,13 +45,13 @@ impl<'stream, 'data> Iter<'stream, 'data> {
     }
 }
 
-impl<'stream, 'data> std::fmt::Debug for Iter<'stream, 'data> {
+impl std::fmt::Debug for Iter<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Iter").field(self.stream).finish()
     }
 }
 
-impl<'stream, 'data> Iterator for Iter<'stream, 'data> {
+impl Iterator for Iter<'_, '_> {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -55,7 +66,7 @@ impl<'stream, 'data> Iterator for Iter<'stream, 'data> {
                 stop
             };
 
-            let item = self.stream.buffer[index];
+            let item = self.stream.backing[index];
             self.index += 1;
 
             Some(item)
