@@ -87,6 +87,58 @@ impl<'data> ByteStream<'data> {
         }
     }
 
+    /// Re-arrange the internal storage of this stream so that it is one contiguous slice, which is
+    /// then returned.
+    ///
+    /// This method does not allocate and does not change the order of the inserted elements.
+    pub fn make_contiguous(&mut self) -> &[u8] {
+        assert_le!(self.start, self.capacity());
+        assert_leq!(self.size, self.capacity());
+
+        let start = self.start;
+        let stop = self.start + self.size;
+
+        if stop <= self.capacity() {
+            // No buffer wrap-around.
+            //
+            //      ┌─start
+            //      ▼
+            // [ _, 0, 1, 2, 3 ]
+            //               ▲
+            //           stop┘
+            //
+            // We just need to move array elements to the start of the buffer.
+            //
+            //   ┌─start
+            //   ▼
+            // [ 0, 1, 2, 3, _ ]
+            //            ▲
+            //       stop─┘
+            self.buffer.rotate_left(self.start)
+        } else {
+            // Buffer wrap-around.
+            //
+            //      start─┐
+            //            ▼
+            // [ 2, 3, 4, 0, 1 ]
+            //         ▲
+            //         └─stop
+            //
+            // We need to re-order each section of the buffer. This can be achieved easily with the
+            // use of `slice.rotate_right`.
+            //
+            //   ┌─start
+            //   ▼
+            // [ 0, 1, 2, 3, 4 ]
+            //               ▲
+            //          stop─┘
+            self.buffer.rotate_right(self.capacity() - start)
+        }
+
+        self.start = 0;
+        &self.buffer[..self.size]
+    }
+
     /// Total available memory the stream has access to.
     pub fn capacity(&self) -> usize {
         self.buffer.len()
