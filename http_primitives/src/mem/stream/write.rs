@@ -1,6 +1,5 @@
-use crate::prelude::*;
-
 use super::ByteStream;
+use crate::prelude::*;
 
 impl std::io::Write for ByteStream<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -84,7 +83,6 @@ impl ByteStream<'_> {
 
 #[cfg(all(test, kani))]
 use super::fixtures::*;
-
 #[cfg(all(test, kani))]
 use super::invariants::*;
 
