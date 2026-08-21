@@ -1,7 +1,8 @@
 //! Zero-copy HTTP/1.1 request parsers.
 
-use crate::prelude::*;
 use http_primitives::prelude::*;
+
+use crate::prelude::*;
 
 const GET: &[u8] = b"GET";
 

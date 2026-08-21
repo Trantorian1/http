@@ -5,8 +5,9 @@
 //! multiple threads in order to support concurrent request handling without any form of locking or
 //! memory contention.
 
-use crate::prelude::*;
 use http_primitives::prelude::*;
+
+use crate::prelude::*;
 
 /// HTTP/1.1 server instance, handles connection responses and ensures proper flushing between
 /// requests.
@@ -78,7 +79,7 @@ where
             Ok(request) => {
                 let response = Response::new(self.global_response_buffer, &mut self.stream);
                 f(request, response)
-            }
+            },
         };
 
         if let Err(err) = res {

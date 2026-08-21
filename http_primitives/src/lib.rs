@@ -18,22 +18,18 @@ pub mod prelude {
     //!
     //! The prelude may grow over time as additional items see ubiquitous use.
 
-    pub use super::mem::buffer::Buffer;
-    pub use super::mem::buffer::BufferForReading;
-    pub use super::mem::buffer::BufferForWriting;
-
-    pub use super::mem::stream::ByteStream;
-
-    pub use super::status::Status;
-
-    pub use super::size::GB;
-    pub use super::size::KB;
-    pub use super::size::MB;
-
     pub use super::assert_gr;
     pub use super::assert_greq;
     pub use super::assert_le;
     pub use super::assert_leq;
+    pub use super::mem::buffer::Buffer;
+    pub use super::mem::buffer::BufferForReading;
+    pub use super::mem::buffer::BufferForWriting;
+    pub use super::mem::stream::ByteStream;
+    pub use super::size::GB;
+    pub use super::size::KB;
+    pub use super::size::MB;
+    pub use super::status::Status;
 }
 
 pub use prelude::*;

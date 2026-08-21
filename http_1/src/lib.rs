@@ -25,13 +25,11 @@ pub mod prelude {
     //!
     //! The prelude may grow over time as additional items see ubiquitous use.
 
-    pub use super::*;
-
     pub use super::request::Request;
     pub use super::request::RequestInfo;
-
     pub use super::response::Response;
     pub use super::server::Server;
+    pub use super::*;
 }
 
 pub use prelude::*;

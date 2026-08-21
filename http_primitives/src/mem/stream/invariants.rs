@@ -1,8 +1,8 @@
-use super::ByteStream;
-use super::fixtures::*;
-
 use std::io::Read as _;
 use std::io::Write as _;
+
+use super::ByteStream;
+use super::fixtures::*;
 
 impl ByteStream<'_> {
     /// General [`ByteStream`] pre-conditions, shared between [`Read`] and [`Write`] function
@@ -26,7 +26,6 @@ impl ByteStream<'_> {
 /// - Varying stream capacity.
 /// - Varying stream size.
 /// - Wrapped and contiguous data.
-///
 pub(crate) fn stream_invariant_problem(
     n_read: usize,   // number of bytes read
     n_write: usize,  // number of bytes written

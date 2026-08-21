@@ -50,9 +50,9 @@ impl<'data> Buffer<'data, ReadIn> {
     ///     }
     /// }
     ///
-    /// let method = buffer.read_in(&mut stream, |reader| {
-    ///     reader.read(parser)
-    /// }).unwrap();
+    /// let method = buffer
+    ///     .read_in(&mut stream, |reader| reader.read(parser))
+    ///     .unwrap();
     /// ```
     ///
     /// [`Reader`]: std::io::Read

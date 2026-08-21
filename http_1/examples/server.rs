@@ -51,10 +51,10 @@ fn main() {
                         b"/" => response.with_status_code(Status::Ok).send(),
                         _ => response.with_status_code(Status::NotFound).send(),
                     });
-            }
+            },
             Err(e) => {
                 println!("error: {e}");
-            }
+            },
         }
     }
 }
