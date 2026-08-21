@@ -41,7 +41,7 @@ pub use iter::Iter;
 /// [`Write`]: std::io::Write
 /// [`TcpStream`]: std::net::TcpStream
 pub struct ByteStream<'data> {
-    buffer: &'data mut [u8],
+    backing: &'data mut [u8],
     start: usize,
     size: usize,
 }
@@ -75,13 +75,13 @@ impl<'data> ByteStream<'data> {
         Self::any(buffer, 0, buffer.len())
     }
 
-    fn any(buffer: &'data mut [u8], start: usize, size: usize) -> Self {
-        assert!(!buffer.is_empty());
-        assert_le!(start, buffer.len());
-        assert_leq!(start, buffer.len());
+    fn any(backing: &'data mut [u8], start: usize, size: usize) -> Self {
+        assert!(!backing.is_empty());
+        assert_le!(start, backing.len());
+        assert_leq!(start, backing.len());
 
         Self {
-            buffer,
+            backing,
             start,
             size,
         }
@@ -114,7 +114,7 @@ impl<'data> ByteStream<'data> {
             // [ 0, 1, 2, 3, _ ]
             //            ▲
             //       stop─┘
-            self.buffer.copy_within(start.., 0);
+            self.backing.copy_within(start.., 0);
         } else {
             // Buffer wrap-around.
             //
@@ -132,35 +132,39 @@ impl<'data> ByteStream<'data> {
             // [ 0, 1, 2, 3, 4 ]
             //               ▲
             //          stop─┘
-            self.buffer.rotate_left(start);
+            self.backing.rotate_left(start);
         }
 
         self.start = 0;
-        &self.buffer[..self.size]
+        &self.backing[..self.size]
     }
 
     /// Total available memory the stream has access to.
+    #[must_use]
     pub fn capacity(&self) -> usize {
-        self.buffer.len()
+        self.backing.len()
     }
 
     /// Returns the length of unread data currently in the byte stream.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.size
     }
 
     /// Returns [`true`] if the byte stream contains no unread data.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Returns the amount of space in the stream which can still be written to.
+    #[must_use]
     pub fn space_left(&self) -> usize {
         self.capacity() - self.size
     }
 }
 
-impl<'data> std::fmt::Debug for ByteStream<'data> {
+impl std::fmt::Debug for ByteStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }

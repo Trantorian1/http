@@ -20,6 +20,12 @@ impl<'data> Buffer<'data, WriteOut> {
     /// Writes out a set of bytes to a [`Writer`], guaranteeing proper flushing. See [`BufWriter`]
     /// for a list of available writing methods.
     ///
+    /// # Errors
+    ///
+    /// Errors if the underlying writer returns an [`io::Error`] during flushing.
+    ///
+    /// # Examples
+    ///
     /// ```rust
     /// # use http_primitives::prelude::*;
     /// # let mut backing = [0; 64 * KB];
@@ -31,6 +37,7 @@ impl<'data> Buffer<'data, WriteOut> {
     /// ```
     ///
     /// [`Writer`]: std::io::Write
+    /// [`io::Error`]: std::io::Error
     pub fn write_out<'buf, 'writer, W: std::io::Write>(
         &'buf mut self,
         writer: &'writer mut W,
@@ -54,7 +61,7 @@ impl<'data> Buffer<'data, WriteOut> {
         if index_stop < capacity {
             // Buffer is large enough to fit all of `data`, copy it in.
 
-            self.buffer[index_start..index_stop].copy_from_slice(data);
+            self.backing[index_start..index_stop].copy_from_slice(data);
             self.window.end += data.len();
 
             &data[0..0]
@@ -63,7 +70,7 @@ impl<'data> Buffer<'data, WriteOut> {
 
             let available_space = capacity - index_start;
 
-            self.buffer[index_start..].copy_from_slice(&data[..available_space]);
+            self.backing[index_start..].copy_from_slice(&data[..available_space]);
             self.window.end = capacity;
 
             &data[available_space..]
@@ -85,21 +92,39 @@ where
     }
 
     /// Writes new data to a [`Buffer`], handling flushing and buffering.
+    ///
+    /// # Errors
+    ///
+    /// Errors if the underlying writer returns an [`io::Error`] during flushing.
+    ///
+    /// [`io::Error`]: std::io::Error
     pub fn write(&mut self, mut data: &[u8]) -> std::io::Result<()> {
         loop {
             data = self.buffer.append_to(data);
 
-            if !data.is_empty() {
-                self.writer.write_all(self.buffer.as_ref())?;
-                self.buffer.clear();
-            } else {
+            if data.is_empty() {
                 break Ok(());
             }
+
+            self.writer.write_all(self.buffer.as_ref())?;
+            self.buffer.clear();
         }
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.writer.write_all(self.buffer.as_ref())
+    }
+}
+
+impl<'buf, 'data, W> std::fmt::Debug for BufWriter<'buf, 'data, '_, W>
+where
+    'data: 'buf,
+    W: std::io::Write,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufWriter")
+            .field("buffer", &self.buffer)
+            .finish()
     }
 }
 
@@ -140,23 +165,11 @@ mod property_tests {
                     .unwrap();
 
                 let mut iter = stream.iter();
-                for n in &bytes[..n] {
-                    assert_eq!(Some(*n), iter.next());
+                for b in &bytes[..n] {
+                    assert_eq!(Some(*b), iter.next());
                 }
 
                 assert!(stream.is_empty());
             });
-    }
-}
-
-impl<'buf, 'data, 'writer, W> std::fmt::Debug for BufWriter<'buf, 'data, 'writer, W>
-where
-    'data: 'buf,
-    W: std::io::Write,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BufWriter")
-            .field("buffer", &self.buffer)
-            .finish()
     }
 }

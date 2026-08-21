@@ -2,7 +2,7 @@ use crate::prelude::*;
 
 use super::ByteStream;
 
-impl<'data> std::io::Write for ByteStream<'data> {
+impl std::io::Write for ByteStream<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         Ok(self.write_impl(buf))
     }
@@ -12,7 +12,7 @@ impl<'data> std::io::Write for ByteStream<'data> {
     }
 }
 
-impl<'data> ByteStream<'data> {
+impl ByteStream<'_> {
     //
     // -- Mutations
     //
@@ -54,11 +54,11 @@ impl<'data> ByteStream<'data> {
             // The data currently in the buffer is contiguous, we might need to wrap around in order
             // to write more bytes. Here, were start by appending to the end of the stream.
             let space_after_stop = (self.capacity() - stop).min(bytes);
-            self.buffer[stop..stop + space_after_stop].copy_from_slice(&buf[..space_after_stop]);
+            self.backing[stop..stop + space_after_stop].copy_from_slice(&buf[..space_after_stop]);
 
             // Next, we try and write whatever bytes remain at the start of the stream.
             let space_before_start = start.min(bytes - space_after_stop);
-            self.buffer[..space_before_start]
+            self.backing[..space_before_start]
                 .copy_from_slice(&buf[space_after_stop..space_after_stop + space_before_start]);
 
             self.size += space_after_stop + space_before_start;
@@ -72,7 +72,7 @@ impl<'data> ByteStream<'data> {
             let space_before_start = (start - stop_wrapped).min(bytes);
 
             // Write to the middle of the buffer, taking existing data wrap-around into consideration.
-            self.buffer[stop_wrapped..stop_wrapped + space_before_start]
+            self.backing[stop_wrapped..stop_wrapped + space_before_start]
                 .copy_from_slice(&buf[..space_before_start]);
 
             self.size += space_before_start;
