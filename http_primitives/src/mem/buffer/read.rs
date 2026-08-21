@@ -29,9 +29,13 @@ impl<'data> Buffer<'data, ReadIn> {
     ///
     /// ```rust
     /// # use http_primitives::prelude::*;
-    /// # let mut backing = [0; 8 * KB];
-    /// # let mut buffer = BufferForReading::new(&mut backing);
-    /// # let mut stream = std::collections::VecDeque::from(*b"GET / HTTP/1.1\r\n\r\n");
+    /// #
+    /// # let mut backing_buffer = [0; 8 * KB];
+    /// # let mut buffer = BufferForReading::new(&mut backing_buffer);
+    /// #
+    /// # let mut backing_stream = *b"GET / HTTP/1.1\r\n\r\n";
+    /// # let mut stream = ByteStream::pre_populate(&mut backing_stream);
+    /// #
     /// // Parses in an HTTP/1.1 GET method
     /// fn parser(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
     ///     const GET: &[u8] = b"GET";
@@ -110,10 +114,15 @@ impl<'buf, 'data, 'reader, R: std::io::Read> BufReader<'buf, 'data, 'reader, R> 
     ///
     /// ```rust
     /// # use http_primitives::prelude::*;
-    /// # let mut backing = [0; 8 * KB];
-    /// # let mut buffer = BufferForReading::new(&mut backing);
-    /// # let mut stream = std::collections::VecDeque::from(*b"GET / HTTP/1.1\r\n\r\n");
+    /// #
+    /// # let mut backing_buffer = [0; 8 * KB];
+    /// # let mut buffer = BufferForReading::new(&mut backing_buffer);
+    /// #
+    /// # let mut backing_stream = *b"GET / HTTP/1.1\r\n\r\n";
+    /// # let mut stream = ByteStream::pre_populate(&mut backing_stream);
+    /// #
     /// # let _ = buffer.read_in(&mut stream, |reader| {
+    /// #
     /// // Parses in an HTTP/1.1 GET method
     /// fn parser(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
     ///     const GET: &[u8] = b"GET";
