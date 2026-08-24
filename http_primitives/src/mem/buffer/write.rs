@@ -149,12 +149,11 @@ where
 }
 
 #[cfg(test)]
+use super::invariants::*;
+
+#[cfg(test)]
 mod property_tests {
     use super::*;
-
-    // This still passes as for MAX_SIZE = 16 but takes 1h40min to validate and 72GB of RAM :P
-    const MAX_SIZE: usize = 2;
-    const _: () = assert!(MAX_SIZE > 0);
 
     #[test]
     #[cfg_attr(kani, kani::proof)]
@@ -172,24 +171,8 @@ mod property_tests {
         bolero::check!()
             .with_generator(generator)
             .cloned()
-            .for_each(|(n, size)| {
-                let bytes: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
-                let mut stream_backing = [0; MAX_SIZE];
-                let mut stream = ByteStream::new(&mut stream_backing);
-
-                let mut buffer_backing = [0; MAX_SIZE];
-                let mut buffer = BufferForWriting::new(&mut buffer_backing[..size]);
-
-                buffer
-                    .write_out(&mut stream, |writer| writer.write(&bytes[..n]))
-                    .unwrap();
-
-                let mut iter = stream.iter();
-                for b in &bytes[..n] {
-                    assert_eq!(Some(*b), iter.next());
-                }
-
-                assert!(stream.is_empty());
+            .for_each(|(n_write, capacity)| {
+                buffer_write_invariant_problem(n_write, capacity);
             });
     }
 }

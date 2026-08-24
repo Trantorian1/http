@@ -3,6 +3,9 @@
 mod read;
 mod write;
 
+#[cfg(test)]
+mod invariants;
+
 pub use read::BufReader;
 pub use write::BufWriter;
 
