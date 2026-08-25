@@ -9,7 +9,7 @@
 
 use http_primitives::prelude::*;
 
-pub mod parsers;
+use crate::prelude::*;
 
 /// See [RFC9112], request line.
 ///

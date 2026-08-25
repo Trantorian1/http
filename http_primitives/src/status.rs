@@ -98,15 +98,15 @@ impl Status {
     #[must_use]
     pub fn code(&self) -> &'static [u8] {
         match self {
-            Self::Ok => b"200 ",
+            Self::Ok => b"200",
 
-            Self::BadRequest => b"400 ",
-            Self::NotFound => b"404 ",
-            Self::RequestTimetout => b"408 ",
-            Self::ContentTooLarge => b"413 ",
+            Self::BadRequest => b"400",
+            Self::NotFound => b"404",
+            Self::RequestTimetout => b"408",
+            Self::ContentTooLarge => b"413",
 
-            Self::InternalServerError(_) => b"500 ",
-            Self::NotImplemented => b"501 ",
+            Self::InternalServerError(_) => b"500",
+            Self::NotImplemented => b"501",
         }
     }
 
