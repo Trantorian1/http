@@ -30,12 +30,18 @@ pub mod parsers;
 /// > [Section 11.2])."_
 ///
 /// Note that since the request implements buffer-based parsing it will fail if the content of the
-/// request cannot fit in the target buffer, in which case the server will respond with a [`413`]
-/// status code.
+/// request cannot fit in the target buffer, in which case the server will respond with a
+/// [`ContentTooLarge`] status code.
+///
+/// # Usage
+///
+/// This struct is not meant to be consumed as is: to read the contents a byte stream request you
+/// must first [`process`] it, after which you will be able to read the resulting [`RequestInfo`].
 ///
 /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#name-request-line
 /// [Section 11.2]: https://datatracker.ietf.org/doc/html/rfc9112#request.smuggling
-/// [`413`]: Status::ContentTooLarge
+/// [`ContentTooLarge`]: Status::ContentTooLarge
+/// [`process`]: Self::process
 pub struct Request<'buf, 'data, 'reader, R>
 where
     'data: 'buf,
@@ -60,7 +66,7 @@ where
     /// # Errors
     ///
     /// Returns an error [`Status`] code if request parsing fails.
-    pub fn process(self) -> Result<RequestInfo<'buf>, Status> {
+    pub fn process(self) -> Result<RequestInfo<'buf, 'data>, Status> {
         let (method, target) = self.buffer.read_in(self.stream, |reader| {
             let method = reader.read(parsers::method)?;
 
@@ -80,8 +86,9 @@ where
         })?;
 
         Ok(RequestInfo {
-            method: &self.buffer[method],
-            target: &self.buffer[target],
+            buffer: self.buffer,
+            method,
+            target,
         })
     }
 }
@@ -100,7 +107,19 @@ where
 
 /// Zero-copy slice of the parsed [`Request`] data, allows to index into specific parts of the
 /// request.
-pub struct RequestInfo<'buf> {
+///
+/// # Drop
+///
+/// This `struct` will [`clear`] the backing buffer on drop to ensure future requests cannot read
+/// past data.
+///
+/// [`clear`]: http_primitives::Buffer::clear
+pub struct RequestInfo<'buf, 'data>
+where
+    'data: 'buf,
+{
+    buffer: &'buf mut BufferForReading<'data>,
+
     /// See [RFC9112], method.
     ///
     /// > _"The method token indicates the request method to be performed on the target resource.
@@ -117,7 +136,7 @@ pub struct RequestInfo<'buf> {
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#name-method
     /// [Section 9]: https://www.rfc-editor.org/rfc/rfc9110#section-9
     /// [\[HTTP\]]: https://datatracker.ietf.org/doc/html/rfc9110
-    pub method: &'buf [u8],
+    method: std::ops::Range<usize>,
 
     /// See [RFC9112], request target.
     ///
@@ -149,19 +168,52 @@ pub struct RequestInfo<'buf> {
     ///
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#section-3.2
     /// [`400`]: Status::BadRequest
-    pub target: &'buf [u8],
+    target: std::ops::Range<usize>,
 }
 
-impl std::fmt::Debug for RequestInfo<'_> {
+impl<'buf, 'data> RequestInfo<'buf, 'data>
+where
+    'data: 'buf,
+{
+    #[must_use]
+    /// Returns the request [method].
+    ///
+    /// [method]: crate::methods
+    pub fn method(&self) -> &[u8] {
+        &self.buffer[self.method.clone()]
+    }
+
+    #[must_use]
+    /// Returns the target of the request.
+    pub fn target(&self) -> &[u8] {
+        &self.buffer[self.target.clone()]
+    }
+}
+
+impl<'buf, 'data> Drop for RequestInfo<'buf, 'data>
+where
+    'data: 'buf,
+{
+    fn drop(&mut self) {
+        // Clears the buffer once we are done processing the request, that way data cannot be
+        // read by future calls if ever we mess up indexing in our `Buffer` implementation.
+        self.buffer.clear();
+    }
+}
+
+impl<'buf, 'data> std::fmt::Debug for RequestInfo<'buf, 'data>
+where
+    'data: 'buf,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RequestInfo")
             .field(
                 "method",
-                &std::str::from_utf8(self.method).unwrap_or("non-utf8 method"),
+                &std::str::from_utf8(self.method()).unwrap_or("non-utf8 method"),
             )
             .field(
                 "target",
-                &std::str::from_utf8(self.target).unwrap_or("non-utf8 target"),
+                &std::str::from_utf8(self.target()).unwrap_or("non-utf8 target"),
             )
             .finish()
     }
