@@ -10,6 +10,10 @@ use crate::prelude::*;
 ///
 /// Returns [`Status::NotImplemented`] if the HTTP request does not match any supported methods.
 pub fn method(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
+    if data.len() < methods::CONNECT.len() {
+        return Ok(None);
+    }
+
     match &data[..methods::GET.len()] {
         [b'G', b'E', b'T', ..] => Ok(Some(unsafe {
             // SAFETY: GET is not empty
@@ -43,8 +47,7 @@ pub fn method(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
             // SAFETY: TRACE is not empty
             std::num::NonZero::new_unchecked(methods::TRACE.len())
         })),
-        _ if data.len() >= methods::CONNECT.len() => Err(Status::BadRequest),
-        _ => Ok(None),
+        _ => Err(Status::BadRequest),
     }
 }
 
@@ -55,10 +58,14 @@ pub fn method(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
 /// This function never errors, but this guarantee might change in future versions as more edge
 /// cases are handled.
 pub fn sp(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
+    if data.len() < SP.len() {
+        return Ok(None);
+    }
+
     match &data[..SP.len()] {
         // SAFETY: SP is not empty
         SP => Ok(Some(unsafe { std::num::NonZero::new_unchecked(SP.len()) })),
-        _ => Ok(None),
+        _ => Err(Status::BadRequest),
     }
 }
 
@@ -83,12 +90,32 @@ pub fn target(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
 /// This function never errors, but this guarantee might change in future versions as more edge
 /// cases are handled.
 pub fn protocol(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
+    if data.len() < PROTOCOL.len() {
+        return Ok(None);
+    }
+
     match &data[..PROTOCOL.len()] {
         // SAFETY: PROTOCOL is not empty
         PROTOCOL => Ok(Some(unsafe {
             std::num::NonZero::new_unchecked(PROTOCOL.len())
         })),
-        _ => Ok(None),
+        _ => Err(Status::BadRequest),
+    }
+}
+
+pub fn status(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
+    if data.len() < 3 {
+        return Ok(None);
+    }
+
+    // FIXME: look up the set of legal values for http status codes and parse that instead. This is
+    // a quick hack but is overly restrictive against custom status codes.
+    match &data[..3] {
+        b"200" | b"400" | b"404" | b"408" | b"413" | b"500" | b"501" => {
+            // SAFETY: 3 > 0 dumbass
+            Ok(Some(unsafe { std::num::NonZero::new_unchecked(3) }))
+        },
+        _ => Err(Status::NotImplemented),
     }
 }
 
@@ -99,11 +126,15 @@ pub fn protocol(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
 /// This function never errors, but this guarantee might change in future versions as more edge
 /// cases are handled.
 pub fn crlf(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
+    if data.len() < CRLF.len() {
+        return Ok(None);
+    }
+
     match &data[..CRLF.len()] {
         // SAFETY: CRLF is not empty
         CRLF => Ok(Some(unsafe {
             std::num::NonZero::new_unchecked(CRLF.len())
         })),
-        _ => Ok(None),
+        _ => Err(Status::BadRequest),
     }
 }

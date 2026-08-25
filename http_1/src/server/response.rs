@@ -81,6 +81,7 @@ where
             writer.write(PROTOCOL)?;
             writer.write(SP)?;
             writer.write(self.status.code())?;
+            writer.write(SP)?;
             writer.write(self.status.reason())?;
             writer.write(CRLF)?;
             writer.write(CRLF)?;

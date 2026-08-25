@@ -8,9 +8,9 @@
 //! [build your own HTTP server]: https://app.codecrafters.io/courses/http-server/overview
 //! [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112
 
+pub mod client;
 pub mod methods;
-pub mod request;
-pub mod response;
+pub mod parsers;
 pub mod server;
 
 pub mod prelude {
@@ -26,9 +26,7 @@ pub mod prelude {
     //!
     //! The prelude may grow over time as additional items see ubiquitous use.
 
-    pub use super::request::Request;
-    pub use super::request::RequestInfo;
-    pub use super::response::Response;
+    pub use super::client::Client;
     pub use super::server::Server;
     pub use super::*;
 }

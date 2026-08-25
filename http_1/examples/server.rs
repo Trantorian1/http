@@ -44,14 +44,16 @@ fn main() {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(connection) => {
-                server.process(connection).respond(|request, response| {
-                    match (request.method(), request.target()) {
-                        (methods::GET, b"/") => response.with_status_code(Status::Ok).send(),
-                        (methods::GET, _) => response.with_status_code(Status::NotFound).send(),
-                        (..) => response.with_status_code(Status::NotImplemented).send(),
-                    }
-                });
+            Ok(mut connection) => {
+                server
+                    .process(&mut connection)
+                    .respond(
+                        |request, response| match (request.method(), request.target()) {
+                            (methods::GET, b"/") => response.with_status_code(Status::Ok).send(),
+                            (methods::GET, _) => response.with_status_code(Status::NotFound).send(),
+                            (..) => response.with_status_code(Status::NotImplemented).send(),
+                        },
+                    );
             },
             Err(e) => {
                 println!("error: {e}");
