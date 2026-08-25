@@ -4,24 +4,47 @@ use http_primitives::prelude::*;
 
 use crate::prelude::*;
 
-const GET: &[u8] = b"GET";
-
 /// Parses the **method portion** of an HTTP request.
 ///
 /// # Errors
 ///
 /// Returns [`Status::NotImplemented`] if the HTTP request does not match any supported methods.
 pub fn method(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
-    const _: () = assert!(!GET.is_empty());
-
-    if data.len() < GET.len() {
-        return Ok(None);
-    }
-
-    match &data[..GET.len()] {
-        // SAFETY: The above assertions guarantees that GET can never have a length of 0
-        GET => Ok(Some(unsafe { std::num::NonZero::new_unchecked(GET.len()) })),
-        _ => Err(Status::NotImplemented),
+    match &data[..methods::GET.len()] {
+        [b'G', b'E', b'T', ..] => Ok(Some(unsafe {
+            // SAFETY: GET is not empty
+            std::num::NonZero::new_unchecked(methods::GET.len())
+        })),
+        [b'H', b'E', b'A', b'D', ..] => Ok(Some(unsafe {
+            // SAFETY: HEAD is not empty
+            std::num::NonZero::new_unchecked(methods::HEAD.len())
+        })),
+        [b'P', b'O', b'S', b'T', ..] => Ok(Some(unsafe {
+            // SAFETY: POST is not empty
+            std::num::NonZero::new_unchecked(methods::POST.len())
+        })),
+        [b'P', b'U', b'T', ..] => Ok(Some(unsafe {
+            // SAFETY: PUT is not empty
+            std::num::NonZero::new_unchecked(methods::PUT.len())
+        })),
+        [b'D', b'E', b'L', b'E', b'T', b'E', ..] => Ok(Some(unsafe {
+            // SAFETY: DELETE is not empty
+            std::num::NonZero::new_unchecked(methods::DELETE.len())
+        })),
+        [b'C', b'O', b'N', b'N', b'E', b'C', b'T', ..] => Ok(Some(unsafe {
+            // SAFETY: CONNECT is not empty
+            std::num::NonZero::new_unchecked(methods::CONNECT.len())
+        })),
+        [b'O', b'P', b'T', b'I', b'O', b'N', b'S', ..] => Ok(Some(unsafe {
+            // SAFETY: OPTIONS is not empty
+            std::num::NonZero::new_unchecked(methods::OPTIONS.len())
+        })),
+        [b'T', b'R', b'A', b'C', b'E', ..] => Ok(Some(unsafe {
+            // SAFETY: TRACE is not empty
+            std::num::NonZero::new_unchecked(methods::TRACE.len())
+        })),
+        _ if data.len() >= methods::CONNECT.len() => Err(Status::BadRequest),
+        _ => Ok(None),
     }
 }
 
@@ -32,10 +55,8 @@ pub fn method(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
 /// This function never errors, but this guarantee might change in future versions as more edge
 /// cases are handled.
 pub fn sp(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
-    const _: () = assert!(!SP.is_empty());
-
     match &data[..SP.len()] {
-        // SAFETY: The above assertions guarantees that SP can never have a length of 0
+        // SAFETY: SP is not empty
         SP => Ok(Some(unsafe { std::num::NonZero::new_unchecked(SP.len()) })),
         _ => Ok(None),
     }
@@ -62,10 +83,8 @@ pub fn target(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
 /// This function never errors, but this guarantee might change in future versions as more edge
 /// cases are handled.
 pub fn protocol(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
-    const _: () = assert!(!PROTOCOL.is_empty());
-
     match &data[..PROTOCOL.len()] {
-        // SAFETY: The above assertions guarantees that PROTOCOL can never have a length of 0
+        // SAFETY: PROTOCOL is not empty
         PROTOCOL => Ok(Some(unsafe {
             std::num::NonZero::new_unchecked(PROTOCOL.len())
         })),
@@ -80,10 +99,8 @@ pub fn protocol(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
 /// This function never errors, but this guarantee might change in future versions as more edge
 /// cases are handled.
 pub fn crlf(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
-    const _: () = assert!(!CRLF.is_empty());
-
     match &data[..CRLF.len()] {
-        // SAFETY: The above assertions guarantees that CRLF can never have a length of 0
+        // SAFETY: CRLF is not empty
         CRLF => Ok(Some(unsafe {
             std::num::NonZero::new_unchecked(CRLF.len())
         })),

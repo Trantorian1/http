@@ -70,7 +70,7 @@ where
     /// Respond to a TCP [`Request`].
     pub fn respond(
         mut self,
-        f: fn(RequestInfo<'buf>, Response<'buf, 'data, '_, RW>) -> std::io::Result<()>,
+        f: fn(RequestInfo<'buf, 'data>, Response<'buf, 'data, '_, RW>) -> std::io::Result<()>,
     ) {
         let res = match Request::new(self.global_request_buffer, &mut self.stream).process() {
             Err(status) => Response::new(self.global_response_buffer, &mut self.stream)

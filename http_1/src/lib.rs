@@ -8,6 +8,7 @@
 //! [build your own HTTP server]: https://app.codecrafters.io/courses/http-server/overview
 //! [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112
 
+pub mod methods;
 pub mod request;
 pub mod response;
 pub mod server;

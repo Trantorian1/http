@@ -53,6 +53,6 @@ pub(crate) fn buffer_read_invariant_problem(
     } else if chunk.get() > n_read {
         assert_eq!(res, Err(Status::RequestTimetout));
     } else {
-        assert_eq!(res, Ok(0..chunk.get()))
+        assert_eq!(res, Ok(0..chunk.get()));
     }
 }
