@@ -152,7 +152,7 @@ where
 use super::invariants::*;
 
 #[cfg(test)]
-mod property_tests {
+mod validate {
     use super::*;
 
     #[test]

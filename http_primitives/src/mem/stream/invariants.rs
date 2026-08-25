@@ -27,11 +27,11 @@ impl ByteStream<'_> {
 /// - Varying stream size.
 /// - Wrapped and contiguous data.
 pub(crate) fn stream_invariant_problem(
-    n_read: usize,   // number of bytes read
-    n_write: usize,  // number of bytes written
-    capacity: usize, // stream capacity
-    start: usize,    // stream start index, causes wrap-around
-    size: usize,     // initial stream size, data in the backing buffer which is kept
+    n_read: usize,                    // number of bytes read
+    n_write: usize,                   // number of bytes written
+    capacity: std::num::NonZeroUsize, // stream capacity
+    start: usize,                     // stream start index, causes wrap-around
+    size: usize, // initial stream size, data in the backing buffer which is kept
 ) {
     // Initial stream data. The number of bytes kept is informed by `size`. The rest will be
     // overwritten during subsequent writes.
@@ -44,7 +44,7 @@ pub(crate) fn stream_invariant_problem(
     let bytes_prev = backing;
 
     // The system under test
-    let mut stream = ByteStream::any(&mut backing[..capacity], start, size);
+    let mut stream = ByteStream::any(&mut backing[..capacity.get()], start, size);
 
     // Invariant test 1:
     //
@@ -53,7 +53,7 @@ pub(crate) fn stream_invariant_problem(
     // enough space left to write `n_write` bytes, as many bytes as possible should still be
     // written to the stream.
     let written = stream.write(&bytes_new[..n_write]).unwrap();
-    assert_eq!(written, n_write.min(capacity - size));
+    assert_eq!(written, n_write.min(capacity.get() - size));
 
     // Invariant test 2:
     //
@@ -84,11 +84,15 @@ pub(crate) fn stream_invariant_problem(
     }
 }
 
-pub(crate) fn stream_iter_invariant_problems(capacity: usize, start: usize, size: usize) {
+pub(crate) fn stream_iter_invariant_problems(
+    capacity: std::num::NonZeroUsize,
+    start: usize,
+    size: usize,
+) {
     let mut backing: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
     let bytes_prev = backing;
 
-    let stream = ByteStream::any(&mut backing[..capacity], start, size);
+    let stream = ByteStream::any(&mut backing[..capacity.get()], start, size);
     let mut iter = stream.iter();
 
     for i in 0..size {
@@ -99,26 +103,30 @@ pub(crate) fn stream_iter_invariant_problems(capacity: usize, start: usize, size
     assert_eq!(stream.start, start);
 }
 
-pub(crate) fn make_contiguous_invariant_problem(capacity: usize, start: usize, size: usize) {
+pub(crate) fn make_contiguous_invariant_problem(
+    capacity: std::num::NonZeroUsize,
+    start: usize,
+    size: usize,
+) {
     let mut backing: [u8; MAX_SIZE] = std::array::from_fn(|i| i as u8);
     let backing_copy = backing;
-    let oracle = &backing_copy[..capacity];
+    let oracle = &backing_copy[..capacity.get()];
 
-    let mut stream = ByteStream::any(&mut backing[..capacity], start, size);
+    let mut stream = ByteStream::any(&mut backing[..capacity.get()], start, size);
 
     let contiguous = stream.make_contiguous();
     assert_eq!(contiguous.len(), size);
 
-    if start + size <= capacity {
+    if start + size <= capacity.get() {
         assert_eq!(contiguous[..size], oracle[start..start + size]);
     } else {
-        let space_after_start = capacity - start;
+        let space_after_start = capacity.get() - start;
         assert_eq!(
             contiguous[..space_after_start],
             oracle[start..start + space_after_start]
         );
 
-        let space_before_stop = start + size - capacity;
+        let space_before_stop = start + size - capacity.get();
         assert_eq!(contiguous[space_after_start..], oracle[..space_before_stop]);
     }
 }

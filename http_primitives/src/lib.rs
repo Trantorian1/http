@@ -26,6 +26,7 @@ pub mod prelude {
     pub use super::mem::buffer::BufferForReading;
     pub use super::mem::buffer::BufferForWriting;
     pub use super::mem::stream::ByteStream;
+    pub use super::nonzero;
     pub use super::size::GB;
     pub use super::size::KB;
     pub use super::size::MB;

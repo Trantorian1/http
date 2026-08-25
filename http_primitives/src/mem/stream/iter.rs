@@ -118,7 +118,7 @@ mod validate {
             })
             .cloned()
             .for_each(|(capacity, start, size)| {
-                stream_iter_invariant_problems(capacity, start, size);
+                stream_iter_invariant_problems(nonzero!(capacity), start, size);
             });
     }
 }

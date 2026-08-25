@@ -131,3 +131,14 @@ impl Status {
         }
     }
 }
+
+impl std::cmp::PartialEq for Status {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::InternalServerError(_), Self::InternalServerError(_)) => true,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
+impl std::cmp::Eq for Status {}

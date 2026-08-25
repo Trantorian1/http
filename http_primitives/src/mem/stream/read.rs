@@ -119,7 +119,7 @@ mod contracts {
             })
             .cloned()
             .for_each(|(n_read, n_write, capacity, start, size)| {
-                stream_invariant_problem(n_read, n_write, capacity, start, size);
+                stream_invariant_problem(n_read, n_write, nonzero!(capacity), start, size);
             })
     }
 }
