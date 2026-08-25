@@ -15,7 +15,7 @@ impl ByteStream<'_> {
     //
     // -- Mutations
     //
-    #[cfg_attr(all(test, kani), kani::modifies(&self.start, &self.size, self.buffer))]
+    #[cfg_attr(all(test, kani), kani::modifies(&self.start, &self.size, self.backing))]
     //
     // -- Pre-conditions
     //
@@ -119,7 +119,7 @@ mod contracts {
             })
             .cloned()
             .for_each(|(n_read, n_write, capacity, start, size)| {
-                stream_invariant_problem(n_read, n_write, capacity, start, size);
+                stream_invariant_problem(n_read, n_write, nonzero!(capacity), start, size);
             })
     }
 }

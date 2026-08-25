@@ -290,7 +290,7 @@ mod validate {
             })
             .cloned()
             .for_each(|(n_read, n_write, capacity, start, size)| {
-                stream_invariant_problem(n_read, n_write, capacity, start, size);
+                stream_invariant_problem(n_read, n_write, nonzero!(capacity), start, size);
             });
     }
 
@@ -329,7 +329,7 @@ mod validate {
             })
             .cloned()
             .for_each(|(capacity, start, size)| {
-                make_contiguous_invariant_problem(capacity, start, size);
+                make_contiguous_invariant_problem(nonzero!(capacity), start, size);
             });
     }
 }

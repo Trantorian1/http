@@ -23,7 +23,10 @@ impl<'data> Buffer<'data, ReadIn> {
     ///
     /// # Errors
     ///
-    /// This method only fails if the underlying reader returns an [`io::Error`] while reading.
+    /// Returns an HTTP error [`Status`] code if the provided [`BufReader`] fails to parse the byte
+    /// stream which is passed to it.
+    ///
+    /// See [`read`] for a more complete list of read-related errors.
     ///
     /// # Examples
     ///
@@ -55,8 +58,7 @@ impl<'data> Buffer<'data, ReadIn> {
     ///     .unwrap();
     /// ```
     ///
-    /// [`Reader`]: std::io::Read
-    /// [`io::Error`]: std::io::Error
+    /// [`read`]: BufReader::read
     pub fn read_in<'buf, 'reader, R: std::io::Read, T>(
         &'buf mut self,
         reader: &'reader mut R,
@@ -110,6 +112,11 @@ impl<'buf, 'data, 'reader, R: std::io::Read> BufReader<'buf, 'data, 'reader, R> 
     /// Returns [`ContentTooLarge`] if there is not enough space left in the buffer to write all
     /// parsed bytes.
     ///
+    /// Returns [`RequestTimetout`] if no bytes are left to consume and parsing still fails.
+    ///
+    /// Returns an [`InternalServerError`] wrapping an [`io::Error`] if the underlying reader fails
+    /// to read new bytes.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -143,13 +150,20 @@ impl<'buf, 'data, 'reader, R: std::io::Read> BufReader<'buf, 'data, 'reader, R> 
     /// ```
     ///
     /// [`ContentTooLarge`]: Status::ContentTooLarge
+    /// [`RequestTimetout`]: Status::RequestTimetout
+    /// [`InternalServerError`]: Status::InternalServerError
+    /// [`io::Error`]: std::io::Error
     pub fn read(
         &mut self,
-        parse: fn(&[u8]) -> Result<Option<std::num::NonZeroUsize>, Status>,
+        parse: impl Fn(&[u8]) -> Result<Option<std::num::NonZeroUsize>, Status>,
     ) -> Result<std::ops::Range<usize>, Status> {
         loop {
             if let Some(index) = parse(self.buffer.as_ref())? {
                 break Ok(self.buffer.process(index));
+            }
+
+            if self.buffer.is_full() {
+                return Err(Status::ContentTooLarge);
             }
 
             let new_bytes = self
@@ -157,9 +171,7 @@ impl<'buf, 'data, 'reader, R: std::io::Read> BufReader<'buf, 'data, 'reader, R> 
                 .append_from(&mut self.reader)
                 .map_err(Status::internal)?;
 
-            if self.buffer.is_full() {
-                return Err(Status::ContentTooLarge);
-            } else if new_bytes == 0 {
+            if new_bytes == 0 {
                 return Err(Status::RequestTimetout);
             }
         }
@@ -179,5 +191,41 @@ where
         f.debug_struct("BufReader")
             .field("buffer", &self.buffer)
             .finish()
+    }
+}
+
+#[cfg(test)]
+use super::invariants::*;
+
+#[cfg(test)]
+mod validate {
+    use super::*;
+
+    #[test]
+    #[cfg_attr(kani, kani::proof)]
+    #[cfg_attr(kani, kani::unwind(17))]
+    // #[cfg_attr(kani, kani::stub_verified(ByteStream::read_impl))]
+    // #[cfg_attr(kani, kani::stub_verified(ByteStream::write_impl))]
+    fn buf_read_harness() {
+        let generator = (
+            // Number of bytes to read
+            bolero::produce::<usize>().with().bounds(..MAX_SIZE),
+            // Read buffer capacity, cannot be 0
+            bolero::produce::<usize>().with().bounds(1..MAX_SIZE),
+        );
+
+        bolero::check!()
+            .with_generator(generator)
+            .and_then(|(n_read, capacity)| {
+                (
+                    n_read,
+                    capacity,
+                    bolero::produce::<usize>().with().bounds(1..capacity),
+                )
+            })
+            .cloned()
+            .for_each(|(n_read, capacity, chunk)| {
+                buffer_read_invariant_problem(n_read, nonzero!(capacity), nonzero!(chunk));
+            });
     }
 }

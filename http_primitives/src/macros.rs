@@ -1,8 +1,25 @@
+#[macro_export]
+/// Creates a new [`NonZero`] integer.
+///
+/// # Examples
+///
+/// ```rust
+/// # use http_primitives::prelude::*;
+/// assert_eq!(nonzero!(42), std::num::NonZero::new(42).unwrap());
+/// ```
+///
+/// [`NonZero`]: std::num::NonZero
+macro_rules! nonzero {
+    ($n:expr) => {
+        std::num::NonZero::new($n).expect("literal should be non-zero")
+    };
+}
+
 /// Assert less than.
 ///
-/// ## Example Usage
+/// # Examples
 ///
-/// ```
+/// ```rust
 /// # use http_primitives::prelude::*;
 /// assert_le!(3, 4);
 /// ```
@@ -18,9 +35,9 @@ macro_rules! assert_le {
 
 /// Assert less than or equal.
 ///
-/// ## Example Usage
+/// # Examples
 ///
-/// ```
+/// ```rust
 /// # use http_primitives::prelude::*;
 /// assert_leq!(4, 4);
 /// ```
@@ -36,9 +53,9 @@ macro_rules! assert_leq {
 
 /// Assert greater than.
 ///
-/// ## Example Usage
+/// # Examples
 ///
-/// ```
+/// ```rust
 /// # use http_primitives::prelude::*;
 /// assert_gr!(4, 3);
 /// ```
