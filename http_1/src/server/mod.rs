@@ -29,8 +29,6 @@ pub struct Server<'data> {
 
 impl<'data> Server<'data> {
     /// Creates a new server instance.
-    ///
-    /// [`TcpListener`]: std::net::TcpListener
     pub fn new(
         global_request_buffer: &'data mut [u8],
         global_response_buffer: &'data mut [u8],

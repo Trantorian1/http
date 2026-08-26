@@ -1,10 +1,3 @@
-//! Stack-allocated HTTP response helpers.
-//!
-//! All responses are written to a fixed-size [`Buffer`] and are only flushed as capacity is
-//! reached.
-//!
-//! [`Buffer`]: Buffer
-
 use http_primitives::prelude::*;
 
 use crate::prelude::*;
@@ -71,7 +64,7 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error in case writing the response to the underlying stream fails.
+    /// Errors in case writing to the underlying stream fails.
     pub fn send(self) -> std::io::Result<()> {
         if let Status::InternalServerError(err) = &self.status {
             tracing::error!(err);

@@ -87,22 +87,33 @@ pub fn target(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
 ///
 /// # Errors
 ///
-/// This function never errors, but this guarantee might change in future versions as more edge
-/// cases are handled.
+/// Returns [`HTTPVersionNotSupported`] if the message requests a protocol version other than
+/// HTTP/1.x.
+///
+/// [`HTTPVersionNotSupported`]: Status::HTTPVersionNotSupported
 pub fn protocol(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
     if data.len() < PROTOCOL.len() {
         return Ok(None);
     }
+
+    // FIXME: implement proper HTTP version parsing
 
     match &data[..PROTOCOL.len()] {
         // SAFETY: PROTOCOL is not empty
         PROTOCOL => Ok(Some(unsafe {
             std::num::NonZero::new_unchecked(PROTOCOL.len())
         })),
-        _ => Err(Status::BadRequest),
+        _ => Err(Status::HTTPVersionNotSupported),
     }
 }
 
+/// Parses the [Status] code in an HTTP response.
+///
+/// # Errors
+///
+/// Returns [`NotImplemented`] if an unknown status code is encountered.
+///
+/// [`NotImplemented`]: Status::NotImplemented
 pub fn status(data: &[u8]) -> Result<Option<std::num::NonZeroUsize>, Status> {
     if data.len() < 3 {
         return Ok(None);
