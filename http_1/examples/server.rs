@@ -5,9 +5,6 @@
 //! [`ADDRESS`]
 
 #![allow(clippy::unwrap_used)]
-#![allow(clippy::print_stdout)]
-
-use std::net::TcpListener;
 
 use http_1::prelude::*;
 use http_primitives::prelude::*;
@@ -33,7 +30,7 @@ fn main() {
 
     // == Expose server on TCP port 4221 ===========================================================
 
-    let listener = TcpListener::bind(ADDRESS).unwrap();
+    let listener = std::net::TcpListener::bind(ADDRESS).unwrap();
     tracing::info!("Listening on {ADDRESS}");
 
     let mut global_request_buffer = vec![0; 16 * KB].into_boxed_slice();
@@ -56,7 +53,7 @@ fn main() {
                     );
             },
             Err(e) => {
-                println!("error: {e}");
+                tracing::error!("error: {e}");
             },
         }
     }
