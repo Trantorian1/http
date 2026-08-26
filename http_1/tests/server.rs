@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use http_1::prelude::*;
 use http_primitives::*;
 

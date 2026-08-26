@@ -1,12 +1,3 @@
-//! Stack-allocated HTTP request helpers.
-//!
-//! All requests are written to a fixed-size [`Buffer`]. Keep in mind that parsing **WILL** fail in
-//! case the buffer is too small to process the entire request, in which case the server **SHOULD**
-//! return [`413`].
-//!
-//! [`Buffer`]: Buffer
-//! [`413`]: Status::ContentTooLarge
-
 use http_primitives::prelude::*;
 
 use crate::prelude::*;
@@ -65,7 +56,7 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error [`Status`] code if request parsing fails.
+    /// Returns an error [`Status`] code if [`Client`] request parsing fails.
     pub fn process(self) -> Result<RequestInfo<'buf, 'data>, Status> {
         let (method, target) = self.buffer.read_in(self.stream, |reader| {
             let method = reader.read(parsers::method)?;
@@ -105,12 +96,11 @@ where
     }
 }
 
-/// Zero-copy slice of the parsed [`Request`] data, allows to index into specific parts of the
-/// request.
+/// Zero-copy [`Request`] fields.
 ///
 /// # Drop
 ///
-/// This `struct` will [`clear`] the backing buffer on drop to ensure future requests cannot read
+/// This `struct` will [`clear`] its backing buffer on drop to ensure future requests cannot read
 /// past data.
 ///
 /// [`clear`]: http_primitives::Buffer::clear
@@ -176,7 +166,7 @@ where
     'data: 'buf,
 {
     #[must_use]
-    /// Returns the request [method].
+    /// Returns the [method] associated to the [`Request`].
     ///
     /// [method]: crate::methods
     pub fn method(&self) -> &[u8] {
@@ -209,11 +199,11 @@ where
         f.debug_struct("RequestInfo")
             .field(
                 "method",
-                &std::str::from_utf8(self.method()).unwrap_or("non-utf8 method"),
+                &std::str::from_utf8(self.method()).unwrap_or_default(),
             )
             .field(
                 "target",
-                &std::str::from_utf8(self.target()).unwrap_or("non-utf8 target"),
+                &std::str::from_utf8(self.target()).unwrap_or_default(),
             )
             .finish()
     }

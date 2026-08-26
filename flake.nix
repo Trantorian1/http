@@ -25,7 +25,6 @@
         (rust-bin.override {
           extensions = [
             "rust-analyzer"
-
             "rust-src"
           ];
         })
