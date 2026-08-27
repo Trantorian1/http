@@ -86,3 +86,12 @@ macro_rules! assert_greq {
         assert!($left >= $right, concat!("{} >= {}: ", $msg), $left, $right)
     };
 }
+
+#[macro_export]
+macro_rules! assert_streq {
+    ($left:expr,$right:expr) => {{
+        let left = std::str::from_utf8($left).expect("Invalid utf8");
+        let right = std::str::from_utf8($right).expect("Invalid utf8");
+        assert_eq!(left, right);
+    }};
+}
