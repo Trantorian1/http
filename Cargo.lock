@@ -231,6 +231,7 @@ name = "http_primitives"
 version = "0.0.1"
 dependencies = [
  "bolero",
+ "memchr",
  "pretty_assertions",
  "rstest",
 ]

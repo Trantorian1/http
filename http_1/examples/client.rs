@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
 #![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
 
 use http_1::prelude::*;
 use http_primitives::prelude::*;
