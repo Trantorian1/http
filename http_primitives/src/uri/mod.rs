@@ -1,4 +1,5 @@
 mod error;
+mod query;
 
 pub use error::Error;
 
@@ -7,25 +8,28 @@ pub struct Uri<'data> {
     pub host: &'data [u8],
     pub port: &'data [u8],
     pub path: &'data [u8],
-
     backing: &'data [u8],
 }
 
 impl<'data> Uri<'data> {
     pub fn new(bytes: &'data [u8]) -> Result<Self, Error> {
+        // FIXME: parse out legal characters and % encoding
+
+        // == Step 1: parse and separate URI segments ==============================================
+
         let (scheme, skip_scheme) = match memchr::memmem::find(bytes, b"://") {
             None => (0..0, 0),
             Some(n) => (0..n, n + 3),
         };
 
-        let (authority, skip_authority) = match memchr::memchr(b'/', &bytes[skip_scheme..]) {
+        let (authority, skip_authority) = match memchr::memchr2(b'/', b'?', &bytes[skip_scheme..]) {
             None => (skip_scheme..bytes.len(), bytes.len()),
             Some(0) => (skip_scheme..skip_scheme, skip_scheme),
             Some(n) => (skip_scheme..skip_scheme + n, skip_scheme + n + 1),
         };
 
-        let (host, port) = match memchr::memchr(b':', &bytes[authority]) {
-            None => (skip_scheme..skip_authority, skip_authority..skip_authority),
+        let (host, port) = match memchr::memchr(b':', &bytes[authority.clone()]) {
+            None => (skip_scheme..authority.end, skip_authority..skip_authority),
             Some(0) => return Err(Error::MissingHost),
             Some(n) => (
                 skip_scheme..skip_scheme + n,
@@ -33,13 +37,47 @@ impl<'data> Uri<'data> {
             ),
         };
 
-        let path = match memchr::memchr(b'?', &bytes[skip_authority..]) {
-            None => skip_authority..bytes.len(),
-            Some(n) => skip_authority..skip_authority + n,
+        let (path, query) = match memchr::memchr(b'?', &bytes[skip_authority..]) {
+            None => (skip_authority..bytes.len(), bytes.len()..bytes.len()),
+            Some(n) => (
+                skip_authority..skip_authority + n,
+                skip_authority + n + 1..bytes.len(),
+            ),
         };
 
         if host.is_empty() && !scheme.is_empty() {
             return Err(Error::MissingHost);
+        }
+
+        // == Step 2: check each segment for illegal characters ====================================
+
+        for i in scheme.clone() {
+            if !unreserved(bytes[i]) {
+                return Err(Error::ReservedCharacter(bytes[i]));
+            }
+        }
+
+        let foo = std::str::from_utf8(&bytes[host.clone()]).unwrap_or_default();
+
+        for i in host.clone() {
+            if !unreserved(bytes[i]) {
+                return Err(Error::ReservedCharacter(bytes[i]));
+            }
+        }
+
+        for i in port.clone() {
+            if !unreserved(bytes[i]) {
+                return Err(Error::ReservedCharacter(bytes[i]));
+            }
+        }
+
+        let foo_2 = std::str::from_utf8(&bytes[path.clone()]).unwrap_or_default();
+
+        for i in path.clone() {
+            // URI paths allow the use of `/` characters as path separators
+            if !path_abempty(bytes[i]) {
+                return Err(Error::ReservedCharacter(bytes[i]));
+            }
         }
 
         Ok(Self {
@@ -52,6 +90,14 @@ impl<'data> Uri<'data> {
             backing: bytes,
         })
     }
+}
+
+fn unreserved(c: u8) -> bool {
+    matches!(c, b'A'..b'Z' |  b'a'..b'z' | b'0'..b'9' | b'-' | b'.' | b'_' | b'~')
+}
+
+fn path_abempty(c: u8) -> bool {
+    matches!(c, b'A'..b'Z' |  b'a'..b'z' | b'0'..b'9' | b'-' | b'.' | b'_' | b'~' | b'/')
 }
 
 impl<'data> PartialEq for Uri<'data> {
