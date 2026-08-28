@@ -4,7 +4,7 @@ mod macros;
 pub mod mem;
 pub mod size;
 pub mod status;
-pub mod uri;
+pub mod url;
 
 pub mod prelude {
     //! A “prelude” for crates using the `http_primitives` crate.
