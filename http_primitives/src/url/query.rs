@@ -1,11 +1,11 @@
 use super::Error;
 
 #[derive(PartialEq, Eq)]
-pub struct Query<'data> {
+pub struct QueryForm<'data> {
     query: &'data [u8],
 }
 
-impl<'data> Query<'data> {
+impl<'data> QueryForm<'data> {
     pub(super) fn new(query: &'data [u8]) -> Result<Self, Error> {
         if !query.is_empty() {
             let mut prev = 0;
@@ -55,7 +55,7 @@ impl<'data> Query<'data> {
     }
 }
 
-impl<'data> std::fmt::Debug for Query<'data> {
+impl<'data> std::fmt::Debug for QueryForm<'data> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Query")
             .field(
@@ -66,7 +66,7 @@ impl<'data> std::fmt::Debug for Query<'data> {
     }
 }
 
-impl<'data> std::fmt::Display for Query<'data> {
+impl<'data> std::fmt::Display for QueryForm<'data> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(std::str::from_utf8(self.query).unwrap_or_default())
     }
@@ -128,7 +128,7 @@ mod test {
 
     #[test]
     fn url_query_simple() {
-        let query = Query::new(b"a=12&bcd=2&ef=345").expect("Should be a valid query");
+        let query = QueryForm::new(b"a=12&bcd=2&ef=345").expect("Should be a valid query");
         let mut iter = query.iter();
 
         let a = iter.next().unwrap();
@@ -148,7 +148,7 @@ mod test {
 
     #[test]
     fn url_query_single_parameter() {
-        let query = Query::new(b"a=1").expect("Should be a valid query");
+        let query = QueryForm::new(b"a=1").expect("Should be a valid query");
         let mut iter = query.iter();
 
         let a = iter.next().unwrap();
@@ -160,37 +160,37 @@ mod test {
 
     #[test]
     fn url_query_empty() {
-        let query = Query::new(b"").expect("Should be a valid query");
+        let query = QueryForm::new(b"").expect("Should be a valid query");
         assert_eq!(query.iter().next(), None)
     }
 
     #[test]
     fn url_query_err_empty_parameter() {
-        assert_eq!(Query::new(b"&"), Err(Error::EmptyQueryParameter));
+        assert_eq!(QueryForm::new(b"&"), Err(Error::EmptyQueryParameter));
     }
 
     #[test]
     fn url_query_err_invalid() {
-        assert_eq!(Query::new(b"a1"), Err(Error::InvalidQuery));
+        assert_eq!(QueryForm::new(b"a1"), Err(Error::InvalidQuery));
     }
 
     #[test]
     fn url_query_err_missing_key() {
-        assert_eq!(Query::new(b"=1"), Err(Error::MissingQueryKey));
+        assert_eq!(QueryForm::new(b"=1"), Err(Error::MissingQueryKey));
     }
 
     #[test]
     fn url_query_err_missing_value() {
-        assert_eq!(Query::new(b"a="), Err(Error::MissingQueryValue));
+        assert_eq!(QueryForm::new(b"a="), Err(Error::MissingQueryValue));
     }
 
     #[test]
     fn url_query_err_reserved_character_in_key() {
-        assert_eq!(Query::new(b"%=1"), Err(Error::ReservedCharacter(b'%')))
+        assert_eq!(QueryForm::new(b"%=1"), Err(Error::ReservedCharacter(b'%')))
     }
 
     #[test]
     fn url_query_err_reserved_character_in_val() {
-        assert_eq!(Query::new(b"a=%"), Err(Error::ReservedCharacter(b'%')))
+        assert_eq!(QueryForm::new(b"a=%"), Err(Error::ReservedCharacter(b'%')))
     }
 }

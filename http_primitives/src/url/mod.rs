@@ -9,7 +9,7 @@ pub struct Url<'data> {
     pub host: &'data [u8],
     pub port: &'data [u8],
     pub path: &'data [u8],
-    pub query: Query<'data>,
+    pub query: QueryForm<'data>,
     pub fragment: &'data [u8],
 
     backing: &'data [u8],
@@ -94,7 +94,7 @@ impl<'data> Url<'data> {
             port: if port.is_empty() { b"80" } else { &bytes[port] },
             path: if path.is_empty() { b"/" } else { &bytes[path] },
 
-            query: Query::new(&bytes[query])?,
+            query: QueryForm::new(&bytes[query])?,
 
             backing: bytes,
         })
@@ -236,5 +236,17 @@ mod test {
     #[test]
     fn url_invalid_only_port() {
         assert_eq!(Url::new(b":80"), Err(Error::MissingHost));
+    }
+}
+
+#[cfg(test)]
+mod fuzz {
+    use super::Url;
+
+    #[test]
+    fn fuzz_url() {
+        bolero::check!().for_each(|bytes| {
+            let _ = Url::new(bytes);
+        })
     }
 }

@@ -9,5 +9,8 @@ target/
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 
-# Core dumps during fuzzing
+# Fuzzing-related
 core*
+**/__fuzz__/*/*
+!**/__fuzz__/*/corpus/
+!**/__fuzz__/*/crashes/
