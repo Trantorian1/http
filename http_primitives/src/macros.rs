@@ -71,9 +71,9 @@ macro_rules! assert_gr {
 
 /// Assert greater than or equal.
 ///
-/// ## Example Usage
+/// # Examples
 ///
-/// ```
+/// ```rust
 /// # use http_primitives::prelude::*;
 /// assert_greq!(4, 4);
 /// ```
@@ -87,6 +87,14 @@ macro_rules! assert_greq {
     };
 }
 
+/// Compares two byte strings together.
+///
+/// # Examples
+///
+/// ```rust
+/// # use http_primitives::prelude::*;
+/// assert_streq!(b"Trantorian", b"Trantorian");
+/// ```
 #[macro_export]
 macro_rules! assert_streq {
     ($left:expr,$right:expr) => {{

@@ -1,23 +1,105 @@
+//! [Url] parsing utilities.
+
 mod error;
 mod query;
 
 pub use error::Error;
 pub use query::*;
 
+/// Zero-copy **U**niform **R**esource **L**ocators.
+///
+/// See [RFC3986] for more information.
+///
+/// [RFC3986]: https://www.rfc-editor.org/info/rfc3986
 pub struct Url<'data> {
+    /// See [RFC3986], scheme.
+    ///
+    /// > _"Each URI begins with a scheme name that refers to a specification for assigning
+    /// > identifiers within that scheme.  As such, the URI syntax is a federated and extensible
+    /// > naming system wherein each scheme's specification may further restrict the syntax and
+    /// > semantics of identifiers using that scheme."_
+    ///
+    /// [RFC3986]: https://www.rfc-editor.org/info/rfc3986/#section-3.1
     pub scheme: &'data [u8],
+
+    /// See [RFC3986], host.
+    ///
+    /// > _"The host subcomponent of authority is identified by an IP literal encapsulated within
+    /// > square brackets, an IPv4 address in dotted-decimal form, or a registered name. The host
+    /// > subcomponent is case-insensitive.  The presence of a host subcomponent within a URI does
+    /// > not imply that the scheme requires access to the given host on the Internet."_
+    ///
+    /// [RFC3986]: https://www.rfc-editor.org/info/rfc3986/#section-3.2.2
     pub host: &'data [u8],
+
+    /// See [RFC3986], port.
+    ///
+    /// > _"The port subcomponent of authority is designated by an optional port number in decimal
+    /// > following the host and delimited from it by a single colon (":") character."_
+    ///
+    /// [RFC3986]: https://www.rfc-editor.org/info/rfc3986/#section-3.2.3
     pub port: &'data [u8],
+
+    /// See [RFC3986], path.
+    ///
+    /// > _"The path component contains data, usually organized in hierarchical form, that, along
+    /// > with data in the non-hierarchical query component [(Section 3.4)], serves to identify a
+    /// > resource within the scope of the URI's scheme and naming authority (if any). The path is
+    /// > terminated by the first question mark ("?") or number sign ("#") character, or by the end
+    /// > of the URI."_
+    ///
+    /// [RFC3986]: https://www.rfc-editor.org/info/rfc3986/#section-3.3
+    /// [Section 3.4]: https://www.rfc-editor.org/info/rfc3986/#section-3.4
     pub path: &'data [u8],
-    pub query: QueryForm<'data>,
+
+    /// See [RFC3986], query.
+    ///
+    /// > _"The query component contains non-hierarchical data that, along with data in the path
+    /// > component (Section 3.3), serves to identify a resource within the scope of the URI's
+    /// > scheme and naming authority (if any)."_
+    ///
+    /// # Usage
+    ///
+    /// HTTP query data is expected to be in `x-www-form-urlencoded` format.
+    ///
+    /// [RFC3986]: https://www.rfc-editor.org/info/rfc3986/#section-3.4
+    /// [Section 3.3]: https://www.rfc-editor.org/info/rfc3986/#section-3.3
+    pub query: Query<'data>,
+
+    /// See [RFC3986], fragment.
+    ///
+    /// > _"The fragment identifier component of a URI allows indirect identification of a secondary
+    /// > resource by reference to a primary resource and additional identifying information. The
+    /// > identified secondary resource may be some portion or subset of the primary resource, some
+    /// > view on representations of the primary resource, or some other resource defined or
+    /// > described by those representations."_
+    ///
+    /// [RFC3986]: https://www.rfc-editor.org/info/rfc3986/#section-3.5
     pub fragment: &'data [u8],
 
     backing: &'data [u8],
 }
 
 impl<'data> Url<'data> {
+    /// Tries to parse a byte string into a valid URL.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MissingScheme`] if the URL contains a scheme specifier (`://`) but no scheme
+    /// preceding it.
+    ///
+    /// Returns [`MissingHost`] if the URL contains a port and no host, or a scheme and no host.
+    ///
+    /// Returns [`MissingFragment`] if the URL contains a fragment specified (`#`) but no fragment
+    /// data.
+    ///
+    /// See [`Query::new`] for a list of query-related errors.
+    ///
+    /// [`MissingScheme`]: Error::MissingScheme
+    /// [`MissingHost`]: Error::MissingHost
+    /// [`MissingFragment`]: Error::MissingFragment
     pub fn new(bytes: &'data [u8]) -> Result<Self, Error> {
-        // FIXME: parse out legal characters and % encoding
+        // FIXME: validate % encoding
 
         // == Step 1: parse and separate URL segments ==============================================
 
@@ -62,26 +144,26 @@ impl<'data> Url<'data> {
         // == Step 2: check each segment for illegal characters ====================================
 
         for i in scheme.clone() {
-            if !unreserved(bytes[i]) {
+            if !is_valid_scheme(bytes[i]) {
                 return Err(Error::ReservedCharacter(bytes[i]));
             }
         }
 
         for i in host.clone() {
-            if !unreserved(bytes[i]) {
+            if !is_valid_unreserved(bytes[i]) {
                 return Err(Error::ReservedCharacter(bytes[i]));
             }
         }
 
         for i in port.clone() {
-            if !unreserved(bytes[i]) {
+            if !is_valid_unreserved(bytes[i]) {
                 return Err(Error::ReservedCharacter(bytes[i]));
             }
         }
 
         for i in path.clone() {
             // URL paths allow the use of `/` characters as path separators
-            if !path_abempty(bytes[i]) {
+            if !is_valid_path_abempty(bytes[i]) {
                 return Err(Error::ReservedCharacter(bytes[i]));
             }
         }
@@ -94,34 +176,38 @@ impl<'data> Url<'data> {
             port: if port.is_empty() { b"80" } else { &bytes[port] },
             path: if path.is_empty() { b"/" } else { &bytes[path] },
 
-            query: QueryForm::new(&bytes[query])?,
+            query: Query::new(&bytes[query])?,
 
             backing: bytes,
         })
     }
 }
 
-fn unreserved(c: u8) -> bool {
-    matches!(c, b'A'..b'Z' |  b'a'..b'z' | b'0'..b'9' | b'-' | b'.' | b'_' | b'~')
+fn is_valid_scheme(c: u8) -> bool {
+    matches!(c, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'-' | b'.')
 }
 
-fn path_abempty(c: u8) -> bool {
-    matches!(c, b'A'..b'Z' |  b'a'..b'z' | b'0'..b'9' | b'-' | b'.' | b'_' | b'~' | b'/')
+fn is_valid_unreserved(c: u8) -> bool {
+    matches!(c, b'A'..=b'Z' |  b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~')
 }
 
-impl<'data> PartialEq for Url<'data> {
+fn is_valid_path_abempty(c: u8) -> bool {
+    matches!(c, b'A'..=b'Z' |  b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/')
+}
+
+impl PartialEq for Url<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.backing == other.backing
     }
 }
 
-impl<'data> std::fmt::Debug for Url<'data> {
+impl std::fmt::Debug for Url<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let scheme = std::str::from_utf8(&self.scheme).unwrap_or_default();
-        let host = std::str::from_utf8(&self.host).unwrap_or_default();
-        let port = std::str::from_utf8(&self.port).unwrap_or_default();
-        let path = std::str::from_utf8(&self.path).unwrap_or_default();
-        let fragment = std::str::from_utf8(&self.fragment).unwrap_or_default();
+        let scheme = std::str::from_utf8(self.scheme).unwrap_or_default();
+        let host = std::str::from_utf8(self.host).unwrap_or_default();
+        let port = std::str::from_utf8(self.port).unwrap_or_default();
+        let path = std::str::from_utf8(self.path).unwrap_or_default();
+        let fragment = std::str::from_utf8(self.fragment).unwrap_or_default();
 
         f.debug_struct("Url")
             .field("scheme", &scheme)
@@ -134,7 +220,7 @@ impl<'data> std::fmt::Debug for Url<'data> {
     }
 }
 
-impl<'data> std::fmt::Display for Url<'data> {
+impl std::fmt::Display for Url<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(std::str::from_utf8(self.backing).unwrap_or_default())
     }
@@ -160,7 +246,7 @@ mod test {
         assert_streq!(a.val, b"world");
         assert_eq!(parameters.next(), None);
 
-        assert_eq!(url.fragment, b"anchor")
+        assert_eq!(url.fragment, b"anchor");
     }
 
     #[test]
@@ -172,7 +258,7 @@ mod test {
         assert_streq!(url.port, b"80");
         assert_streq!(url.path, b"/");
         assert_eq!(url.query.iter().next(), None);
-        assert_eq!(url.fragment, b"")
+        assert_eq!(url.fragment, b"");
     }
 
     #[test]
@@ -184,7 +270,7 @@ mod test {
         assert_streq!(url.port, b"80");
         assert_streq!(url.path, b"path");
         assert_eq!(url.query.iter().next(), None);
-        assert_eq!(url.fragment, b"")
+        assert_eq!(url.fragment, b"");
     }
 
     #[test]
@@ -215,7 +301,7 @@ mod test {
         assert_streq!(url.port, b"80");
         assert_streq!(url.path, b"/");
         assert_eq!(url.query.iter().next(), None);
-        assert_eq!(url.fragment, b"fragment")
+        assert_eq!(url.fragment, b"fragment");
     }
 
     #[test]
@@ -247,6 +333,6 @@ mod fuzz {
     fn fuzz_url() {
         bolero::check!().for_each(|bytes| {
             let _ = Url::new(bytes);
-        })
+        });
     }
 }
