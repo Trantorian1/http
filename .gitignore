@@ -12,5 +12,3 @@ target/
 # Fuzzing-related
 core*
 **/__fuzz__/*/*
-!**/__fuzz__/*/corpus/
-!**/__fuzz__/*/crashes/
