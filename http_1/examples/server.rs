@@ -44,13 +44,23 @@ fn main() {
             Ok(mut connection) => {
                 server
                     .process(&mut connection)
-                    .respond(
-                        |request, response| match (request.method, request.target.path) {
+                    .respond(|request, response| {
+                        tracing::info!(
+                            path = std::str::from_utf8(request.target.path).unwrap_or_default()
+                        );
+
+                        match (request.method, request.target.path) {
                             (methods::GET, b"/") => response.with_status_code(Status::Ok).send(),
+                            (methods::GET, [b'/', b'e', b'c', b'h', b'o', b'/', param @ ..]) => {
+                                response
+                                    .with_status_code(Status::Ok)
+                                    .with_content(content::TEXT_PLAIN, param)
+                                    .send()
+                            },
                             (methods::GET, _) => response.with_status_code(Status::NotFound).send(),
                             (..) => response.with_status_code(Status::NotImplemented).send(),
-                        },
-                    );
+                        }
+                    });
             },
             Err(e) => {
                 tracing::error!("error: {e}");

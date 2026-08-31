@@ -30,6 +30,11 @@ where
 {
     buffer: &'buf mut BufferForWriting<'data>,
     stream: &'buf mut W,
+
+    // content
+    content_type: &'static [u8],
+    content: &'buf [u8],
+
     status: Status,
 }
 
@@ -43,6 +48,10 @@ where
         Self {
             stream,
             status: Status::default(),
+
+            content_type: b"",
+            content: b"",
+
             buffer,
         }
     }
@@ -51,6 +60,13 @@ where
     #[must_use]
     pub fn with_status_code(mut self, status: Status) -> Self {
         self.status = status;
+        self
+    }
+
+    #[must_use]
+    pub fn with_content(mut self, content_type: &'static [u8], content: &'buf [u8]) -> Self {
+        self.content_type = content_type;
+        self.content = content;
         self
     }
 
@@ -71,7 +87,27 @@ where
             writer.write(SP)?;
             writer.write(self.status.reason())?;
             writer.write(CRLF)?;
-            writer.write(CRLF)?;
+
+            // content
+            if !self.content_type.is_empty() && !self.content.is_empty() {
+                writer.write(headers::CONTENT_TYPE)?;
+                writer.write(self.content_type)?;
+                writer.write(CRLF)?;
+
+                let mut itoa = itoa::Buffer::new();
+                let content_length = itoa.format(self.content.len());
+
+                writer.write(headers::CONTENT_LENGTH)?;
+                writer.write(content_length.as_bytes())?;
+                writer.write(CRLF)?;
+
+                writer.write(CRLF)?;
+
+                writer.write(self.content)?;
+            } else {
+                writer.write(CRLF)?;
+            }
+
             Ok(())
         })
     }

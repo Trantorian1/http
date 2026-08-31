@@ -9,6 +9,8 @@
 //! [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112
 
 pub mod client;
+pub mod content;
+pub mod headers;
 pub mod methods;
 pub mod parsers;
 pub mod server;
