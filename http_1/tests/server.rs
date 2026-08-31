@@ -24,8 +24,8 @@ fn get_origin_200_ok() {
     let mut server = Server::new(&mut global_request_buffer, &mut global_response_buffer);
 
     server.process(&mut stream).respond(|request, response| {
-        assert_eq!(request.method(), methods::GET);
-        assert_eq!(request.target(), b"/");
+        assert_eq!(request.method, methods::GET);
+        assert_eq!(request.target.path, b"/");
 
         response
             .with_status_code(Status::Ok)
