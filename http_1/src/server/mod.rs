@@ -57,6 +57,14 @@ impl<'data> Server<'data> {
 }
 
 /// TPC input stream parser and response handler.
+///
+/// # Drop
+///
+/// This `struct` will [`clear`] both the global request buffer and global response buffer on drop
+/// to ensure future requests cannot read past data.
+///
+/// [`clear`]: http_primitives::Buffer::clear
+/// past data.
 pub struct RequestHandle<'buf, 'data, 'stream, RW>
 where
     'data: 'buf,
@@ -73,10 +81,7 @@ where
     RW: std::io::Read + std::io::Write,
 {
     /// Respond to a TCP [`Request`].
-    pub fn respond(
-        self,
-        f: fn(RequestInfo<'buf, 'data>, Response<'buf, 'data, '_, RW>) -> std::io::Result<()>,
-    ) {
+    pub fn respond(self, f: fn(RequestInfo<'_>, Response<'_, 'data, RW>) -> std::io::Result<()>) {
         let res = match Request::new(self.global_request_buffer, self.stream).process() {
             Err(status) => Response::new(self.global_response_buffer, self.stream)
                 .with_status_code(status)
@@ -90,6 +95,17 @@ where
         if let Err(err) = res {
             tracing::error!("Failed to send data back to TPC stream: {err}");
         }
+    }
+}
+
+impl<'buf, 'data, RW> Drop for RequestHandle<'buf, 'data, '_, RW>
+where
+    'data: 'buf,
+    RW: std::io::Read + std::io::Write,
+{
+    fn drop(&mut self) {
+        self.global_request_buffer.clear();
+        self.global_response_buffer.clear();
     }
 }
 

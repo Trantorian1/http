@@ -45,7 +45,7 @@ fn main() {
                 server
                     .process(&mut connection)
                     .respond(
-                        |request, response| match (request.method(), request.target()) {
+                        |request, response| match (request.method, request.target.path) {
                             (methods::GET, b"/") => response.with_status_code(Status::Ok).send(),
                             (methods::GET, _) => response.with_status_code(Status::NotFound).send(),
                             (..) => response.with_status_code(Status::NotImplemented).send(),

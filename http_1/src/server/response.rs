@@ -21,31 +21,25 @@ use crate::prelude::*;
 /// > request-line (for requests) or a status-line (for responses), and in the algorithm for
 /// > determining the length of the message body (Section 6)."_
 ///
-/// # Drop
-///
-/// This struct will [`clear`] the backing buffer on drop to ensure future requests cannot read past
-/// data.
-///
 /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#section-2.1
 /// [RFC5322]: https://datatracker.ietf.org/doc/html/rfc5322
-/// [`clear`]: http_primitives::Buffer::clear
-pub struct Response<'buf, 'data, 'reader, W>
+pub struct Response<'buf, 'data, W>
 where
     'data: 'buf,
     W: std::io::Write,
 {
     buffer: &'buf mut BufferForWriting<'data>,
-    stream: &'reader mut W,
+    stream: &'buf mut W,
     status: Status,
 }
 
-impl<'buf, 'data, 'reader, W> Response<'buf, 'data, 'reader, W>
+impl<'buf, 'data, W> Response<'buf, 'data, W>
 where
     'data: 'buf,
     W: std::io::Write,
 {
     /// Initializes a new [`Response`]
-    pub fn new(buffer: &'buf mut BufferForWriting<'data>, stream: &'reader mut W) -> Self {
+    pub fn new(buffer: &'buf mut BufferForWriting<'data>, stream: &'buf mut W) -> Self {
         Self {
             stream,
             status: Status::default(),
@@ -83,19 +77,19 @@ where
     }
 }
 
-impl<'buf, 'data, W> Drop for Response<'buf, 'data, '_, W>
-where
-    'data: 'buf,
-    W: std::io::Write,
-{
-    fn drop(&mut self) {
-        // Clears the buffer once we are done processing the request, that way data cannot be
-        // read by future calls if ever we mess up indexing in our `Buffer` implementation.
-        self.buffer.clear();
-    }
-}
+// impl<'buf, 'data, W> Drop for Response<'buf, 'data, '_, W>
+// where
+//     'data: 'buf,
+//     W: std::io::Write,
+// {
+//     fn drop(&mut self) {
+//         // Clears the buffer once we are done processing the request, that way data cannot be
+//         // read by future calls if ever we mess up indexing in our `Buffer` implementation.
+//         self.buffer.clear();
+//     }
+// }
 
-impl<'buf, 'data, W> std::fmt::Debug for Response<'buf, 'data, '_, W>
+impl<'buf, 'data, W> std::fmt::Debug for Response<'buf, 'data, W>
 where
     'data: 'buf,
     W: std::io::Write,

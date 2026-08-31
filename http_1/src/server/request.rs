@@ -57,8 +57,8 @@ where
     /// # Errors
     ///
     /// Returns an error [`Status`] code if [`Client`] request parsing fails.
-    pub fn process(self) -> Result<RequestInfo<'buf, 'data>, Status> {
-        let (method, target) = self.buffer.read_in(self.stream, |reader| {
+    pub fn process(self) -> Result<RequestInfo<'buf>, Status> {
+        let (method_range, target_range) = self.buffer.read_in(self.stream, |reader| {
             let method = reader.read(parsers::method)?;
 
             reader.read(parsers::sp)?;
@@ -77,9 +77,8 @@ where
         })?;
 
         Ok(RequestInfo {
-            buffer: self.buffer,
-            method,
-            target,
+            method: &self.buffer[method_range],
+            target: Url::new(&self.buffer[target_range]).map_err(|_err| Status::BadRequest)?,
         })
     }
 }
@@ -97,19 +96,7 @@ where
 }
 
 /// Zero-copy [`Request`] fields.
-///
-/// # Drop
-///
-/// This `struct` will [`clear`] its backing buffer on drop to ensure future requests cannot read
-/// past data.
-///
-/// [`clear`]: http_primitives::Buffer::clear
-pub struct RequestInfo<'buf, 'data>
-where
-    'data: 'buf,
-{
-    buffer: &'buf mut BufferForReading<'data>,
-
+pub struct RequestInfo<'data> {
     /// See [RFC9112], method.
     ///
     /// > _"The method token indicates the request method to be performed on the target resource.
@@ -126,7 +113,7 @@ where
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#name-method
     /// [Section 9]: https://www.rfc-editor.org/rfc/rfc9110#section-9
     /// [\[HTTP\]]: https://datatracker.ietf.org/doc/html/rfc9110
-    method: std::ops::Range<usize>,
+    pub method: &'data [u8],
 
     /// See [RFC9112], request target.
     ///
@@ -158,53 +145,17 @@ where
     ///
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#section-3.2
     /// [`400`]: Status::BadRequest
-    target: std::ops::Range<usize>,
+    pub target: Url<'data>,
 }
 
-impl<'buf, 'data> RequestInfo<'buf, 'data>
-where
-    'data: 'buf,
-{
-    #[must_use]
-    /// Returns the [method] associated to the [`Request`].
-    ///
-    /// [method]: crate::methods
-    pub fn method(&self) -> &[u8] {
-        &self.buffer[self.method.clone()]
-    }
-
-    #[must_use]
-    /// Returns the target of the request.
-    pub fn target(&self) -> &[u8] {
-        &self.buffer[self.target.clone()]
-    }
-}
-
-impl<'buf, 'data> Drop for RequestInfo<'buf, 'data>
-where
-    'data: 'buf,
-{
-    fn drop(&mut self) {
-        // Clears the buffer once we are done processing the request, that way data cannot be
-        // read by future calls if ever we mess up indexing in our `Buffer` implementation.
-        self.buffer.clear();
-    }
-}
-
-impl<'buf, 'data> std::fmt::Debug for RequestInfo<'buf, 'data>
-where
-    'data: 'buf,
-{
+impl std::fmt::Debug for RequestInfo<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RequestInfo")
             .field(
                 "method",
-                &std::str::from_utf8(self.method()).unwrap_or_default(),
+                &std::str::from_utf8(self.method).unwrap_or_default(),
             )
-            .field(
-                "target",
-                &std::str::from_utf8(self.target()).unwrap_or_default(),
-            )
+            .field("target", &self.target)
             .finish()
     }
 }
