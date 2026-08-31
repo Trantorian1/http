@@ -64,6 +64,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 # Parsing
 memchr = "2.8.3"
+itoa = "1.0.18"
 
 # Testing
 rstest = "0.26.1"

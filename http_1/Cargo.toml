@@ -17,6 +17,7 @@ tracing-subscriber.workspace = true
 
 # Parsing
 memchr.workspace = true
+itoa.workspace = true
 
 [[example]]
 name = "server"

@@ -76,9 +76,17 @@ where
             Ok((method, target))
         })?;
 
+        let target = match Url::new(&self.buffer[target_range]) {
+            Ok(url) => url,
+            Err(err) => {
+                tracing::error!(%err);
+                return Err(Status::BadRequest);
+            },
+        };
+
         Ok(RequestInfo {
             method: &self.buffer[method_range],
-            target: Url::new(&self.buffer[target_range]).map_err(|_err| Status::BadRequest)?,
+            target,
         })
     }
 }

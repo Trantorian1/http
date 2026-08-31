@@ -109,10 +109,16 @@ impl<'data> Url<'data> {
             None => (bytes.len()..bytes.len(), ..bytes.len()),
         };
 
+        #[cfg(test)]
+        let _fragment = std::str::from_utf8(&bytes[fragment.clone()]).unwrap_or_default();
+
         let (query, before_query) = match memchr::memrchr(b'?', &bytes[before_fragment]) {
             Some(n) => (n + 1..before_fragment.end, ..n),
             None => (before_fragment.end..before_fragment.end, before_fragment),
         };
+
+        #[cfg(test)]
+        let _query = std::str::from_utf8(&bytes[query.clone()]).unwrap_or_default();
 
         let (scheme, hier_part) = match memchr::memmem::rfind(&bytes[before_query], b"://") {
             Some(0) => return Err(Error::MissingScheme),
@@ -120,13 +126,19 @@ impl<'data> Url<'data> {
             None => (0..0, 0..before_query.end),
         };
 
-        let (path, authority) = match memchr::memrchr(b'/', &bytes[hier_part.clone()]) {
+        #[cfg(test)]
+        let _scheme = std::str::from_utf8(&bytes[scheme.clone()]).unwrap_or_default();
+
+        let (path, authority) = match memchr::memchr(b'/', &bytes[hier_part.clone()]) {
             Some(n) => (
-                hier_part.start + n + 1..hier_part.end,
+                hier_part.start + n..hier_part.end,
                 hier_part.start..hier_part.start + n,
             ),
             None => (hier_part.end..hier_part.end, hier_part.clone()),
         };
+
+        #[cfg(test)]
+        let _path = std::str::from_utf8(&bytes[path.clone()]).unwrap_or_default();
 
         let (host, port) = match memchr::memrchr(b':', &bytes[authority.clone()]) {
             Some(0) => return Err(Error::MissingHost),
@@ -136,6 +148,12 @@ impl<'data> Url<'data> {
             ),
             None => (authority.clone(), authority.end..authority.end),
         };
+
+        #[cfg(test)]
+        let _host = std::str::from_utf8(&bytes[host.clone()]).unwrap_or_default();
+
+        #[cfg(test)]
+        let _port = std::str::from_utf8(&bytes[port.clone()]).unwrap_or_default();
 
         if !scheme.is_empty() && host.is_empty() {
             return Err(Error::MissingHost);
@@ -250,6 +268,17 @@ mod test {
     }
 
     #[test]
+    fn url_nested_path() {
+        let url = Url::new(b"/path/to/resource/name").unwrap();
+        assert_streq!(url.scheme, b"");
+        assert_streq!(url.host, b"");
+        assert_streq!(url.port, b"80");
+        assert_streq!(url.path, b"/path/to/resource/name");
+        assert_eq!(url.query.iter().next(), None);
+        assert_streq!(url.fragment, b"");
+    }
+
+    #[test]
     fn url_only_host() {
         let url = Url::new(b"example.com").unwrap();
 
@@ -258,7 +287,7 @@ mod test {
         assert_streq!(url.port, b"80");
         assert_streq!(url.path, b"/");
         assert_eq!(url.query.iter().next(), None);
-        assert_eq!(url.fragment, b"");
+        assert_streq!(url.fragment, b"");
     }
 
     #[test]
@@ -268,9 +297,9 @@ mod test {
         assert_streq!(url.scheme, b"");
         assert_streq!(url.host, b"");
         assert_streq!(url.port, b"80");
-        assert_streq!(url.path, b"path");
+        assert_streq!(url.path, b"/path");
         assert_eq!(url.query.iter().next(), None);
-        assert_eq!(url.fragment, b"");
+        assert_streq!(url.fragment, b"");
     }
 
     #[test]
@@ -301,7 +330,7 @@ mod test {
         assert_streq!(url.port, b"80");
         assert_streq!(url.path, b"/");
         assert_eq!(url.query.iter().next(), None);
-        assert_eq!(url.fragment, b"fragment");
+        assert_streq!(url.fragment, b"fragment");
     }
 
     #[test]
