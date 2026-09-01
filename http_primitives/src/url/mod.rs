@@ -1,9 +1,11 @@
 //! [Url] parsing utilities.
 
 mod error;
+mod percent_encode;
 mod query;
 
 pub use error::Error;
+pub use percent_encode::*;
 pub use query::*;
 
 /// Zero-copy **U**niform **R**esource **L**ocators.
