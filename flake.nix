@@ -1,7 +1,9 @@
 {
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+
     kani-flake.url = "github:trantorian1/kani-flake";
+    kani-flake.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = {
