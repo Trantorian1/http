@@ -76,7 +76,7 @@ where
             Ok((method, target))
         })?;
 
-        let target = match Url::new(&self.buffer[target_range]) {
+        let target = match UrlOld::new(&self.buffer[target_range]) {
             Ok(url) => url,
             Err(err) => {
                 tracing::error!(%err);
@@ -153,7 +153,7 @@ pub struct RequestInfo<'data> {
     ///
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#section-3.2
     /// [`400`]: Status::BadRequest
-    pub target: Url<'data>,
+    pub target: UrlOld<'data>,
 }
 
 impl std::fmt::Debug for RequestInfo<'_> {

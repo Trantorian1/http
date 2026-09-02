@@ -1,4 +1,4 @@
-use super::Error;
+use super::OldError;
 
 /// [`Url`] `x-www-form-urlencoded` query.
 ///
@@ -35,37 +35,37 @@ impl<'data> Query<'data> {
     /// [`MissingQueryKey`]: Error::MissingQueryKey
     /// [`MissingQueryValue`]: Error::MissingQueryValue
     /// [`ReservedCharacter`]: Error::ReservedCharacter
-    pub fn new(query: &'data [u8]) -> Result<Self, Error> {
+    pub fn new(query: &'data [u8]) -> Result<Self, OldError> {
         if !query.is_empty() {
             let mut prev = 0;
             for n in memchr::memchr_iter(b'&', query).chain(std::iter::once(query.len())) {
                 let parameter = prev..n;
                 if parameter.is_empty() {
-                    return Err(Error::EmptyQueryParameter);
+                    return Err(OldError::EmptyQueryParameter);
                 }
 
                 let (key, value) = match memchr::memchr(b'=', &query[parameter]) {
-                    None => return Err(Error::InvalidQuery),
+                    None => return Err(OldError::InvalidQuery),
                     Some(m) => (prev..prev + m, prev + m + 1..n),
                 };
 
                 if key.is_empty() {
-                    return Err(Error::MissingQueryKey);
+                    return Err(OldError::MissingQueryKey);
                 }
 
                 if value.is_empty() {
-                    return Err(Error::MissingQueryValue);
+                    return Err(OldError::MissingQueryValue);
                 }
 
                 for i in key {
-                    if !super::is_valid_unreserved(query[i]) {
-                        return Err(Error::ReservedCharacter(query[i]));
+                    if !super::old::is_valid_unreserved(query[i]) {
+                        return Err(OldError::ReservedCharacter(query[i]));
                     }
                 }
 
                 for i in value {
-                    if !super::is_valid_unreserved(query[i]) {
-                        return Err(Error::ReservedCharacter(query[i]));
+                    if !super::old::is_valid_unreserved(query[i]) {
+                        return Err(OldError::ReservedCharacter(query[i]));
                     }
                 }
 
@@ -193,16 +193,16 @@ mod test {
         let mut iter = query.iter();
 
         let a = iter.next().unwrap();
-        assert_streq!(a.key, b"a");
-        assert_streq!(a.val, b"12");
+        assert_str_eq!(a.key, b"a");
+        assert_str_eq!(a.val, b"12");
 
         let bcd = iter.next().unwrap();
-        assert_streq!(bcd.key, b"bcd");
-        assert_streq!(bcd.val, b"2");
+        assert_str_eq!(bcd.key, b"bcd");
+        assert_str_eq!(bcd.val, b"2");
 
         let ef = iter.next().unwrap();
-        assert_streq!(ef.key, b"ef");
-        assert_streq!(ef.val, b"345");
+        assert_str_eq!(ef.key, b"ef");
+        assert_str_eq!(ef.val, b"345");
 
         assert_eq!(iter.next(), None);
     }
@@ -227,31 +227,31 @@ mod test {
 
     #[test]
     fn url_query_err_empty_parameter() {
-        assert_eq!(Query::new(b"&"), Err(Error::EmptyQueryParameter));
+        assert_eq!(Query::new(b"&"), Err(OldError::EmptyQueryParameter));
     }
 
     #[test]
     fn url_query_err_invalid() {
-        assert_eq!(Query::new(b"a1"), Err(Error::InvalidQuery));
+        assert_eq!(Query::new(b"a1"), Err(OldError::InvalidQuery));
     }
 
     #[test]
     fn url_query_err_missing_key() {
-        assert_eq!(Query::new(b"=1"), Err(Error::MissingQueryKey));
+        assert_eq!(Query::new(b"=1"), Err(OldError::MissingQueryKey));
     }
 
     #[test]
     fn url_query_err_missing_value() {
-        assert_eq!(Query::new(b"a="), Err(Error::MissingQueryValue));
+        assert_eq!(Query::new(b"a="), Err(OldError::MissingQueryValue));
     }
 
     #[test]
     fn url_query_err_reserved_character_in_key() {
-        assert_eq!(Query::new(b"%=1"), Err(Error::ReservedCharacter(b'%')));
+        assert_eq!(Query::new(b"%=1"), Err(OldError::ReservedCharacter(b'%')));
     }
 
     #[test]
     fn url_query_err_reserved_character_in_val() {
-        assert_eq!(Query::new(b"a=%"), Err(Error::ReservedCharacter(b'%')));
+        assert_eq!(Query::new(b"a=%"), Err(OldError::ReservedCharacter(b'%')));
     }
 }

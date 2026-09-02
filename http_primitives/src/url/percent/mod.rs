@@ -78,6 +78,6 @@ mod test {
         let written = encode(message, &mut buffer, sets::PATH);
 
         assert_eq!(written, message.len() + 2);
-        assert_streq!(&buffer[..written], b"Hello%20World");
+        assert_str_eq!(&buffer[..written], b"Hello%20World");
     }
 }

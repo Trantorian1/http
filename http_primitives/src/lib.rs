@@ -19,11 +19,12 @@ pub mod prelude {
     //!
     //! The prelude may grow over time as additional items see ubiquitous use.
 
+    pub use super::assert_char_eq;
     pub use super::assert_gr;
     pub use super::assert_greq;
     pub use super::assert_le;
     pub use super::assert_leq;
-    pub use super::assert_streq;
+    pub use super::assert_str_eq;
     pub use super::mem::buffer::Buffer;
     pub use super::mem::buffer::BufferForReading;
     pub use super::mem::buffer::BufferForWriting;
@@ -35,7 +36,7 @@ pub mod prelude {
     pub use super::status::Status;
     pub use super::url::Query;
     pub use super::url::QueryParameter;
-    pub use super::url::Url;
+    pub use super::url::UrlOld;
 }
 
 pub use prelude::*;

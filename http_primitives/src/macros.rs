@@ -96,10 +96,19 @@ macro_rules! assert_greq {
 /// assert_streq!(b"Trantorian", b"Trantorian");
 /// ```
 #[macro_export]
-macro_rules! assert_streq {
+macro_rules! assert_str_eq {
     ($left:expr,$right:expr) => {{
         let left = std::str::from_utf8($left).expect("Invalid utf8");
         let right = std::str::from_utf8($right).expect("Invalid utf8");
+        assert_eq!(left, right);
+    }};
+}
+
+#[macro_export]
+macro_rules! assert_char_eq {
+    ($left:expr,$right:expr) => {{
+        let left = char::from_u32($left as u32).expect("Invalid utf8");
+        let right = char::from_u32($right as u32).expect("Invalid utf8");
         assert_eq!(left, right);
     }};
 }
