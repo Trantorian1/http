@@ -1,5 +1,7 @@
-#[derive(Debug)]
-pub enum Error {}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Error {
+    Overflow,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A validation error indicates a mismatch between input and valid input. User agents, especially
@@ -22,4 +24,15 @@ pub enum ValidationError {
     ///
     /// [URL unit]: https://url.spec.whatwg.org/#url-units
     InvalidURLUnit,
+
+    /// The input’s scheme is not followed by "//".
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// "file:c:/my-secret-folder"
+    ///
+    /// "https:example.org"
+    /// ```
+    SpecialSchemeMissingFollowingSolidus,
 }
