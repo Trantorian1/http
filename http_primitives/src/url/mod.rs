@@ -2,7 +2,7 @@
 
 mod old;
 mod parsing;
-mod percent;
+pub mod percent;
 mod query;
 
 pub use old::*;

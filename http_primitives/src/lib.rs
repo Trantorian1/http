@@ -34,6 +34,7 @@ pub mod prelude {
     pub use super::size::KB;
     pub use super::size::MB;
     pub use super::status::Status;
+    pub use super::url;
     pub use super::url::Query;
     pub use super::url::QueryParameter;
     pub use super::url::UrlOld;
