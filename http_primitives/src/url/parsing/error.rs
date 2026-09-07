@@ -1,6 +1,16 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     Overflow,
+    /// The input has a special scheme, but does not contain a host.
+    ///
+    /// ```text
+    /// "https://#fragment"
+    ///
+    /// "https://:443"
+    ///
+    /// "https://user:pass@"
+    /// ```
+    HostMissing,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
