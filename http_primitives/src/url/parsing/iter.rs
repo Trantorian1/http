@@ -1,11 +1,11 @@
-pub struct ByteIter<'data> {
+pub(super) struct ByteIter<'data> {
     next: usize,
     bytes: &'data [u8],
     next_tab_or_newline: usize,
 }
 
 impl<'data> ByteIter<'data> {
-    pub fn new(bytes: &'data [u8]) -> Self {
+    pub(super) fn new(bytes: &'data [u8]) -> Self {
         Self {
             next: 0,
             bytes,
@@ -13,12 +13,12 @@ impl<'data> ByteIter<'data> {
         }
     }
 
-    pub fn peek(&mut self) -> Option<&'data u8> {
+    pub(super) fn peek(&mut self) -> Option<&'data u8> {
         self.skip_tabs_and_newlines();
         self.bytes.get(self.next)
     }
 
-    pub fn starts_with(&self, needle: &[u8]) -> bool {
+    pub(super) fn skip_if_matches(&mut self, needle: &[u8]) -> bool {
         let mut i = self.next;
         let mut next_tab_or_newline = self.next_tab_or_newline;
 
@@ -35,10 +35,42 @@ impl<'data> ByteIter<'data> {
             i += 1;
         }
 
+        self.next = i;
+        self.next_tab_or_newline = find_next_tab_or_newline(&self.bytes[i..]) + i;
+
         true
     }
 
-    pub fn reset(&mut self) {
+    pub(super) fn skip_while_matches2(&mut self, needle1: u8, needle2: u8) -> bool {
+        let mut i = self.next;
+        let mut next_tab_or_newline = self.next_tab_or_newline;
+
+        // We need this here to ensure we start the skip routine on a non-tab or newline character
+        while i == next_tab_or_newline && i < self.bytes.len() {
+            i += 1;
+            next_tab_or_newline = find_next_tab_or_newline(&self.bytes[i..]) + i;
+        }
+
+        let prev = i;
+
+        // Keep skipping while we still have matches.
+        while i < self.bytes.len() && (self.bytes[i] == needle1 || self.bytes[i] == needle2) {
+            i += 1;
+
+            // FIXME: this can be replaced by a single inverse search routine with minimal looping
+            while i == next_tab_or_newline && i < self.bytes.len() {
+                i += 1;
+                next_tab_or_newline = find_next_tab_or_newline(&self.bytes[i..]) + i;
+            }
+        }
+
+        self.next = i;
+        self.next_tab_or_newline = find_next_tab_or_newline(&self.bytes[i..]) + i;
+
+        i != prev
+    }
+
+    pub(super) fn reset(&mut self) {
         *self = Self::new(self.bytes);
     }
 
@@ -126,10 +158,62 @@ mod test {
     }
 
     #[test]
-    fn byte_iter_starts_with() {
+    fn byte_iter_skip_if_matches_with_match() {
         let mut iter = ByteIter::new(b"\t\n\rHello, \t\t\tWo\n\n\nrl\r\r\rd\t\n\r");
 
-        assert!(iter.starts_with(b"Hello, World"));
+        assert!(iter.skip_if_matches(b"Hello, World"));
+
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn byte_iter_skip_if_matches_with_no_match() {
+        let mut iter = ByteIter::new(b"\t\n\rHello, \t\t\tWo\n\n\nrl\r\r\rd\t\n\r");
+
+        assert!(!iter.skip_if_matches(b"FizzBuzz"));
+
+        assert_char_eq!(*iter.next().unwrap(), b'H');
+        assert_char_eq!(*iter.next().unwrap(), b'e');
+        assert_char_eq!(*iter.next().unwrap(), b'l');
+        assert_char_eq!(*iter.next().unwrap(), b'l');
+        assert_char_eq!(*iter.next().unwrap(), b'o');
+        assert_char_eq!(*iter.next().unwrap(), b',');
+        assert_char_eq!(*iter.next().unwrap(), b' ');
+        assert_char_eq!(*iter.next().unwrap(), b'W');
+        assert_char_eq!(*iter.next().unwrap(), b'o');
+        assert_char_eq!(*iter.next().unwrap(), b'r');
+        assert_char_eq!(*iter.next().unwrap(), b'l');
+        assert_char_eq!(*iter.next().unwrap(), b'd');
+
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn skip_while_matches2_with_match() {
+        let mut iter = ByteIter::new(b"\t\n\r//\\/\\\\\\/\\///\\///\\example.com");
+
+        assert!(iter.skip_while_matches2(b'/', b'\\'));
+
+        assert_char_eq!(*iter.next().unwrap(), b'e');
+        assert_char_eq!(*iter.next().unwrap(), b'x');
+        assert_char_eq!(*iter.next().unwrap(), b'a');
+        assert_char_eq!(*iter.next().unwrap(), b'm');
+        assert_char_eq!(*iter.next().unwrap(), b'p');
+        assert_char_eq!(*iter.next().unwrap(), b'l');
+        assert_char_eq!(*iter.next().unwrap(), b'e');
+        assert_char_eq!(*iter.next().unwrap(), b'.');
+        assert_char_eq!(*iter.next().unwrap(), b'c');
+        assert_char_eq!(*iter.next().unwrap(), b'o');
+        assert_char_eq!(*iter.next().unwrap(), b'm');
+
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn skip_while_matches2_with_no_match() {
+        let mut iter = ByteIter::new(b"\t\n\rHello, \t\t\tWo\n\n\nrl\r\r\rd\t\n\r");
+
+        assert!(!iter.skip_while_matches2(b'/', b'\\'));
 
         assert_char_eq!(*iter.next().unwrap(), b'H');
         assert_char_eq!(*iter.next().unwrap(), b'e');

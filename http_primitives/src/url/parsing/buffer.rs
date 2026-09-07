@@ -1,39 +1,49 @@
 use super::Error;
 
-pub struct UrlBuffer<'data> {
+pub(super) struct UrlBuffer<'data> {
     backing: &'data mut [u8],
     next: usize,
 }
 
 impl<'data> UrlBuffer<'data> {
-    pub fn new(backing: &'data mut [u8]) -> Self {
+    pub(super) fn new(backing: &'data mut [u8]) -> Self {
         assert!(!backing.is_empty());
         Self { backing, next: 0 }
     }
 
-    pub fn push(&mut self, c: u8) -> Result<(), Error> {
+    pub(super) fn push(&mut self, c: u8) -> Result<usize, Error> {
         if self.next < self.backing.len() {
             self.backing[self.next] = c;
             self.next += 1;
-            Ok(())
+            Ok(self.next)
         } else {
             Err(Error::Overflow)
         }
     }
 
-    pub fn clear(&mut self) {
+    pub(super) fn push_str(&mut self, bytes: &[u8]) -> Result<usize, Error> {
+        if self.next + bytes.len() <= self.backing.len() {
+            self.backing[self.next..self.next + bytes.len()].copy_from_slice(bytes);
+            self.next += bytes.len();
+            Ok(self.next)
+        } else {
+            Err(Error::Overflow)
+        }
+    }
+
+    pub(super) fn clear(&mut self) {
         self.next = 0;
     }
 
-    pub fn into_inner(self) -> &'data [u8] {
+    pub(super) fn into_inner(self) -> &'data [u8] {
         &self.backing[..self.next]
     }
 
-    pub fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         self.next
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }

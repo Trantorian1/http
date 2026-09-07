@@ -13,6 +13,7 @@ pub struct Url<'data> {
 
     pub scheme: &'data [u8],
     pub username: &'data [u8],
+    pub password: &'data [u8],
     pub host: &'data [u8],
     pub port: &'data [u8],
     pub path: &'data [u8],
@@ -25,6 +26,7 @@ impl<'data> std::fmt::Debug for Url<'data> {
         let backing = str::from_utf8(&self.backing).unwrap_or_default();
         let scheme = str::from_utf8(&self.scheme).unwrap_or_default();
         let username = str::from_utf8(&self.username).unwrap_or_default();
+        let password = str::from_utf8(&self.password).unwrap_or_default();
         let host = str::from_utf8(&self.host).unwrap_or_default();
         let port = str::from_utf8(&self.port).unwrap_or_default();
         let path = str::from_utf8(&self.path).unwrap_or_default();
@@ -35,6 +37,7 @@ impl<'data> std::fmt::Debug for Url<'data> {
             .field("backing", &backing)
             .field("scheme", &scheme)
             .field("username", &username)
+            .field("password", &password)
             .field("host", &host)
             .field("port", &port)
             .field("path", &path)
