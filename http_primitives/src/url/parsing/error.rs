@@ -35,6 +35,19 @@ pub enum ValidationError {
     /// [URL unit]: https://url.spec.whatwg.org/#url-units
     InvalidURLUnit,
 
+    /// The input [includes credentials].
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// "https://user@example.org"
+    ///  
+    /// "ssh://user@example.org"
+    /// ```
+    ///
+    /// [includes credentials]: https://url.spec.whatwg.org/#include-credentials
+    InvalidCredentials,
+
     /// The input’s scheme is not followed by "//".
     ///
     /// # Example

@@ -4,7 +4,7 @@ const BITS_PER_CHUNK: usize = 8 * std::mem::size_of::<Chunk>();
 
 /// The C0 control percent-encode set is a [`PercentEncodeSet`] consisting of C0 controls and
 /// all code points greater than U+007E (~).
-pub const C0_CONTROL: PercentEncodeSet = PercentEncodeSet::new()
+pub const C0_CONTROL: EncodeSet = EncodeSet::new()
     // C0 controls
     .add(0x0)
     .add(0x1)
@@ -43,7 +43,7 @@ pub const C0_CONTROL: PercentEncodeSet = PercentEncodeSet::new()
 
 /// The fragment [`PercentEncodeSet`] is a percent-encode set consisting of the C0 control
 /// percent-encode set and U+0020 SPACE, U+0022 ("), U+003C (<), U+003E (>), and U+0060 (`).
-pub const FRAGMENT: PercentEncodeSet = C0_CONTROL
+pub const FRAGMENT: EncodeSet = C0_CONTROL
     // U+0020
     .add(b' ')
     // U+0022
@@ -57,7 +57,7 @@ pub const FRAGMENT: PercentEncodeSet = C0_CONTROL
 
 /// The query [`PercentEncodeSet`] is a percent-encode set consisting of the C0 control percent-
 /// encode set and U+0020 SPACE, U+0022 ("), U+0023 (#), U+003C (<), and U+003E (>).
-pub const QUERY: PercentEncodeSet = C0_CONTROL
+pub const QUERY: EncodeSet = C0_CONTROL
     // U+0020
     .add(b' ')
     // U+0022
@@ -71,13 +71,13 @@ pub const QUERY: PercentEncodeSet = C0_CONTROL
 
 /// The special-query [`PercentEncodeSet`] is a percent-encode set consisting of the query
 /// percent-encode set and U+0027 (').
-pub const QUERY_SPECIAL: PercentEncodeSet = QUERY
+pub const QUERY_SPECIAL: EncodeSet = QUERY
     // U+0027
     .add(b'\'');
 
 /// The path percent-encode set is a [`PercentEncodeSet`] consisting of the query percent-encode
 /// set and U+003F (?), U+005E (^), U+0060 (`), U+007B ({), and U+007D (}).
-pub const PATH: PercentEncodeSet = QUERY
+pub const PATH: EncodeSet = QUERY
     // U+003F
     .add(b'?')
     // U+005E
@@ -92,7 +92,7 @@ pub const PATH: PercentEncodeSet = QUERY
 /// The userinfo [`PercentEncodeSet`] is a percent-encode set consisting of the path
 /// percent-encode set and U+002F (/), U+003A (:), U+003B (;), U+003D (=), U+0040 (@),
 /// U+005B ([) to U+005D (]), inclusive, and U+007C (|).
-pub const USERINFO: PercentEncodeSet = PATH
+pub const USERINFO: EncodeSet = PATH
     // U+002F
     .add(b'/')
     // U+003A
@@ -114,7 +114,7 @@ pub const USERINFO: PercentEncodeSet = PATH
 
 /// The component [`PercentEncodeSet`] is a percent-encode set consisting of the userinfo
 /// percent-encode set and U+0024 ($) to U+0026 (&), inclusive, U+002B (+), and U+002C (,).
-pub const COMPONENT: PercentEncodeSet = USERINFO
+pub const COMPONENT: EncodeSet = USERINFO
     // U+0024
     .add(b'$')
     // U+0025
@@ -131,11 +131,11 @@ pub const COMPONENT: PercentEncodeSet = USERINFO
 /// [code points]: https://infra.spec.whatwg.org/#code-point
 /// [percent-encode]: https://url.spec.whatwg.org/#percent-encoded-bytes
 #[derive(Clone, Copy)]
-pub struct PercentEncodeSet {
+pub struct EncodeSet {
     bitset: [Chunk; ASCII_RANGE / BITS_PER_CHUNK],
 }
 
-impl PercentEncodeSet {
+impl EncodeSet {
     pub const fn new() -> Self {
         Self {
             bitset: [0; ASCII_RANGE / BITS_PER_CHUNK],
@@ -165,13 +165,13 @@ impl PercentEncodeSet {
     }
 }
 
-impl Default for PercentEncodeSet {
+impl Default for EncodeSet {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl std::fmt::Debug for PercentEncodeSet {
+impl std::fmt::Debug for EncodeSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut format = f.debug_list();
 
@@ -195,7 +195,7 @@ mod test {
 
     #[test]
     fn percent_encode_set_example() {
-        let s1 = PercentEncodeSet::default();
+        let s1 = EncodeSet::default();
         assert!(!s1.contains(b'~'));
         assert!(!s1.should_percent_encode(b'~'));
         assert!(s1.should_percent_encode(0x80));
@@ -208,7 +208,7 @@ mod test {
 
     #[test]
     fn percent_encode_set_debug() {
-        let s1 = PercentEncodeSet::default();
+        let s1 = EncodeSet::default();
         pretty_assertions::assert_str_eq!(&format!("{s1:?}"), "[]");
 
         let s2 = s1.add(0x0).add(b' ').add(b'@').add(b'`');

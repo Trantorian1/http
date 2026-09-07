@@ -4,6 +4,11 @@ pub(super) struct ByteIter<'data> {
     next_tab_or_newline: usize,
 }
 
+pub(super) struct Checkpoint {
+    next: usize,
+    next_tab_or_newline: usize,
+}
+
 impl<'data> ByteIter<'data> {
     pub(super) fn new(bytes: &'data [u8]) -> Self {
         Self {
@@ -70,8 +75,20 @@ impl<'data> ByteIter<'data> {
         i != prev
     }
 
+    pub(super) fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            next: self.next,
+            next_tab_or_newline: self.next_tab_or_newline,
+        }
+    }
+
     pub(super) fn reset(&mut self) {
         *self = Self::new(self.bytes);
+    }
+
+    pub(super) fn reset_to(&mut self, checkpoint: Checkpoint) {
+        self.next = checkpoint.next;
+        self.next_tab_or_newline = checkpoint.next_tab_or_newline;
     }
 
     fn skip_tabs_and_newlines(&mut self) {
