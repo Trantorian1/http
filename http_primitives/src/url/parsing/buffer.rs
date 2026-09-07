@@ -1,4 +1,4 @@
-use super::Error;
+use super::*;
 
 pub(super) struct UrlBuffer<'data> {
     backing: &'data mut [u8],
@@ -28,6 +28,20 @@ impl<'data> UrlBuffer<'data> {
             Ok(self.next)
         } else {
             Err(Error::Overflow)
+        }
+    }
+
+    pub(super) fn push_encode_byte(
+        &mut self,
+        c: u8,
+        set: percent::EncodeSet,
+    ) -> Result<usize, Error> {
+        let n = percent::encode(c, &mut self.backing[self.next..], set);
+        if n == 0 {
+            Err(Error::Overflow)
+        } else {
+            self.next += n;
+            Ok(self.next)
         }
     }
 

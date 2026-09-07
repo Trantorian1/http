@@ -2,47 +2,34 @@ mod sets;
 
 pub use sets::*;
 
-pub fn encode(bytes: &[u8], buffer: &mut [u8], set: PercentEncodeSet) -> usize {
-    let mut prev_byte = 0;
-    let mut prev_buff = 0;
-
+pub fn encode(c: u8, buffer: &mut [u8], set: EncodeSet) -> usize {
     #[cfg(test)]
     let _bytes = str::from_utf8(buffer).unwrap_or_default();
 
-    for (i, c) in bytes.iter().enumerate() {
-        #[cfg(test)]
-        let _c = char::from_u32(*c as u32).unwrap_or_default();
+    #[cfg(test)]
+    let _c = char::from_u32(c as u32).unwrap_or_default();
 
-        if set.should_percent_encode(*c) {
-            let size = i - prev_byte;
-
-            if prev_buff + size + 3 >= buffer.len() {
-                return prev_buff;
-            }
-
-            buffer[prev_buff..prev_buff + size]
-                .copy_from_slice(&bytes[prev_byte..prev_byte + size]);
-
-            buffer[prev_buff + size..prev_buff + size + 3].copy_from_slice(encode_byte(*c));
-
-            prev_byte += size + 1;
-            prev_buff += size + 3;
+    if set.should_percent_encode(c) {
+        if buffer.len() < 3 {
+            return 0;
         }
+
+        buffer[..3].copy_from_slice(encode_ascii_byte(c));
+
+        3
+    } else {
+        if buffer.is_empty() {
+            return 0;
+        }
+
+        buffer[0] = c;
+
+        1
     }
-
-    let size = bytes.len() - prev_byte;
-
-    if prev_buff + size + 3 >= buffer.len() {
-        return prev_buff;
-    }
-
-    buffer[prev_buff..prev_buff + size].copy_from_slice(&bytes[prev_byte..prev_byte + size]);
-
-    prev_buff + size
 }
 
 #[inline]
-pub fn encode_byte(c: u8) -> &'static [u8] {
+fn encode_ascii_byte(c: u8) -> &'static [u8] {
     static ENC_TABLE: &[u8; 768] = b"\
       %00%01%02%03%04%05%06%07%08%09%0A%0B%0C%0D%0E%0F\
       %10%11%12%13%14%15%16%17%18%19%1A%1B%1C%1D%1E%1F\
@@ -74,10 +61,9 @@ mod test {
     #[test]
     fn encode_path() {
         let mut buffer = [0; 128];
-        let message = b"Hello World";
-        let written = encode(message, &mut buffer, sets::PATH);
+        let written = encode(b' ', &mut buffer, sets::PATH);
 
-        assert_eq!(written, message.len() + 2);
-        assert_str_eq!(&buffer[..written], b"Hello%20World");
+        assert_eq!(written, 3);
+        assert_str_eq!(&buffer[..written], b"%20");
     }
 }
