@@ -313,11 +313,15 @@ impl<'data> Url<'data> {
 
                         let checkpoint_hostname = iter.checkpoint();
                         let mut inside_brackets = false;
+                        let mut has_port = false;
                         let mut char_count_hostname = 0;
 
                         while let Some(c) = iter.next() {
                             match c {
-                                b':' if inside_brackets => break,
+                                b':' if !inside_brackets => {
+                                    has_port = true;
+                                    break;
+                                },
                                 b'/' | b'\\' | b'?' | b'#' => break,
                                 b'[' => inside_brackets = true,
                                 b']' => inside_brackets = false,
@@ -358,7 +362,7 @@ impl<'data> Url<'data> {
                             }
 
                             // TODO: IDNA domain parser
-                            let domain = percent::decode(iter.clone().copied());
+                            let domain = percent::decode(&mut iter);
                             for c in domain.take(char_count_hostname) {
                                 buffer.push(c)?;
                             }
@@ -367,7 +371,36 @@ impl<'data> Url<'data> {
                         };
 
                         #[cfg(test)]
-                        let _host = str::from_utf8(&backing[host.clone()]).unwrap_or_default();
+                        let _host = str::from_utf8(&buffer[host.clone()]).unwrap_or_default();
+
+                        // == port state ===========================================================
+                        //
+                        // https://url.spec.whatwg.org/#port-state
+                        //
+                        // =========================================================================
+
+                        // TODO: use scheme default port instead
+                        let mut port = 0u32;
+
+                        if has_port {
+                            assert_eq!(iter.next(), Some(&b':'));
+
+                            while let Some(c) = iter.next() {
+                                #[cfg(test)]
+                                let _c = char::from_u32(*c as u32).unwrap_or_default();
+
+                                match c {
+                                    b'0'..=b'9' => {
+                                        port = port * 10 + *c as u32 - b'0' as u32;
+                                        if port > u16::MAX as u32 {
+                                            return Err(Error::PortOutOfRange);
+                                        }
+                                    },
+                                    b'/' | b'\\' | b'?' | b'#' => break,
+                                    _ => return Err(Error::PortInvalid),
+                                }
+                            }
+                        }
 
                         return Ok((
                             Url {
@@ -376,7 +409,7 @@ impl<'data> Url<'data> {
                                 username: &backing[username],
                                 password: &backing[password],
                                 host: &backing[host],
-                                port: &[],
+                                port: port as u16,
                                 path: &[],
                                 query: &[],
                                 fragment: &[],
@@ -407,7 +440,7 @@ impl<'data> Url<'data> {
             username: &[],
             password: &[],
             host: &[],
-            port: &[],
+            port: todo!(),
             path: &[],
             query: &[],
             fragment: &[],
@@ -517,6 +550,22 @@ mod test {
     }
 
     #[test]
+    fn url_parse_port_valid() {
+        const URL: &str = "http://example.com:123";
+
+        let mut backing = [0; 128];
+        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_error, None);
+
+        assert_str_eq!(url.scheme, b"http");
+        assert_str_eq!(url.username, b"");
+        assert_str_eq!(url.password, b"");
+        assert_str_eq!(url.host, b"example.com");
+        assert_eq!(url.port, 123);
+    }
+
+    #[test]
     fn url_trim_c0_control_or_space_front() {
         const URL: &str = "\u{0}\u{1}\u{2}\u{3}\u{4}\u{5}\u{6}\u{7}\u{8}\u{9}\u{10}\u{11}\u{12}\u{13}\u{14}\u{15}\u{16}\u{17}\u{18}\u{19}\u{20}example.com";
 
@@ -603,6 +652,26 @@ mod test {
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
 
         assert_eq!(err, Error::HostMissing)
+    }
+
+    #[test]
+    fn url_err_port_out_of_range() {
+        const URL: &str = "http://example.com:70000";
+
+        let mut backing = [0; 128];
+        let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
+
+        assert_eq!(err, Error::PortOutOfRange)
+    }
+
+    #[test]
+    fn url_err_port_invalid() {
+        const URL: &str = "http://example.com:7z";
+
+        let mut backing = [0; 128];
+        let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
+
+        assert_eq!(err, Error::PortInvalid)
     }
 
     #[test]
