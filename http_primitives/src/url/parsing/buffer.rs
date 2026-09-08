@@ -68,11 +68,19 @@ impl<'data> AsRef<[u8]> for UrlBuffer<'data> {
     }
 }
 
+impl<'data> std::ops::Index<usize> for UrlBuffer<'data> {
+    type Output = u8;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.as_ref()[index]
+    }
+}
+
 impl<'data> std::ops::Index<std::ops::Range<usize>> for UrlBuffer<'data> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::Range<usize>) -> &Self::Output {
-        &self.backing[range]
+        &self.as_ref()[range]
     }
 }
 
@@ -80,7 +88,7 @@ impl<'data> std::ops::Index<std::ops::RangeFrom<usize>> for UrlBuffer<'data> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::RangeFrom<usize>) -> &Self::Output {
-        &self.backing[range]
+        &self.as_ref()[range]
     }
 }
 
@@ -88,7 +96,7 @@ impl<'data> std::ops::Index<std::ops::RangeTo<usize>> for UrlBuffer<'data> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::RangeTo<usize>) -> &Self::Output {
-        &self.backing[range]
+        &self.as_ref()[range]
     }
 }
 
@@ -96,7 +104,7 @@ impl<'data> std::ops::Index<std::ops::RangeInclusive<usize>> for UrlBuffer<'data
     type Output = [u8];
 
     fn index(&self, range: std::ops::RangeInclusive<usize>) -> &Self::Output {
-        &self.backing[range]
+        &self.as_ref()[range]
     }
 }
 
@@ -104,7 +112,7 @@ impl<'data> std::ops::Index<std::ops::RangeToInclusive<usize>> for UrlBuffer<'da
     type Output = [u8];
 
     fn index(&self, range: std::ops::RangeToInclusive<usize>) -> &Self::Output {
-        &self.backing[range]
+        &self.as_ref()[range]
     }
 }
 
@@ -112,6 +120,6 @@ impl<'data> std::ops::Index<std::ops::RangeFull> for UrlBuffer<'data> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::RangeFull) -> &Self::Output {
-        &self.backing[range]
+        &self.as_ref()[range]
     }
 }

@@ -194,10 +194,10 @@ impl<'data> Url<'data> {
                         //
                         // =========================================================================
 
-                        let checkpoint = iter.checkpoint();
+                        let checkpoint_authority = iter.checkpoint();
 
                         let mut at_sign = None;
-                        let mut char_count = 0;
+                        let mut char_count_authority = 0;
 
                         // Parsing has to take place in two steps:
                         //
@@ -213,20 +213,23 @@ impl<'data> Url<'data> {
                         // of the url.
                         while let Some(c) = iter.next() {
                             match c {
+                                // EOF code point is implied in the below check
+                                b'/' | b'\\' | b'?' | b'#' => break,
                                 b'@' => {
                                     validation_error
                                         .get_or_insert(ValidationError::InvalidCredentials);
-                                    at_sign = Some(char_count);
+
+                                    at_sign = Some(char_count_authority);
                                 },
-                                // EOF code point is implied in the below check
-                                b'/' | b'\\' | b'?' | b'#' => break,
-                                _ => char_count += 1,
+                                _ => (),
                             }
+
+                            char_count_authority += 1
                         }
 
-                        iter.reset_to(checkpoint);
+                        iter.reset_to(checkpoint_authority);
 
-                        let mut userinfo_char_count = match at_sign {
+                        let mut char_count_userinfo = match at_sign {
                             Some(n) => {
                                 // We only exit the above loop if we have  reached the end of the
                                 // host segment of the url or the end of the url itself. This means
@@ -239,7 +242,7 @@ impl<'data> Url<'data> {
                                 // > missing validation error, return failure.
                                 //
                                 // https://url.spec.whatwg.org/#authority-state
-                                if char_count - n == 0 {
+                                if char_count_authority - n - 1 == 0 {
                                     return Err(Error::HostMissing);
                                 } else {
                                     n
@@ -248,14 +251,14 @@ impl<'data> Url<'data> {
                             None => 0,
                         };
 
-                        // Scheme end, plus `://`
+                        // Scheme end, skipping `://`
                         let userinfo_start = scheme.end + 3;
                         let mut userinfo_stop = userinfo_start;
                         let mut password_token = None;
 
                         // Here is where we actually parse the userinfo
-                        while userinfo_char_count > 0 {
-                            userinfo_char_count -= 1;
+                        while char_count_userinfo > 0 {
+                            char_count_userinfo -= 1;
 
                             // SAFETY: we have already iterated over these characters so we know
                             // they exist.
@@ -270,7 +273,7 @@ impl<'data> Url<'data> {
                                             // We only push U+003A (:) if the password is non-empty
                                             //
                                             // https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L907-L914
-                                            if userinfo_char_count > 0 {
+                                            if char_count_userinfo > 0 {
                                                 password_token = Some(buffer.push(b':')? - 1);
                                             }
                                         },
@@ -291,12 +294,80 @@ impl<'data> Url<'data> {
                             None => (userinfo_start..userinfo_stop, userinfo_stop..userinfo_stop),
                         };
 
+                        if !username.is_empty() || !password.is_empty() {
+                            buffer.push(b'@')?;
+                        }
+
                         #[cfg(test)]
                         let _username =
-                            str::from_utf8(&backing[username.clone()]).unwrap_or_default();
+                            str::from_utf8(&buffer[username.clone()]).unwrap_or_default();
                         #[cfg(test)]
                         let _password =
-                            str::from_utf8(&backing[password.clone()]).unwrap_or_default();
+                            str::from_utf8(&buffer[password.clone()]).unwrap_or_default();
+
+                        // == hostname state =======================================================
+                        //
+                        // https://url.spec.whatwg.org/#hostname-state
+                        //
+                        // =========================================================================
+
+                        let checkpoint_hostname = iter.checkpoint();
+                        let mut inside_brackets = false;
+                        let mut char_count_hostname = 0;
+
+                        while let Some(c) = iter.next() {
+                            match c {
+                                b':' if inside_brackets => break,
+                                b'/' | b'\\' | b'?' | b'#' => break,
+                                b'[' => inside_brackets = true,
+                                b']' => inside_brackets = false,
+                                _ => (),
+                            }
+
+                            char_count_hostname += 1;
+                        }
+
+                        iter.reset_to(checkpoint_hostname);
+
+                        if char_count_hostname == 0 {
+                            return Err(Error::HostMissing);
+                        }
+
+                        // == host parsing =========================================================
+                        //
+                        // https://url.spec.whatwg.org/#host-parsing
+                        //
+                        // =========================================================================
+
+                        let host = if iter.skip_if_matches(b"[") {
+                            todo!("IPV6 parsing");
+                        } else {
+                            // userinfo end, skipping U+0040 (@)
+                            let host_start = if !password.is_empty() {
+                                password.end + 1
+                            } else if !username.is_empty() {
+                                username.end + 1
+                            } else {
+                                username.end
+                            };
+                            let host_stop = host_start + char_count_hostname;
+                            let host = host_start..host_stop;
+
+                            if host.is_empty() {
+                                return Err(Error::HostMissing);
+                            }
+
+                            // TODO: IDNA domain parser
+                            let domain = percent::decode(iter.clone().copied());
+                            for c in domain.take(char_count_hostname) {
+                                buffer.push(c)?;
+                            }
+
+                            host
+                        };
+
+                        #[cfg(test)]
+                        let _host = str::from_utf8(&backing[host.clone()]).unwrap_or_default();
 
                         return Ok((
                             Url {
@@ -304,7 +375,7 @@ impl<'data> Url<'data> {
                                 scheme: &backing[scheme],
                                 username: &backing[username],
                                 password: &backing[password],
-                                host: &[],
+                                host: &backing[host],
                                 port: &[],
                                 path: &[],
                                 query: &[],
@@ -417,6 +488,35 @@ mod test {
     }
 
     #[test]
+    fn url_parse_userinfo_with_encoded() {
+        const URL: &str = "http://user:password@@example.com";
+
+        let mut backing = [0; 128];
+        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_error, Some(ValidationError::InvalidCredentials));
+
+        assert_str_eq!(url.scheme, b"http");
+        assert_str_eq!(url.username, b"user");
+        assert_str_eq!(url.password, b"password%40");
+    }
+
+    #[test]
+    fn url_parse_host_domain() {
+        const URL: &str = "http://example.com";
+
+        let mut backing = [0; 128];
+        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_error, None);
+
+        assert_str_eq!(url.scheme, b"http");
+        assert_str_eq!(url.username, b"");
+        assert_str_eq!(url.password, b"");
+        assert_str_eq!(url.host, b"example.com");
+    }
+
+    #[test]
     fn url_trim_c0_control_or_space_front() {
         const URL: &str = "\u{0}\u{1}\u{2}\u{3}\u{4}\u{5}\u{6}\u{7}\u{8}\u{9}\u{10}\u{11}\u{12}\u{13}\u{14}\u{15}\u{16}\u{17}\u{18}\u{19}\u{20}example.com";
 
@@ -493,6 +593,16 @@ mod test {
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
 
         assert_eq!(err, Error::HostMissing);
+    }
+
+    #[test]
+    fn url_err_empty_host_domain() {
+        const URL: &str = "http://";
+
+        let mut backing = [0; 128];
+        let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
+
+        assert_eq!(err, Error::HostMissing)
     }
 
     #[test]
