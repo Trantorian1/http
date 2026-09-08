@@ -15,7 +15,7 @@ pub struct Url<'data> {
     pub username: &'data [u8],
     pub password: &'data [u8],
     pub host: &'data [u8],
-    pub port: u16,
+    pub port: Option<u16>,
     pub path: &'data [u8],
     pub query: &'data [u8],
     pub fragment: &'data [u8],
