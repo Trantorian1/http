@@ -673,6 +673,7 @@ mod port {
         } = context;
 
         let mut port = 0u32;
+        let mut is_empty = true;
 
         while let Some(c) = iter.next() {
             #[cfg(test)]
@@ -681,16 +682,19 @@ mod port {
             match c {
                 b'0'..=b'9' => {
                     port = port * 10 + *c as u32 - b'0' as u32;
+
                     if port > u16::MAX as u32 {
                         return Err(Error::PortOutOfRange);
                     }
+
+                    is_empty = false;
                 },
                 b'/' | b'\\' | b'?' | b'#' => break,
                 _ => return Err(Error::PortInvalid),
             }
         }
 
-        if port as u16 == default_scheme_port {
+        if port as u16 == default_scheme_port || is_empty {
             Ok(None)
         } else {
             Ok(Some(port as u16))
@@ -789,6 +793,108 @@ mod test {
         assert_str_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, Some(123));
+    }
+
+    #[test]
+    fn url_parse_port_default_ftp() {
+        const URL: &str = "ftp://example.com:21";
+
+        let mut backing = [0; 128];
+        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_error, None);
+
+        assert_str_eq!(url.scheme, b"ftp");
+        assert_str_eq!(url.username, b"");
+        assert_str_eq!(url.password, b"");
+        assert_str_eq!(url.host, b"example.com");
+
+        assert_eq!(url.port, None);
+    }
+
+    #[test]
+    fn url_parse_port_default_http() {
+        const URL: &str = "http://example.com:80";
+
+        let mut backing = [0; 128];
+        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_error, None);
+
+        assert_str_eq!(url.scheme, b"http");
+        assert_str_eq!(url.username, b"");
+        assert_str_eq!(url.password, b"");
+        assert_str_eq!(url.host, b"example.com");
+
+        assert_eq!(url.port, None);
+    }
+
+    #[test]
+    fn url_parse_port_default_ws() {
+        const URL: &str = "ws://example.com:80";
+
+        let mut backing = [0; 128];
+        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_error, None);
+
+        assert_str_eq!(url.scheme, b"ws");
+        assert_str_eq!(url.username, b"");
+        assert_str_eq!(url.password, b"");
+        assert_str_eq!(url.host, b"example.com");
+
+        assert_eq!(url.port, None);
+    }
+
+    #[test]
+    fn url_parse_port_default_https() {
+        const URL: &str = "https://example.com:443";
+
+        let mut backing = [0; 128];
+        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_error, None);
+
+        assert_str_eq!(url.scheme, b"https");
+        assert_str_eq!(url.username, b"");
+        assert_str_eq!(url.password, b"");
+        assert_str_eq!(url.host, b"example.com");
+
+        assert_eq!(url.port, None);
+    }
+
+    #[test]
+    fn url_parse_port_default_wss() {
+        const URL: &str = "wss://example.com:443";
+
+        let mut backing = [0; 128];
+        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_error, None);
+
+        assert_str_eq!(url.scheme, b"wss");
+        assert_str_eq!(url.username, b"");
+        assert_str_eq!(url.password, b"");
+        assert_str_eq!(url.host, b"example.com");
+
+        assert_eq!(url.port, None);
+    }
+
+    #[test]
+    fn url_parse_port_empty() {
+        const URL: &str = "http://example.com:";
+
+        let mut backing = [0; 128];
+        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_error, None);
+
+        assert_str_eq!(url.scheme, b"http");
+        assert_str_eq!(url.username, b"");
+        assert_str_eq!(url.password, b"");
+        assert_str_eq!(url.host, b"example.com");
+
+        assert_eq!(url.port, None);
     }
 
     #[test]
