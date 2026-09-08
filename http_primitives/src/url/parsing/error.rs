@@ -1,6 +1,7 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     Overflow,
+
     /// The input has a special scheme, but does not contain a host.
     ///
     /// ```text
@@ -11,6 +12,24 @@ pub enum Error {
     /// "https://user:pass@"
     /// ```
     HostMissing,
+
+    /// The input’s port is invalid.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// "https://example.org:7z"
+    /// ```
+    PortInvalid,
+
+    /// The input’s port is too big.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// "https://example.org:70000"
+    /// ```
+    PortOutOfRange,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

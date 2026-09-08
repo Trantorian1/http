@@ -1,4 +1,3 @@
-#[derive(Clone)]
 pub(super) struct ByteIter<'data> {
     next: usize,
     bytes: &'data [u8],
