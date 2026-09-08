@@ -1,15 +1,15 @@
-pub fn decode<I: Iterator<Item = u8>>(iter: I) -> impl Iterator<Item = u8> {
+pub fn decode<I: Iterator<Item = u8>>(iter: I) -> DecodeIter<I> {
     DecodeIter::new(iter)
 }
 
-struct DecodeIter<I: Iterator<Item = u8>> {
+pub struct DecodeIter<I: Iterator<Item = u8>> {
     iter: I,
     backing: [u8; 2],
     size: u8,
 }
 
 impl<I: Iterator<Item = u8>> DecodeIter<I> {
-    fn new(iter: I) -> Self {
+    pub fn new(iter: I) -> Self {
         Self {
             iter,
             backing: [0; 2],
