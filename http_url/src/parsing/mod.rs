@@ -637,7 +637,7 @@ mod host_and_port {
                     break Ok((host, port));
                 },
                 // End of host section, no port was provided
-                None | Some(b'/') | Some(b'\\') | Some(b'?') | Some(b'#') => {
+                None | Some(b'/' | b'\\' | b'?' | b'#') => {
                     iter.reset_to(checkpoint_hostname);
 
                     let host = host::parse(host::Context {

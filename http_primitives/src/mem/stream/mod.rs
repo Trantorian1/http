@@ -76,7 +76,7 @@ impl<'data> ByteStream<'data> {
     }
 
     pub(crate) fn any(backing: &'data mut [u8], start: usize, size: usize) -> Self {
-        assert!(!backing.is_empty());
+        assert_ne!(backing, []);
         assert_le!(start, backing.len());
         assert_leq!(start, backing.len());
 

@@ -1,5 +1,9 @@
+/// Fatal errors that occur during parsing.
+///
+/// See [`ValidationError`] for a list of non-fatal parsing errors.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
+    /// Parsing a URL does not fit into the given buffer.
     Overflow,
 
     /// The input has a special scheme, but does not contain a host.

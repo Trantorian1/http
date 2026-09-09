@@ -1,3 +1,14 @@
+/// Percent-decodes a stream of bytes.
+///
+/// # Example
+///
+/// ```rust
+/// # use http_url::percent;
+/// let decoded = percent::decode(b"Hello%20World".iter());
+/// let message = String::from_utf8(decoded.collect()).unwrap_or_default();
+///
+/// assert_eq!(&message, "Hello World");
+/// ```
 pub fn decode<'data, I: Iterator<Item = &'data u8>>(iter: I) -> impl Iterator<Item = u8> {
     DecodeIter::new(iter)
 }
