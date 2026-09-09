@@ -1,0 +1,16 @@
+[package]
+name = "macro_derive"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "3.0.5"
+quote = "1.0.47"
+proc-macro2 = "1.0.107"

@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 memchr.workspace = true
 macro_util.workspace = true
+macro_derive.workspace = true
 
 # Testing
 

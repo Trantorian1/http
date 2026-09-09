@@ -31,3 +31,6 @@ format_code_in_doc_comments = true
 
 # https://rust-lang.github.io/rustfmt/?version=v1.10.0&search=condense_wildcard_suffixes#condense_wildcard_suffixes
 condense_wildcard_suffixes = true
+
+# https://rust-lang.github.io/rustfmt/?version=v1.10.0&search=format_strings#format_strings
+format_strings = true

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["http_1", "http_primitives", "macro_util"]
+members = ["http_1", "http_primitives", "macro_derive", "macro_util"]
 
 [workspace.package]
 version = "0.1.0"
@@ -74,3 +74,4 @@ bolero = "0.13.4"
 
 # Utility
 macro_util.path = "macro_util"
+macro_derive.path = "macro_derive"
