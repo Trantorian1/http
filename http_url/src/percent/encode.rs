@@ -1,6 +1,17 @@
 use super::*;
 
-pub fn encode(c: u8, buffer: &mut [u8], set: EncodeSet) -> usize {
+/// Percent-encodes a single ASCII byte to a target buffer. The resulting encoding, if any, is
+/// written at the **start** of the buffer. Whether or not the byte should be encoded is based on
+/// the percent-[`EncodeSet`] which is passed to this function.
+///
+/// # Returns
+///
+/// The number of bytes which were written to the buffer:
+///
+/// - 0 means the buffer did not have enough space left to percent-encode the byte.
+/// - 1 means the byte was not percent-encoded.
+/// - 3 means the byte was percent-encoded.
+pub fn encode_byte_to(c: u8, buffer: &mut [u8], set: EncodeSet) -> usize {
     #[cfg(test)]
     let _bytes = str::from_utf8(buffer).unwrap_or_default();
 
@@ -60,7 +71,7 @@ mod test {
     #[test]
     fn encode_path() {
         let mut buffer = [0; 128];
-        let written = encode(b' ', &mut buffer, sets::PATH);
+        let written = encode_byte_to(b' ', &mut buffer, sets::PATH);
 
         assert_eq!(written, 3);
         assert_utf8_eq!(&buffer[..written], b"%20");

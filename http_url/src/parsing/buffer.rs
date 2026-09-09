@@ -1,4 +1,5 @@
-use super::*;
+use super::Error;
+use super::percent;
 
 pub(super) struct UrlBuffer<'data> {
     backing: &'data mut [u8],
@@ -7,7 +8,7 @@ pub(super) struct UrlBuffer<'data> {
 
 impl<'data> UrlBuffer<'data> {
     pub(super) fn new(backing: &'data mut [u8]) -> Self {
-        assert!(!backing.is_empty());
+        assert_ne!(backing, []);
         Self { backing, next: 0 }
     }
 
@@ -36,7 +37,7 @@ impl<'data> UrlBuffer<'data> {
         c: u8,
         set: percent::EncodeSet,
     ) -> Result<usize, Error> {
-        let n = percent::encode(c, &mut self.backing[self.next..], set);
+        let n = percent::encode_byte_to(c, &mut self.backing[self.next..], set);
         if n == 0 {
             Err(Error::Overflow)
         } else {
@@ -56,19 +57,15 @@ impl<'data> UrlBuffer<'data> {
     pub(super) fn len(&self) -> usize {
         self.next
     }
-
-    pub(super) fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
 }
 
-impl<'data> AsRef<[u8]> for UrlBuffer<'data> {
+impl AsRef<[u8]> for UrlBuffer<'_> {
     fn as_ref(&self) -> &[u8] {
         &self.backing[..self.next]
     }
 }
 
-impl<'data> std::ops::Index<usize> for UrlBuffer<'data> {
+impl std::ops::Index<usize> for UrlBuffer<'_> {
     type Output = u8;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -76,7 +73,7 @@ impl<'data> std::ops::Index<usize> for UrlBuffer<'data> {
     }
 }
 
-impl<'data> std::ops::Index<std::ops::Range<usize>> for UrlBuffer<'data> {
+impl std::ops::Index<std::ops::Range<usize>> for UrlBuffer<'_> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::Range<usize>) -> &Self::Output {
@@ -84,7 +81,7 @@ impl<'data> std::ops::Index<std::ops::Range<usize>> for UrlBuffer<'data> {
     }
 }
 
-impl<'data> std::ops::Index<std::ops::RangeFrom<usize>> for UrlBuffer<'data> {
+impl std::ops::Index<std::ops::RangeFrom<usize>> for UrlBuffer<'_> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::RangeFrom<usize>) -> &Self::Output {
@@ -92,7 +89,7 @@ impl<'data> std::ops::Index<std::ops::RangeFrom<usize>> for UrlBuffer<'data> {
     }
 }
 
-impl<'data> std::ops::Index<std::ops::RangeTo<usize>> for UrlBuffer<'data> {
+impl std::ops::Index<std::ops::RangeTo<usize>> for UrlBuffer<'_> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::RangeTo<usize>) -> &Self::Output {
@@ -100,7 +97,7 @@ impl<'data> std::ops::Index<std::ops::RangeTo<usize>> for UrlBuffer<'data> {
     }
 }
 
-impl<'data> std::ops::Index<std::ops::RangeInclusive<usize>> for UrlBuffer<'data> {
+impl std::ops::Index<std::ops::RangeInclusive<usize>> for UrlBuffer<'_> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::RangeInclusive<usize>) -> &Self::Output {
@@ -108,7 +105,7 @@ impl<'data> std::ops::Index<std::ops::RangeInclusive<usize>> for UrlBuffer<'data
     }
 }
 
-impl<'data> std::ops::Index<std::ops::RangeToInclusive<usize>> for UrlBuffer<'data> {
+impl std::ops::Index<std::ops::RangeToInclusive<usize>> for UrlBuffer<'_> {
     type Output = [u8];
 
     fn index(&self, range: std::ops::RangeToInclusive<usize>) -> &Self::Output {
@@ -116,10 +113,10 @@ impl<'data> std::ops::Index<std::ops::RangeToInclusive<usize>> for UrlBuffer<'da
     }
 }
 
-impl<'data> std::ops::Index<std::ops::RangeFull> for UrlBuffer<'data> {
+impl std::ops::Index<std::ops::RangeFull> for UrlBuffer<'_> {
     type Output = [u8];
 
-    fn index(&self, range: std::ops::RangeFull) -> &Self::Output {
-        &self.as_ref()[range]
+    fn index(&self, _range: std::ops::RangeFull) -> &Self::Output {
+        self.as_ref()
     }
 }

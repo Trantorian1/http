@@ -136,17 +136,24 @@ pub struct EncodeSet {
 }
 
 impl EncodeSet {
+    /// Crates a new, empty, percent-encode set.
+    ///
+    /// New code points can be added later by calling [`add`].
+    ///
+    /// [`add`]: Self::add
     pub const fn new() -> Self {
         Self {
             bitset: [0; ASCII_RANGE / BITS_PER_CHUNK],
         }
     }
 
+    /// Adds a new code point to the percent-encode set. This means that code point will be encoded
+    /// if using this set.
     pub const fn add(mut self, c: u8) -> Self {
         assert!(c.is_ascii());
 
         let i = c as usize / BITS_PER_CHUNK;
-        let mask = 1 << c as usize - i * BITS_PER_CHUNK;
+        let mask = 1 << (c as usize - i * BITS_PER_CHUNK);
 
         self.bitset[i] |= mask;
 
@@ -155,7 +162,7 @@ impl EncodeSet {
 
     pub(crate) const fn contains(&self, c: u8) -> bool {
         let i = c as usize / BITS_PER_CHUNK;
-        let mask = 1 << c as usize - i * BITS_PER_CHUNK;
+        let mask = 1 << (c as usize - i * BITS_PER_CHUNK);
 
         self.bitset[i] & mask != 0
     }

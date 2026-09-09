@@ -170,7 +170,7 @@ impl<'buf, 'data, 'reader, R: std::io::Read> BufReader<'buf, 'data, 'reader, R> 
 
             let new_bytes = self
                 .buffer
-                .append_from(&mut self.reader)
+                .append_from(self.reader)
                 .map_err(Status::internal)?;
 
             if new_bytes == 0 {

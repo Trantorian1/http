@@ -51,7 +51,7 @@ impl<'data, Mode> Buffer<'data, Mode> {
     /// let write_buffer = BufferForWriting::pre_populate(&mut write_backing);
     /// ```
     pub fn new(backing: &'data mut [u8]) -> Self {
-        assert!(!backing.is_empty());
+        assert_ne!(backing, []);
 
         backing.fill(0);
 
@@ -78,7 +78,7 @@ impl<'data, Mode> Buffer<'data, Mode> {
     /// assert_eq!(buffer.as_ref(), &[0, 1, 2, 3, 4, 5, 6, 7]);
     /// ```
     pub fn pre_populate(backing: &'data mut [u8]) -> Self {
-        assert!(!backing.is_empty());
+        assert_ne!(backing, []);
 
         Self {
             window: 0..backing.len(),

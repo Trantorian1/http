@@ -18,11 +18,6 @@ impl<'data> ByteIter<'data> {
         }
     }
 
-    pub(super) fn peek(&mut self) -> Option<&'data u8> {
-        self.skip_tabs_and_newlines();
-        self.bytes.get(self.next)
-    }
-
     pub(super) fn skip_if_matches(&mut self, needle: &[u8]) -> bool {
         let mut i = self.next;
         let mut next_tab_or_newline = self.next_tab_or_newline;
@@ -145,34 +140,6 @@ mod test {
         assert_byte_eq!(*iter.next().unwrap(), b'd');
 
         assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn byte_iter_peek_some() {
-        let mut iter = ByteIter::new(b"\t\n\rHello, \t\t\tWo\n\n\nrl\r\r\rd\t\n\r");
-
-        assert_eq!(*iter.peek().unwrap(), b'H');
-
-        assert_byte_eq!(*iter.next().unwrap(), b'H');
-        assert_byte_eq!(*iter.next().unwrap(), b'e');
-        assert_byte_eq!(*iter.next().unwrap(), b'l');
-        assert_byte_eq!(*iter.next().unwrap(), b'l');
-        assert_byte_eq!(*iter.next().unwrap(), b'o');
-        assert_byte_eq!(*iter.next().unwrap(), b',');
-        assert_byte_eq!(*iter.next().unwrap(), b' ');
-        assert_byte_eq!(*iter.next().unwrap(), b'W');
-        assert_byte_eq!(*iter.next().unwrap(), b'o');
-        assert_byte_eq!(*iter.next().unwrap(), b'r');
-        assert_byte_eq!(*iter.next().unwrap(), b'l');
-        assert_byte_eq!(*iter.next().unwrap(), b'd');
-
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn byte_iter_peek_none() {
-        let mut iter = ByteIter::new(b"");
-        assert_eq!(iter.peek(), None);
     }
 
     #[test]
