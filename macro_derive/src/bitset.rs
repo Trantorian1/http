@@ -140,13 +140,10 @@ fn write_implementation(
          iterator via [`iter`](Self::iter)"
     );
 
-    let bitset_iter = syn::Ident::new(
-        &format!("{enum_name}BitSetIter"),
-        proc_macro2::Span::call_site(),
-    );
+    let bitset_iter = syn::Ident::new(&format!("{enum_name}Iter"), proc_macro2::Span::call_site());
 
     let bitset_iter_doc =
-        format!("Iterator over all [`{enum_name}`] variants recorded in [`{bitset_name}`].");
+        format!("Iterator over all [`{enum_name}`] variants recorded in a [`{bitset_name}`].");
 
     let variants = enum_data
         .variants
@@ -164,6 +161,7 @@ fn write_implementation(
 
     quote::quote! {
         #[doc = #bitset_doc]
+        #[derive(Debug, Clone, PartialEq, Eq)]
         #vis struct #bitset_name(#bitset_width);
 
         impl #bitset_name {
@@ -216,6 +214,7 @@ fn write_implementation(
         }
 
         #[doc = #bitset_iter_doc]
+        #[derive(Debug, Clone, PartialEq, Eq)]
         #vis struct #bitset_iter {
             bitset: #bitset_width,
             index: u8,
@@ -243,6 +242,12 @@ fn write_implementation(
                 }
 
                 None
+            }
+        }
+
+        impl ExactSizeIterator for #bitset_iter {
+            fn len(&self) -> usize {
+                self.bitset.count_ones() as usize
             }
         }
     }

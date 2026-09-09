@@ -3,8 +3,7 @@ mod error;
 mod iter;
 
 use buffer::UrlBuffer;
-pub use error::Error;
-pub use error::ValidationError;
+pub use error::*;
 use iter::ByteIter;
 
 use super::*;
@@ -14,12 +13,10 @@ impl<'data> Url<'data> {
     pub fn new(
         mut bytes: &[u8],
         backing: &'data mut [u8],
-    ) -> Result<(Self, Option<ValidationError>), Error> {
-        // TODO: replace validation_error with a bitset mapping to each enum variant.
-
+    ) -> Result<(Self, ValidationErrorIter), Error> {
         assert!(!backing.is_empty());
 
-        let mut validation_error = None;
+        let mut error_bitset = ValidationErrorBitSet::new();
         let buffer = UrlBuffer::new(backing);
 
         // == input sanitization ===================================================================
@@ -30,7 +27,7 @@ impl<'data> Url<'data> {
 
         c0_control_or_space::parse(c0_control_or_space::Context {
             bytes: &mut bytes,
-            validation_error: &mut validation_error,
+            error_bitset: &mut error_bitset,
         });
 
         // == ASCII tab or newline sanitization ====================================================
@@ -53,7 +50,7 @@ impl<'data> Url<'data> {
         scheme::parse(scheme::Context {
             iter,
             buffer,
-            validation_error,
+            error_bitset,
         })
     }
 }
@@ -112,7 +109,7 @@ mod c0_control_or_space {
 
     pub(super) struct Context<'parsing, 'input> {
         pub bytes: &'parsing mut &'input [u8],
-        pub validation_error: &'parsing mut Option<ValidationError>,
+        pub error_bitset: &'parsing mut ValidationErrorBitSet,
     }
 
     /// # C0 control or space sanitization
@@ -128,14 +125,14 @@ mod c0_control_or_space {
     pub(super) fn parse<'parsing, 'input>(context: Context<'parsing, 'input>) {
         let Context {
             bytes,
-            validation_error,
+            error_bitset,
         } = context;
 
         // Leading C0 control or space
         if let Some(c) = bytes.first()
             && matchers::c0_control_or_space(*c)
         {
-            validation_error.get_or_insert(ValidationError::InvalidURLUnit);
+            error_bitset.add(ValidationError::InvalidURLUnit);
             *bytes = &bytes[1..];
 
             while let Some(c) = bytes.first()
@@ -149,7 +146,8 @@ mod c0_control_or_space {
         if let Some(c) = bytes.last()
             && matchers::c0_control_or_space(*c)
         {
-            validation_error.get_or_insert(ValidationError::InvalidURLUnit);
+            error_bitset.add(ValidationError::InvalidURLUnit);
+
             let len = bytes.len();
             *bytes = &bytes[..len - 1];
 
@@ -170,7 +168,7 @@ mod scheme {
         pub iter: ByteIter<'input>,
         pub buffer: UrlBuffer<'output>,
 
-        pub validation_error: Option<ValidationError>,
+        pub error_bitset: ValidationErrorBitSet,
     }
 
     /// # [Scheme state]
@@ -182,11 +180,11 @@ mod scheme {
     #[inline]
     pub(super) fn parse<'input, 'output>(
         context: Context<'input, 'output>,
-    ) -> Result<(Url<'output>, Option<ValidationError>), Error> {
+    ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
         let Context {
             mut iter,
             mut buffer,
-            mut validation_error,
+            error_bitset,
         } = context;
 
         if let Some(c) = iter.next()
@@ -229,7 +227,7 @@ mod scheme {
                         return scheme::special::parse(scheme::special::Context {
                             iter,
                             buffer,
-                            validation_error,
+                            error_bitset,
                             scheme,
                             default_scheme_port: 21,
                         });
@@ -239,7 +237,7 @@ mod scheme {
                         return scheme::special::parse(scheme::special::Context {
                             iter,
                             buffer,
-                            validation_error,
+                            error_bitset,
                             scheme,
                             default_scheme_port: 80,
                         });
@@ -249,7 +247,7 @@ mod scheme {
                         return scheme::special::parse(scheme::special::Context {
                             iter,
                             buffer,
-                            validation_error,
+                            error_bitset,
                             scheme,
                             default_scheme_port: 443,
                         });
@@ -280,7 +278,7 @@ mod scheme {
             pub iter: ByteIter<'input>,
             pub buffer: UrlBuffer<'output>,
 
-            pub validation_error: Option<ValidationError>,
+            pub error_bitset: ValidationErrorBitSet,
             pub scheme: segment::Scheme,
             pub default_scheme_port: u16,
         }
@@ -322,11 +320,11 @@ mod scheme {
         #[inline]
         pub(crate) fn parse<'input, 'output>(
             context: Context<'input, 'output>,
-        ) -> Result<(Url<'output>, Option<ValidationError>), Error> {
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             let Context {
                 mut iter,
                 mut buffer,
-                mut validation_error,
+                mut error_bitset,
                 scheme,
                 default_scheme_port,
             } = context;
@@ -338,8 +336,7 @@ mod scheme {
             // =========================================================================
 
             if !iter.skip_if_matches(b"//") {
-                validation_error
-                    .get_or_insert(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                error_bitset.add(ValidationError::SpecialSchemeMissingFollowingSolidus);
 
                 // TODO: relative state
                 // https://url.spec.whatwg.org/#relative-state
@@ -359,8 +356,7 @@ mod scheme {
             // =========================================================================
 
             if iter.skip_while_matches2(b'/', b'\\') {
-                validation_error
-                    .get_or_insert(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                error_bitset.add(ValidationError::SpecialSchemeMissingFollowingSolidus);
             }
 
             buffer.push_str(b"//")?;
@@ -368,7 +364,7 @@ mod scheme {
             let (username, password) = userinfo::parse(userinfo::Context {
                 iter: &mut iter,
                 buffer: &mut buffer,
-                validation_error: &mut validation_error,
+                error_bitset: &mut error_bitset,
                 scheme: &scheme,
             })?;
 
@@ -403,7 +399,7 @@ mod scheme {
                     query: &[],
                     fragment: &[],
                 },
-                validation_error,
+                error_bitset.iter(),
             ))
         }
     }
@@ -416,7 +412,7 @@ mod userinfo {
         pub iter: &'parsing mut ByteIter<'input>,
         pub buffer: &'parsing mut UrlBuffer<'output>,
 
-        pub validation_error: &'parsing mut Option<ValidationError>,
+        pub error_bitset: &'parsing mut ValidationErrorBitSet,
         pub scheme: &'parsing segment::Scheme,
     }
 
@@ -443,7 +439,7 @@ mod userinfo {
         let Context {
             iter,
             buffer,
-            validation_error,
+            error_bitset,
             scheme,
         } = context;
 
@@ -487,7 +483,7 @@ mod userinfo {
                 // EOF code point is implied in the below check
                 b'/' | b'\\' | b'?' | b'#' => break,
                 b'@' => {
-                    validation_error.get_or_insert(ValidationError::InvalidCredentials);
+                    error_bitset.add(ValidationError::InvalidCredentials);
 
                     at_sign = Some(char_count_authority);
                 },
@@ -839,9 +835,13 @@ mod test {
         const URL: &str = "http://user:password@example.com";
 
         let mut backing = [0; 128];
-        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, Some(ValidationError::InvalidCredentials));
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidCredentials)
+        );
+        assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"http");
         assert_utf8_eq!(url.username, b"user");
@@ -853,9 +853,13 @@ mod test {
         const URL: &str = "http://user@example.com";
 
         let mut backing = [0; 128];
-        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, Some(ValidationError::InvalidCredentials));
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidCredentials)
+        );
+        assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"http");
         assert_utf8_eq!(url.username, b"user");
@@ -867,9 +871,13 @@ mod test {
         const URL: &str = "http://:password@example.com";
 
         let mut backing = [0; 128];
-        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, Some(ValidationError::InvalidCredentials));
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidCredentials)
+        );
+        assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"http");
         assert_utf8_eq!(url.username, b"");
@@ -881,9 +889,13 @@ mod test {
         const URL: &str = "http://user:password@@example.com";
 
         let mut backing = [0; 128];
-        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, Some(ValidationError::InvalidCredentials));
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidCredentials)
+        );
+        assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"http");
         assert_utf8_eq!(url.username, b"user");
@@ -895,9 +907,9 @@ mod test {
         const URL: &str = "http://example.com";
 
         let mut backing = [0; 128];
-        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, None);
+        assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"http");
         assert_utf8_eq!(url.username, b"");
@@ -910,9 +922,9 @@ mod test {
         const URL: &str = "http://example.com:123";
 
         let mut backing = [0; 128];
-        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, None);
+        assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"http");
         assert_utf8_eq!(url.username, b"");
@@ -927,9 +939,9 @@ mod test {
         const URL: &str = "ftp://example.com:21";
 
         let mut backing = [0; 128];
-        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, None);
+        assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"ftp");
         assert_utf8_eq!(url.username, b"");
@@ -944,9 +956,9 @@ mod test {
         const URL: &str = "http://example.com:80";
 
         let mut backing = [0; 128];
-        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, None);
+        assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"http");
         assert_utf8_eq!(url.username, b"");
@@ -961,9 +973,9 @@ mod test {
         const URL: &str = "ws://example.com:80";
 
         let mut backing = [0; 128];
-        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, None);
+        assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"ws");
         assert_utf8_eq!(url.username, b"");
@@ -978,9 +990,9 @@ mod test {
         const URL: &str = "https://example.com:443";
 
         let mut backing = [0; 128];
-        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, None);
+        assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"https");
         assert_utf8_eq!(url.username, b"");
@@ -995,9 +1007,9 @@ mod test {
         const URL: &str = "wss://example.com:443";
 
         let mut backing = [0; 128];
-        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, None);
+        assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"wss");
         assert_utf8_eq!(url.username, b"");
@@ -1012,9 +1024,9 @@ mod test {
         const URL: &str = "http://example.com:";
 
         let mut backing = [0; 128];
-        let (url, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, None);
+        assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"http");
         assert_utf8_eq!(url.username, b"");
@@ -1029,9 +1041,13 @@ mod test {
         const URL: &str = "\u{0}\u{1}\u{2}\u{3}\u{4}\u{5}\u{6}\u{7}\u{8}\u{9}\u{10}\u{11}\u{12}\u{13}\u{14}\u{15}\u{16}\u{17}\u{18}\u{19}\u{20}http://example.com";
 
         let mut backing = [0; 128];
-        let (_, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, Some(ValidationError::InvalidURLUnit));
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidURLUnit)
+        );
+        assert_eq!(validation_errors.next(), None);
     }
 
     #[test]
@@ -1039,9 +1055,13 @@ mod test {
         const URL: &str = "http://example.com\u{20}\u{19}\u{18}\u{17}\u{16}\u{15}\u{14}\u{13}\u{12}\u{11}\u{10}\u{9}\u{8}\u{7}\u{6}\u{5}\u{4}\u{3}\u{2}\u{1}\u{0}";
 
         let mut backing = [0; 128];
-        let (_, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_error, Some(ValidationError::InvalidURLUnit));
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidURLUnit)
+        );
+        assert_eq!(validation_errors.next(), None);
     }
 
     #[test]
@@ -1049,12 +1069,13 @@ mod test {
         const URL: &str = "file:c:/my-secret-folder";
 
         let mut backing = [0; 128];
-        let (_, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
-            validation_error,
+            validation_errors.next(),
             Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
         );
+        assert_eq!(validation_errors.next(), None);
     }
 
     #[test]
@@ -1062,12 +1083,13 @@ mod test {
         const URL: &str = "http:example.com";
 
         let mut backing = [0; 128];
-        let (_, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
-            validation_error,
+            validation_errors.next(),
             Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
         );
+        assert_eq!(validation_errors.next(), None);
     }
 
     #[test]
@@ -1075,12 +1097,13 @@ mod test {
         const URL: &str = "http://\\\\/\\///example.com";
 
         let mut backing = [0; 128];
-        let (_, validation_error) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
-            validation_error,
+            validation_errors.next(),
             Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
         );
+        assert_eq!(validation_errors.next(), None);
     }
 
     #[test]
