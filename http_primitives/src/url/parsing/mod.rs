@@ -15,49 +15,23 @@ impl<'data> Url<'data> {
         mut bytes: &[u8],
         backing: &'data mut [u8],
     ) -> Result<(Self, Option<ValidationError>), Error> {
+        // TODO: replace validation_error with a bitset mapping to each enum variant.
+
         assert!(!backing.is_empty());
 
         let mut validation_error = None;
-        let mut buffer = UrlBuffer::new(backing);
+        let buffer = UrlBuffer::new(backing);
 
-        // == C0 control or space sanitization =====================================================
+        // == input sanitization ===================================================================
         //
-        // - 1.2. If input contains any leading or trailing C0 control or space, invalid-URL-unit
-        //        validation error.
-        //
-        // - 1.3. Remove any leading and trailing C0 control or space from input.
+        // Removes leading and trailing C0 control or space code points.
         //
         // =========================================================================================
 
-        // Leading C0 control or space
-        if let Some(c) = bytes.first()
-            && matchers::c0_control_or_space(*c)
-        {
-            validation_error.get_or_insert(ValidationError::InvalidURLUnit);
-            bytes = &bytes[1..];
-
-            while let Some(c) = bytes.first()
-                && matchers::c0_control_or_space(*c)
-            {
-                bytes = &bytes[1..];
-            }
-        }
-
-        // Trailing C0 control or space
-        if let Some(c) = bytes.last()
-            && matchers::c0_control_or_space(*c)
-        {
-            validation_error.get_or_insert(ValidationError::InvalidURLUnit);
-            let len = bytes.len();
-            bytes = &bytes[..len - 1];
-
-            while let Some(c) = bytes.last()
-                && matchers::c0_control_or_space(*c)
-            {
-                let len = bytes.len();
-                bytes = &bytes[..len - 1];
-            }
-        }
+        c0_control_or_space::parse(c0_control_or_space::Context {
+            bytes: &mut bytes,
+            validation_error: &mut validation_error,
+        });
 
         // == ASCII tab or newline sanitization ====================================================
         //
@@ -69,10 +43,10 @@ impl<'data> Url<'data> {
 
         let iter = ByteIter::new(bytes);
 
-        // == Scheme parsing =======================================================================
+        // == section parsing ======================================================================
         //
-        // Schemes are bounded by a first ASCII alphabetic character and end at the first U+003A (:)
-        // delimiter.
+        // Iterates over the input byte string and parses out the various URL segments. This is the
+        // entry point for further parsing methods to be invoked deeper into the call stack.
         //
         // =========================================================================================
 
@@ -133,6 +107,62 @@ mod segment {
     pub(super) struct Fragment(std::ops::Range<usize>);
 }
 
+mod c0_control_or_space {
+    use super::*;
+
+    pub(super) struct Context<'parsing, 'input> {
+        pub bytes: &'parsing mut &'input [u8],
+        pub validation_error: &'parsing mut Option<ValidationError>,
+    }
+
+    /// # C0 control or space sanitization
+    ///
+    /// Remove any leading and trailing [C0 control or space] from input.
+    ///
+    /// # Validation Errors
+    ///
+    /// [`InvalidURLUnit`]: If the input contains any leading or trailing [C0 control or space]
+    ///
+    /// [C0 control of space]: https://infra.spec.whatwg.org/#c0-control-or-space
+    /// [`InvalidURLUnit`]: ValidationError::InvalidURLUnit
+    pub(super) fn parse<'parsing, 'input>(context: Context<'parsing, 'input>) {
+        let Context {
+            bytes,
+            validation_error,
+        } = context;
+
+        // Leading C0 control or space
+        if let Some(c) = bytes.first()
+            && matchers::c0_control_or_space(*c)
+        {
+            validation_error.get_or_insert(ValidationError::InvalidURLUnit);
+            *bytes = &bytes[1..];
+
+            while let Some(c) = bytes.first()
+                && matchers::c0_control_or_space(*c)
+            {
+                *bytes = &bytes[1..];
+            }
+        }
+
+        // Trailing C0 control or space
+        if let Some(c) = bytes.last()
+            && matchers::c0_control_or_space(*c)
+        {
+            validation_error.get_or_insert(ValidationError::InvalidURLUnit);
+            let len = bytes.len();
+            *bytes = &bytes[..len - 1];
+
+            while let Some(c) = bytes.last()
+                && matchers::c0_control_or_space(*c)
+            {
+                let len = bytes.len();
+                *bytes = &bytes[..len - 1];
+            }
+        }
+    }
+}
+
 mod scheme {
     use super::*;
 
@@ -143,6 +173,13 @@ mod scheme {
         pub validation_error: Option<ValidationError>,
     }
 
+    /// # [Scheme state]
+    ///
+    /// Tries to parse a [`Url]'s scheme, if there is any, otherwise falls back to the "no scheme"
+    /// state. This is the entry point for parsing further segments.
+    ///
+    /// [Scheme state]: https://url.spec.whatwg.org/#scheme-start-state
+    #[inline]
     pub(super) fn parse<'input, 'output>(
         context: Context<'input, 'output>,
     ) -> Result<(Url<'output>, Option<ValidationError>), Error> {
@@ -185,34 +222,8 @@ mod scheme {
                 #[cfg(test)]
                 let _scheme = str::from_utf8(&buffer[scheme.0.clone()]).unwrap_or_default();
 
-                // See the [URL standard], special schemes.
-                //
-                // > _"A special scheme is an [ASCII string] that is listed in the first column of
-                // > the following table. The default port for a special scheme is listed in the
-                // > second column on the same row. The default port for any other [ASCII string] is
-                // > null."_
-                // >
-                // > | Special scheme | Default port |
-                // > |----------------|--------------|
-                // > | "ftp"          | 21           |
-                // > | "file"         | null         |
-                // > | "http"         | 80           |
-                // > | "https"        | 443          |
-                // > | "ws"           | 80           |
-                // > | "wss"          | 443          |
-                //
-                // [URL standard]: https://url.spec.whatwg.org/#special-scheme
-                // [ASCII string]: https://infra.spec.whatwg.org/#ascii-string
                 match &buffer[scheme.0.clone()] {
-                    b"file" => {
-                        if !iter.skip_if_matches(b"//") {
-                            validation_error.get_or_insert(
-                                ValidationError::SpecialSchemeMissingFollowingSolidus,
-                            );
-                        }
-
-                        buffer.push_str(b"//")?;
-                    },
+                    b"file" => todo!(),
 
                     b"ftp" => {
                         return scheme::special::parse(scheme::special::Context {
@@ -274,6 +285,41 @@ mod scheme {
             pub default_scheme_port: u16,
         }
 
+        /// # [Special relative or authority state]
+        ///
+        /// Parses out each [`Url] segment after a special scheme.
+        ///
+        /// ## Special scheme
+        ///
+        /// A special scheme is an [ASCII string] that is listed in the first column of the
+        /// following table. The default port for a special scheme is listed in the second column on
+        /// the same row. The default port for any other [ASCII string] is null.
+        ///
+        /// | Special scheme | Default port |
+        /// |----------------|--------------|
+        /// | "ftp"          | 21           |
+        /// | "file"         | null         |
+        /// | "http"         | 80           |
+        /// | "https"        | 443          |
+        /// | "ws"           | 80           |
+        /// | "wss"          | 443          |
+        ///
+        /// # Validation Errors
+        ///
+        /// [`SpecialSchemeMissingFollowingSolidus`] if scheme is not followed by two U+002F (/) or
+        /// is followed by too many U+002F (/) or  U+005C (\) code points.
+        ///
+        /// # Errors
+        ///
+        /// Surfaces a parsing [`Error`] if any of the underlying [`userinfo`] or [`host_and_port`]
+        /// parsers error out.
+        ///
+        /// [Special relative or authority state]: https://url.spec.whatwg.org/#special-relative-or-authority-state
+        /// [ASCII string]: https://infra.spec.whatwg.org/#ascii-string
+        /// [`SpecialSchemeMissingFollowingSolidus`]: ValidationError::SpecialSchemeMissingFollowingSolidus
+        /// [`userinfo`]: userinfo::parse
+        /// [`host_and_port`]: host_and_port::parse
+        #[inline]
         pub(crate) fn parse<'input, 'output>(
             context: Context<'input, 'output>,
         ) -> Result<(Url<'output>, Option<ValidationError>), Error> {
@@ -306,8 +352,7 @@ mod scheme {
             //  The specs aren't very clear on what happens in case an invalid
             //  combination of slashes precedes the authority. However, based on the
             //  rust_url source code, it seems the correct approach is to ignore ALL
-            //  slashes following the scheme and emit an error if this does not exactly
-            //  match two U+002F (/).
+            //  slashes following the scheme.
             //
             // https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L451-L457
             //
@@ -367,14 +412,31 @@ mod scheme {
 mod userinfo {
     use super::*;
 
-    pub(super) struct Context<'parse, 'input, 'output> {
-        pub iter: &'parse mut ByteIter<'input>,
-        pub buffer: &'parse mut UrlBuffer<'output>,
+    pub(super) struct Context<'parsing, 'input, 'output> {
+        pub iter: &'parsing mut ByteIter<'input>,
+        pub buffer: &'parsing mut UrlBuffer<'output>,
 
-        pub validation_error: &'parse mut Option<ValidationError>,
-        pub scheme: &'parse segment::Scheme,
+        pub validation_error: &'parsing mut Option<ValidationError>,
+        pub scheme: &'parsing segment::Scheme,
     }
 
+    /// # Authority state
+    ///
+    /// Parses the `username` and `password` sections of a [`Url], if there are any. This really
+    /// only exists for legacy compatibility reasons. You should **NOT** use this to embed plain
+    /// text credentials into a URL for authentication!
+    ///
+    /// # Validation Errors
+    ///
+    /// [`InvalidCredentials`] if any embedded credentials are encountered.
+    ///
+    /// # Errors
+    ///
+    /// [`HostMissing`] if there are no more code points left after `username` and `password`.
+    ///
+    /// [`InvalidCredentials`]: ValidationError::InvalidCredentials
+    /// [`HostMissing`]: Error::HostMissing
+    #[inline]
     pub(super) fn parse<'parsing, 'input, 'output>(
         context: Context<'parsing, 'input, 'output>,
     ) -> Result<(segment::Username, segment::Password), Error> {
@@ -521,6 +583,17 @@ mod host_and_port {
         pub default_scheme_port: u16,
     }
 
+    /// Parses out a [`Url`]'s [`host`] and [`port`] components. This is done to optimize branching
+    /// so that the presence of a port is only ever checked once.
+    ///
+    /// # Errors
+    ///
+    /// Surfaces a parsing [`Error`] if any of the underlying [`host`] or [`port`] parsers error
+    /// out.
+    ///
+    /// [`host`]: host::parse
+    /// [`port`]: port::parse
+    #[inline]
     pub(super) fn parse<'parsing, 'input, 'output>(
         context: Context<'parsing, 'input, 'output>,
     ) -> Result<(segment::Host, Option<u16>), Error> {
@@ -544,6 +617,7 @@ mod host_and_port {
 
         loop {
             match iter.next() {
+                // host and port
                 Some(b':') if !inside_brackets => {
                     iter.reset_to(checkpoint_hostname);
 
@@ -566,6 +640,7 @@ mod host_and_port {
 
                     break Ok((host, port));
                 },
+                // End of host section, no port was provided
                 None | Some(b'/') | Some(b'\\') | Some(b'?') | Some(b'#') => {
                     iter.reset_to(checkpoint_hostname);
 
@@ -607,6 +682,21 @@ mod host {
         pub char_count_hostname: usize,
     }
 
+    /// # [Hostname state]
+    ///
+    /// Parses out the host segment of a [`Url`]. This can be either:
+    ///
+    /// - An IPV6 host.
+    /// - A domain host.
+    /// - An IPV4 host.
+    ///
+    /// # Errors
+    ///
+    /// [`HostMissing`] if the host segment does not contain any code points.
+    ///
+    /// [Hostname state]: https://url.spec.whatwg.org/#hostname-state
+    /// [`HostMissing`]: Error::HostMissing
+    #[inline]
     pub(super) fn parse<'parsing, 'input, 'output>(
         context: Context<'parsing, 'input, 'output>,
     ) -> Result<segment::Host, Error> {
@@ -627,6 +717,9 @@ mod host {
         if iter.skip_if_matches(b"[") {
             todo!("IPV6 parsing");
         } else {
+            // TODO: refactor this into its own function once we support IPV6 parsing and IPV4
+            // parsing as well
+
             // userinfo end, skipping U+0040 (@)
             let host_start = if !password.0.is_empty() {
                 password.0.end + 1
@@ -664,6 +757,39 @@ mod port {
         pub default_scheme_port: u16,
     }
 
+    /// # [Port state]
+    ///
+    /// Parses out the port segment of a [`Url`]. Ports are normalized according to that scheme's
+    /// default port.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// http://example.com:80
+    /// ```
+    ///
+    /// Will have it's port normalized to [`None`]. This is done to guarantee parser/serializer
+    /// indempotence in accordance with the [URL specification goals], so that the following are
+    /// seen as equivalent when compared after parsing.
+    ///
+    /// ```text
+    /// http://example.com:80
+    /// http://example.com:
+    /// http://example.com
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`PortOutOfRange`] if the value of the port is greater than [`u16::MAX`].
+    ///
+    /// [`PortInvalid`] if the port contains non [ASCII digit] code points.
+    ///
+    /// [Port state]: https://url.spec.whatwg.org/#port-state
+    /// [URL specification goals]: https://url.spec.whatwg.org/#goals
+    /// [`PortOutOfRange`]: Error::PortOutOfRange
+    /// [`PortInvalid`]: Error::PortInvalid
+    /// [ASCII digit]: https://infra.spec.whatwg.org/#ascii-digit
+    #[inline]
     pub(super) fn parse<'parse, 'input>(
         context: Context<'parse, 'input>,
     ) -> Result<Option<u16>, Error> {
