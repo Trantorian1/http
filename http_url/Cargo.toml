@@ -1,6 +1,6 @@
 [package]
-name = "http_primitives"
-version = "0.0.1"
+name = "http_url"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 metadata.workspace = true
@@ -9,9 +9,10 @@ metadata.workspace = true
 workspace = true
 
 [dependencies]
-memchr.workspace = true
+http_primitives.workspace = true
 macro_util.workspace = true
 macro_derive.workspace = true
+memchr.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true

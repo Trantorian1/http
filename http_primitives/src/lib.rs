@@ -3,7 +3,6 @@
 pub mod mem;
 pub mod size;
 pub mod status;
-pub mod url;
 
 pub mod prelude {
     //! A “prelude” for crates using the `http_primitives` crate.
@@ -26,10 +25,6 @@ pub mod prelude {
     pub use super::size::KB;
     pub use super::size::MB;
     pub use super::status::Status;
-    pub use super::url;
-    pub use super::url::Query;
-    pub use super::url::QueryParameter;
-    pub use super::url::UrlOld;
 }
 
 pub use prelude::*;
