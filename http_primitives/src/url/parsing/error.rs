@@ -32,9 +32,10 @@ pub enum Error {
     PortOutOfRange,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 /// A validation error indicates a mismatch between input and valid input. User agents, especially
 /// conformance checkers, are encouraged to report them somewhere.
+#[derive(macro_derive::BitSet, Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ValidationError {
     /// A code point is found that is not a [URL unit].
     ///
@@ -77,4 +78,48 @@ pub enum ValidationError {
     /// "https:example.org"
     /// ```
     SpecialSchemeMissingFollowingSolidus,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn bitset_add() {
+        let mut bitset = ValidationErrorBitSet::new();
+
+        assert!(!bitset.contains(ValidationError::InvalidURLUnit));
+        assert!(!bitset.contains(ValidationError::InvalidCredentials));
+        assert!(!bitset.contains(ValidationError::SpecialSchemeMissingFollowingSolidus));
+
+        assert_eq!(bitset.len(), 0);
+        assert!(bitset.is_empty());
+
+        bitset.add(ValidationError::InvalidURLUnit);
+
+        assert!(bitset.contains(ValidationError::InvalidURLUnit));
+        assert!(!bitset.contains(ValidationError::InvalidCredentials));
+        assert!(!bitset.contains(ValidationError::SpecialSchemeMissingFollowingSolidus));
+
+        assert_eq!(bitset.len(), 1);
+        assert!(!bitset.is_empty());
+    }
+
+    #[test]
+    fn bitset_iter() {
+        let mut bitset = ValidationErrorBitSet::new();
+
+        bitset.add(ValidationError::SpecialSchemeMissingFollowingSolidus);
+        bitset.add(ValidationError::InvalidURLUnit);
+
+        let mut iter = bitset.iter();
+
+        assert_eq!(iter.next(), Some(ValidationError::InvalidURLUnit));
+        assert_eq!(
+            iter.next(),
+            Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
+        );
+
+        assert_eq!(iter.next(), None);
+    }
 }
