@@ -1,5 +1,6 @@
+use macro_util::prelude::*;
+
 use super::ByteStream;
-use crate::prelude::*;
 
 impl<'data> ByteStream<'data> {
     /// Returns an iterator over the stream.

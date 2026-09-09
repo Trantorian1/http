@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["http_1", "http_primitives"]
+members = ["http_1", "http_primitives", "macro_util"]
 
 [workspace.package]
 version = "0.1.0"
@@ -71,3 +71,6 @@ hex = { version = "0.4.3", default-features = false }
 rstest = "0.26.1"
 pretty_assertions = "1.4.1"
 bolero = "0.13.4"
+
+# Utility
+macro_util.path = "macro_util"

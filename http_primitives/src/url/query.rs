@@ -184,8 +184,9 @@ where
 
 #[cfg(test)]
 mod test {
+    use macro_util::prelude::*;
+
     use super::*;
-    use crate::prelude::*;
 
     #[test]
     fn url_query_simple() {
@@ -193,16 +194,16 @@ mod test {
         let mut iter = query.iter();
 
         let a = iter.next().unwrap();
-        assert_str_eq!(a.key, b"a");
-        assert_str_eq!(a.val, b"12");
+        assert_utf8_eq!(a.key, b"a");
+        assert_utf8_eq!(a.val, b"12");
 
         let bcd = iter.next().unwrap();
-        assert_str_eq!(bcd.key, b"bcd");
-        assert_str_eq!(bcd.val, b"2");
+        assert_utf8_eq!(bcd.key, b"bcd");
+        assert_utf8_eq!(bcd.val, b"2");
 
         let ef = iter.next().unwrap();
-        assert_str_eq!(ef.key, b"ef");
-        assert_str_eq!(ef.val, b"345");
+        assert_utf8_eq!(ef.key, b"ef");
+        assert_utf8_eq!(ef.val, b"345");
 
         assert_eq!(iter.next(), None);
     }

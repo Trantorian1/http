@@ -1,6 +1,6 @@
 //! Stack-based [`ByteStream`]s.
 
-use crate::prelude::*;
+use macro_util::prelude::*;
 
 mod iter;
 mod read;

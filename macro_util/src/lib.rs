@@ -1,3 +1,27 @@
+//! Basic quality-of-life macros which are used throughout the project.
+
+pub mod prelude {
+    //! A “prelude” for crates using the `macro_util` crate.
+    //!
+    //! This prelude is similar to the standard library’s prelude in that you’ll almost always want
+    //! to import its entire contents, but unlike the standard library’s prelude you’ll have to do
+    //! so manually:
+    //!
+    //! ```rust
+    //! use macro_util::prelude::*;
+    //! ```
+    //!
+    //! The prelude may grow over time as additional items see ubiquitous use.
+
+    pub use super::assert_byte_eq;
+    pub use super::assert_gr;
+    pub use super::assert_greq;
+    pub use super::assert_le;
+    pub use super::assert_leq;
+    pub use super::assert_utf8_eq;
+    pub use super::nonzero;
+}
+
 #[macro_export]
 /// Creates a new [`NonZero`] integer.
 ///
@@ -87,7 +111,7 @@ macro_rules! assert_greq {
     };
 }
 
-/// Compares two byte strings together.
+/// Compares two utf8 byte strings together.
 ///
 /// # Examples
 ///
@@ -96,7 +120,7 @@ macro_rules! assert_greq {
 /// assert_streq!(b"Trantorian", b"Trantorian");
 /// ```
 #[macro_export]
-macro_rules! assert_str_eq {
+macro_rules! assert_utf8_eq {
     ($left:expr,$right:expr) => {{
         let left = std::str::from_utf8($left).expect("Invalid utf8");
         let right = std::str::from_utf8($right).expect("Invalid utf8");
@@ -104,8 +128,16 @@ macro_rules! assert_str_eq {
     }};
 }
 
+/// Compares two utf8 bytes together.
+///
+/// # Example
+///
+/// ```rust
+/// use macro_util::*;
+/// assert_char_eq!(b'a', b'a');
+/// ```
 #[macro_export]
-macro_rules! assert_char_eq {
+macro_rules! assert_byte_eq {
     ($left:expr,$right:expr) => {{
         let left = char::from_u32($left as u32).expect("Invalid utf8");
         let right = char::from_u32($right as u32).expect("Invalid utf8");
