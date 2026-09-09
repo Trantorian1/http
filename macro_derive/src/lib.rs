@@ -74,8 +74,8 @@ mod bitset;
 ///         self.len() == 0
 ///     }
 ///
-///     fn iter(&self) -> ErrorBitSetIter {
-///         ErrorBitSetIter {
+///     fn iter(&self) -> ErrorIter {
+///         ErrorIter {
 ///             bitset: self.0,
 ///             index: 0,
 ///         }
@@ -84,18 +84,18 @@ mod bitset;
 ///
 /// impl IntoIterator for ErrorBitSet {
 ///     type Item = Error;
-///     type IntoIter = ErrorBitSetIter;
-///     fn into_iter(self) -> ErrorBitSetIter {
+///     type IntoIter = ErrorIter;
+///     fn into_iter(self) -> ErrorIter {
 ///         self.iter()
 ///     }
 /// }
 ///
-/// struct ErrorBitSetIter {
+/// struct ErrorIter {
 ///     bitset: u8,
 ///     index: u8,
 /// }
 ///
-/// impl Iterator for ErrorBitSetIter {
+/// impl Iterator for ErrorIter {
 ///     type Item = Error;
 ///     fn next(&mut self) -> Option<Error> {
 ///         while self.index < u8::BITS as u8 {
