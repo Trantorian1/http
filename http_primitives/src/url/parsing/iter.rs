@@ -123,25 +123,26 @@ impl<'data> Iterator for ByteIter<'data> {
 
 #[cfg(test)]
 mod test {
+    use macro_util::prelude::*;
+
     use super::*;
-    use crate::prelude::*;
 
     #[test]
     fn byte_iter_skip_tabs_and_newlines() {
         let mut iter = ByteIter::new(b"\t\n\rHello, \t\t\tWo\n\n\nrl\r\r\rd\t\n\r");
 
-        assert_char_eq!(*iter.next().unwrap(), b'H');
-        assert_char_eq!(*iter.next().unwrap(), b'e');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b',');
-        assert_char_eq!(*iter.next().unwrap(), b' ');
-        assert_char_eq!(*iter.next().unwrap(), b'W');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b'r');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'd');
+        assert_byte_eq!(*iter.next().unwrap(), b'H');
+        assert_byte_eq!(*iter.next().unwrap(), b'e');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b',');
+        assert_byte_eq!(*iter.next().unwrap(), b' ');
+        assert_byte_eq!(*iter.next().unwrap(), b'W');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b'r');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'd');
 
         assert_eq!(iter.next(), None);
     }
@@ -152,18 +153,18 @@ mod test {
 
         assert_eq!(*iter.peek().unwrap(), b'H');
 
-        assert_char_eq!(*iter.next().unwrap(), b'H');
-        assert_char_eq!(*iter.next().unwrap(), b'e');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b',');
-        assert_char_eq!(*iter.next().unwrap(), b' ');
-        assert_char_eq!(*iter.next().unwrap(), b'W');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b'r');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'd');
+        assert_byte_eq!(*iter.next().unwrap(), b'H');
+        assert_byte_eq!(*iter.next().unwrap(), b'e');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b',');
+        assert_byte_eq!(*iter.next().unwrap(), b' ');
+        assert_byte_eq!(*iter.next().unwrap(), b'W');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b'r');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'd');
 
         assert_eq!(iter.next(), None);
     }
@@ -189,18 +190,18 @@ mod test {
 
         assert!(!iter.skip_if_matches(b"FizzBuzz"));
 
-        assert_char_eq!(*iter.next().unwrap(), b'H');
-        assert_char_eq!(*iter.next().unwrap(), b'e');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b',');
-        assert_char_eq!(*iter.next().unwrap(), b' ');
-        assert_char_eq!(*iter.next().unwrap(), b'W');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b'r');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'd');
+        assert_byte_eq!(*iter.next().unwrap(), b'H');
+        assert_byte_eq!(*iter.next().unwrap(), b'e');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b',');
+        assert_byte_eq!(*iter.next().unwrap(), b' ');
+        assert_byte_eq!(*iter.next().unwrap(), b'W');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b'r');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'd');
 
         assert_eq!(iter.next(), None);
     }
@@ -211,17 +212,17 @@ mod test {
 
         assert!(iter.skip_while_matches2(b'/', b'\\'));
 
-        assert_char_eq!(*iter.next().unwrap(), b'e');
-        assert_char_eq!(*iter.next().unwrap(), b'x');
-        assert_char_eq!(*iter.next().unwrap(), b'a');
-        assert_char_eq!(*iter.next().unwrap(), b'm');
-        assert_char_eq!(*iter.next().unwrap(), b'p');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'e');
-        assert_char_eq!(*iter.next().unwrap(), b'.');
-        assert_char_eq!(*iter.next().unwrap(), b'c');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b'm');
+        assert_byte_eq!(*iter.next().unwrap(), b'e');
+        assert_byte_eq!(*iter.next().unwrap(), b'x');
+        assert_byte_eq!(*iter.next().unwrap(), b'a');
+        assert_byte_eq!(*iter.next().unwrap(), b'm');
+        assert_byte_eq!(*iter.next().unwrap(), b'p');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'e');
+        assert_byte_eq!(*iter.next().unwrap(), b'.');
+        assert_byte_eq!(*iter.next().unwrap(), b'c');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b'm');
 
         assert_eq!(iter.next(), None);
     }
@@ -232,18 +233,18 @@ mod test {
 
         assert!(!iter.skip_while_matches2(b'/', b'\\'));
 
-        assert_char_eq!(*iter.next().unwrap(), b'H');
-        assert_char_eq!(*iter.next().unwrap(), b'e');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b',');
-        assert_char_eq!(*iter.next().unwrap(), b' ');
-        assert_char_eq!(*iter.next().unwrap(), b'W');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b'r');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'd');
+        assert_byte_eq!(*iter.next().unwrap(), b'H');
+        assert_byte_eq!(*iter.next().unwrap(), b'e');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b',');
+        assert_byte_eq!(*iter.next().unwrap(), b' ');
+        assert_byte_eq!(*iter.next().unwrap(), b'W');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b'r');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'd');
 
         assert_eq!(iter.next(), None);
     }
@@ -252,35 +253,35 @@ mod test {
     fn byte_iter_reset() {
         let mut iter = ByteIter::new(b"\t\n\rHello, \t\t\tWo\n\n\nrl\r\r\rd\t\n\r");
 
-        assert_char_eq!(*iter.next().unwrap(), b'H');
-        assert_char_eq!(*iter.next().unwrap(), b'e');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b',');
-        assert_char_eq!(*iter.next().unwrap(), b' ');
-        assert_char_eq!(*iter.next().unwrap(), b'W');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b'r');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'd');
+        assert_byte_eq!(*iter.next().unwrap(), b'H');
+        assert_byte_eq!(*iter.next().unwrap(), b'e');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b',');
+        assert_byte_eq!(*iter.next().unwrap(), b' ');
+        assert_byte_eq!(*iter.next().unwrap(), b'W');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b'r');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'd');
 
         assert_eq!(iter.next(), None);
 
         iter.reset();
 
-        assert_char_eq!(*iter.next().unwrap(), b'H');
-        assert_char_eq!(*iter.next().unwrap(), b'e');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b',');
-        assert_char_eq!(*iter.next().unwrap(), b' ');
-        assert_char_eq!(*iter.next().unwrap(), b'W');
-        assert_char_eq!(*iter.next().unwrap(), b'o');
-        assert_char_eq!(*iter.next().unwrap(), b'r');
-        assert_char_eq!(*iter.next().unwrap(), b'l');
-        assert_char_eq!(*iter.next().unwrap(), b'd');
+        assert_byte_eq!(*iter.next().unwrap(), b'H');
+        assert_byte_eq!(*iter.next().unwrap(), b'e');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b',');
+        assert_byte_eq!(*iter.next().unwrap(), b' ');
+        assert_byte_eq!(*iter.next().unwrap(), b'W');
+        assert_byte_eq!(*iter.next().unwrap(), b'o');
+        assert_byte_eq!(*iter.next().unwrap(), b'r');
+        assert_byte_eq!(*iter.next().unwrap(), b'l');
+        assert_byte_eq!(*iter.next().unwrap(), b'd');
 
         assert_eq!(iter.next(), None);
     }

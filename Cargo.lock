@@ -232,6 +232,7 @@ name = "http_primitives"
 version = "0.0.1"
 dependencies = [
  "bolero",
+ "macro_util",
  "memchr",
  "pretty_assertions",
  "rstest",
@@ -270,6 +271,10 @@ name = "log"
 version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+
+[[package]]
+name = "macro_util"
+version = "0.1.0"
 
 [[package]]
 name = "matchers"

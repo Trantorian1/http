@@ -1,9 +1,10 @@
 use std::io::Read as _;
 use std::io::Write as _;
 
+use macro_util::prelude::*;
+
 use super::ByteStream;
 use super::fixtures::*;
-use crate::prelude::*;
 
 mod test {
     use super::*;

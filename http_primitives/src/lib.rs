@@ -1,6 +1,5 @@
 //! Shared HTTP primitives.
 
-mod macros;
 pub mod mem;
 pub mod size;
 pub mod status;
@@ -19,17 +18,10 @@ pub mod prelude {
     //!
     //! The prelude may grow over time as additional items see ubiquitous use.
 
-    pub use super::assert_char_eq;
-    pub use super::assert_gr;
-    pub use super::assert_greq;
-    pub use super::assert_le;
-    pub use super::assert_leq;
-    pub use super::assert_str_eq;
     pub use super::mem::buffer::Buffer;
     pub use super::mem::buffer::BufferForReading;
     pub use super::mem::buffer::BufferForWriting;
     pub use super::mem::stream::ByteStream;
-    pub use super::nonzero;
     pub use super::size::GB;
     pub use super::size::KB;
     pub use super::size::MB;

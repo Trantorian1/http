@@ -53,8 +53,9 @@ fn encode_ascii_byte(c: u8) -> &'static [u8] {
 
 #[cfg(test)]
 mod test {
+    use macro_util::prelude::*;
+
     use super::*;
-    use crate::prelude::*;
 
     #[test]
     fn encode_path() {
@@ -62,6 +63,6 @@ mod test {
         let written = encode(b' ', &mut buffer, sets::PATH);
 
         assert_eq!(written, 3);
-        assert_str_eq!(&buffer[..written], b"%20");
+        assert_utf8_eq!(&buffer[..written], b"%20");
     }
 }

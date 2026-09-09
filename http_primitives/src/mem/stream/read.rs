@@ -1,5 +1,6 @@
+use macro_util::prelude::*;
+
 use super::ByteStream;
-use crate::prelude::*;
 
 impl std::io::Read for ByteStream<'_> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {

@@ -830,8 +830,9 @@ mod port {
 
 #[cfg(test)]
 mod test {
+    use macro_util::prelude::*;
+
     use super::*;
-    use crate::prelude::*;
 
     #[test]
     fn url_parse_userinfo_full() {
@@ -842,9 +843,9 @@ mod test {
 
         assert_eq!(validation_error, Some(ValidationError::InvalidCredentials));
 
-        assert_str_eq!(url.scheme, b"http");
-        assert_str_eq!(url.username, b"user");
-        assert_str_eq!(url.password, b"password");
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"user");
+        assert_utf8_eq!(url.password, b"password");
     }
 
     #[test]
@@ -856,9 +857,9 @@ mod test {
 
         assert_eq!(validation_error, Some(ValidationError::InvalidCredentials));
 
-        assert_str_eq!(url.scheme, b"http");
-        assert_str_eq!(url.username, b"user");
-        assert_str_eq!(url.password, b"");
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"user");
+        assert_utf8_eq!(url.password, b"");
     }
 
     #[test]
@@ -870,9 +871,9 @@ mod test {
 
         assert_eq!(validation_error, Some(ValidationError::InvalidCredentials));
 
-        assert_str_eq!(url.scheme, b"http");
-        assert_str_eq!(url.username, b"");
-        assert_str_eq!(url.password, b"password");
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"password");
     }
 
     #[test]
@@ -884,9 +885,9 @@ mod test {
 
         assert_eq!(validation_error, Some(ValidationError::InvalidCredentials));
 
-        assert_str_eq!(url.scheme, b"http");
-        assert_str_eq!(url.username, b"user");
-        assert_str_eq!(url.password, b"password%40");
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"user");
+        assert_utf8_eq!(url.password, b"password%40");
     }
 
     #[test]
@@ -898,10 +899,10 @@ mod test {
 
         assert_eq!(validation_error, None);
 
-        assert_str_eq!(url.scheme, b"http");
-        assert_str_eq!(url.username, b"");
-        assert_str_eq!(url.password, b"");
-        assert_str_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
     }
 
     #[test]
@@ -913,10 +914,10 @@ mod test {
 
         assert_eq!(validation_error, None);
 
-        assert_str_eq!(url.scheme, b"http");
-        assert_str_eq!(url.username, b"");
-        assert_str_eq!(url.password, b"");
-        assert_str_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, Some(123));
     }
@@ -930,10 +931,10 @@ mod test {
 
         assert_eq!(validation_error, None);
 
-        assert_str_eq!(url.scheme, b"ftp");
-        assert_str_eq!(url.username, b"");
-        assert_str_eq!(url.password, b"");
-        assert_str_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme, b"ftp");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, None);
     }
@@ -947,10 +948,10 @@ mod test {
 
         assert_eq!(validation_error, None);
 
-        assert_str_eq!(url.scheme, b"http");
-        assert_str_eq!(url.username, b"");
-        assert_str_eq!(url.password, b"");
-        assert_str_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, None);
     }
@@ -964,10 +965,10 @@ mod test {
 
         assert_eq!(validation_error, None);
 
-        assert_str_eq!(url.scheme, b"ws");
-        assert_str_eq!(url.username, b"");
-        assert_str_eq!(url.password, b"");
-        assert_str_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme, b"ws");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, None);
     }
@@ -981,10 +982,10 @@ mod test {
 
         assert_eq!(validation_error, None);
 
-        assert_str_eq!(url.scheme, b"https");
-        assert_str_eq!(url.username, b"");
-        assert_str_eq!(url.password, b"");
-        assert_str_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme, b"https");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, None);
     }
@@ -998,10 +999,10 @@ mod test {
 
         assert_eq!(validation_error, None);
 
-        assert_str_eq!(url.scheme, b"wss");
-        assert_str_eq!(url.username, b"");
-        assert_str_eq!(url.password, b"");
-        assert_str_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme, b"wss");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, None);
     }
@@ -1015,10 +1016,10 @@ mod test {
 
         assert_eq!(validation_error, None);
 
-        assert_str_eq!(url.scheme, b"http");
-        assert_str_eq!(url.username, b"");
-        assert_str_eq!(url.password, b"");
-        assert_str_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, None);
     }

@@ -365,22 +365,23 @@ impl std::fmt::Display for UrlOld<'_> {
 
 #[cfg(test)]
 mod test {
+    use macro_util::prelude::*;
+
     use super::*;
-    use crate::prelude::*;
 
     #[test]
     fn url_simple() {
         let url = UrlOld::new(b"http://example.com?hello=world#anchor").unwrap();
-        assert_str_eq!(url.scheme, b"http");
-        assert_str_eq!(url.host, b"example.com");
-        assert_str_eq!(url.port, b"80");
-        assert_str_eq!(url.path, b"/");
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.port, b"80");
+        assert_utf8_eq!(url.path, b"/");
 
         let mut parameters = url.query.iter();
         let a = parameters.next().unwrap();
 
-        assert_str_eq!(a.key, b"hello");
-        assert_str_eq!(a.val, b"world");
+        assert_utf8_eq!(a.key, b"hello");
+        assert_utf8_eq!(a.val, b"world");
         assert_eq!(parameters.next(), None);
 
         assert_eq!(url.fragment, b"anchor");
@@ -389,67 +390,67 @@ mod test {
     #[test]
     fn url_nested_path() {
         let url = UrlOld::new(b"/path/to/resource/name").unwrap();
-        assert_str_eq!(url.scheme, b"");
-        assert_str_eq!(url.host, b"");
-        assert_str_eq!(url.port, b"80");
-        assert_str_eq!(url.path, b"/path/to/resource/name");
+        assert_utf8_eq!(url.scheme, b"");
+        assert_utf8_eq!(url.host, b"");
+        assert_utf8_eq!(url.port, b"80");
+        assert_utf8_eq!(url.path, b"/path/to/resource/name");
         assert_eq!(url.query.iter().next(), None);
-        assert_str_eq!(url.fragment, b"");
+        assert_utf8_eq!(url.fragment, b"");
     }
 
     #[test]
     fn url_only_host() {
         let url = UrlOld::new(b"example.com").unwrap();
 
-        assert_str_eq!(url.scheme, b"");
-        assert_str_eq!(url.host, b"example.com");
-        assert_str_eq!(url.port, b"80");
-        assert_str_eq!(url.path, b"/");
+        assert_utf8_eq!(url.scheme, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.port, b"80");
+        assert_utf8_eq!(url.path, b"/");
         assert_eq!(url.query.iter().next(), None);
-        assert_str_eq!(url.fragment, b"");
+        assert_utf8_eq!(url.fragment, b"");
     }
 
     #[test]
     fn url_only_path() {
         let url = UrlOld::new(b"/path").unwrap();
 
-        assert_str_eq!(url.scheme, b"");
-        assert_str_eq!(url.host, b"");
-        assert_str_eq!(url.port, b"80");
-        assert_str_eq!(url.path, b"/path");
+        assert_utf8_eq!(url.scheme, b"");
+        assert_utf8_eq!(url.host, b"");
+        assert_utf8_eq!(url.port, b"80");
+        assert_utf8_eq!(url.path, b"/path");
         assert_eq!(url.query.iter().next(), None);
-        assert_str_eq!(url.fragment, b"");
+        assert_utf8_eq!(url.fragment, b"");
     }
 
     #[test]
     fn url_only_query() {
         let url = UrlOld::new(b"?a=1").unwrap();
 
-        assert_str_eq!(url.scheme, b"");
-        assert_str_eq!(url.host, b"");
-        assert_str_eq!(url.port, b"80");
-        assert_str_eq!(url.path, b"/");
+        assert_utf8_eq!(url.scheme, b"");
+        assert_utf8_eq!(url.host, b"");
+        assert_utf8_eq!(url.port, b"80");
+        assert_utf8_eq!(url.path, b"/");
 
         let mut parameters = url.query.iter();
         let a = parameters.next().unwrap();
 
-        assert_str_eq!(a.key, b"a");
-        assert_str_eq!(a.val, b"1");
+        assert_utf8_eq!(a.key, b"a");
+        assert_utf8_eq!(a.val, b"1");
         assert_eq!(parameters.next(), None);
 
-        assert_str_eq!(url.fragment, b"");
+        assert_utf8_eq!(url.fragment, b"");
     }
 
     #[test]
     fn url_only_fragment() {
         let url = UrlOld::new(b"#fragment").unwrap();
 
-        assert_str_eq!(url.scheme, b"");
-        assert_str_eq!(url.host, b"");
-        assert_str_eq!(url.port, b"80");
-        assert_str_eq!(url.path, b"/");
+        assert_utf8_eq!(url.scheme, b"");
+        assert_utf8_eq!(url.host, b"");
+        assert_utf8_eq!(url.port, b"80");
+        assert_utf8_eq!(url.path, b"/");
         assert_eq!(url.query.iter().next(), None);
-        assert_str_eq!(url.fragment, b"fragment");
+        assert_utf8_eq!(url.fragment, b"fragment");
     }
 
     #[test]

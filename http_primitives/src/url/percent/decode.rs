@@ -68,25 +68,26 @@ impl<'data, I: Iterator<Item = &'data u8>> Iterator for DecodeIter<'data, I> {
 
 #[cfg(test)]
 mod test {
+    use macro_util::prelude::*;
+
     use super::*;
-    use crate::prelude::*;
 
     #[test]
     fn decode_simple() {
         let message = b"Hello%20World";
         let mut iter = decode(message.into_iter());
 
-        assert_char_eq!(iter.next().unwrap(), b'H');
-        assert_char_eq!(iter.next().unwrap(), b'e');
-        assert_char_eq!(iter.next().unwrap(), b'l');
-        assert_char_eq!(iter.next().unwrap(), b'l');
-        assert_char_eq!(iter.next().unwrap(), b'o');
-        assert_char_eq!(iter.next().unwrap(), b' ');
-        assert_char_eq!(iter.next().unwrap(), b'W');
-        assert_char_eq!(iter.next().unwrap(), b'o');
-        assert_char_eq!(iter.next().unwrap(), b'r');
-        assert_char_eq!(iter.next().unwrap(), b'l');
-        assert_char_eq!(iter.next().unwrap(), b'd');
+        assert_byte_eq!(iter.next().unwrap(), b'H');
+        assert_byte_eq!(iter.next().unwrap(), b'e');
+        assert_byte_eq!(iter.next().unwrap(), b'l');
+        assert_byte_eq!(iter.next().unwrap(), b'l');
+        assert_byte_eq!(iter.next().unwrap(), b'o');
+        assert_byte_eq!(iter.next().unwrap(), b' ');
+        assert_byte_eq!(iter.next().unwrap(), b'W');
+        assert_byte_eq!(iter.next().unwrap(), b'o');
+        assert_byte_eq!(iter.next().unwrap(), b'r');
+        assert_byte_eq!(iter.next().unwrap(), b'l');
+        assert_byte_eq!(iter.next().unwrap(), b'd');
 
         assert_eq!(iter.next(), None);
     }
@@ -96,23 +97,23 @@ mod test {
         let message = b"username%3Apassword";
         let mut iter = decode(message.into_iter());
 
-        assert_char_eq!(iter.next().unwrap(), b'u');
-        assert_char_eq!(iter.next().unwrap(), b's');
-        assert_char_eq!(iter.next().unwrap(), b'e');
-        assert_char_eq!(iter.next().unwrap(), b'r');
-        assert_char_eq!(iter.next().unwrap(), b'n');
-        assert_char_eq!(iter.next().unwrap(), b'a');
-        assert_char_eq!(iter.next().unwrap(), b'm');
-        assert_char_eq!(iter.next().unwrap(), b'e');
-        assert_char_eq!(iter.next().unwrap(), b':');
-        assert_char_eq!(iter.next().unwrap(), b'p');
-        assert_char_eq!(iter.next().unwrap(), b'a');
-        assert_char_eq!(iter.next().unwrap(), b's');
-        assert_char_eq!(iter.next().unwrap(), b's');
-        assert_char_eq!(iter.next().unwrap(), b'w');
-        assert_char_eq!(iter.next().unwrap(), b'o');
-        assert_char_eq!(iter.next().unwrap(), b'r');
-        assert_char_eq!(iter.next().unwrap(), b'd');
+        assert_byte_eq!(iter.next().unwrap(), b'u');
+        assert_byte_eq!(iter.next().unwrap(), b's');
+        assert_byte_eq!(iter.next().unwrap(), b'e');
+        assert_byte_eq!(iter.next().unwrap(), b'r');
+        assert_byte_eq!(iter.next().unwrap(), b'n');
+        assert_byte_eq!(iter.next().unwrap(), b'a');
+        assert_byte_eq!(iter.next().unwrap(), b'm');
+        assert_byte_eq!(iter.next().unwrap(), b'e');
+        assert_byte_eq!(iter.next().unwrap(), b':');
+        assert_byte_eq!(iter.next().unwrap(), b'p');
+        assert_byte_eq!(iter.next().unwrap(), b'a');
+        assert_byte_eq!(iter.next().unwrap(), b's');
+        assert_byte_eq!(iter.next().unwrap(), b's');
+        assert_byte_eq!(iter.next().unwrap(), b'w');
+        assert_byte_eq!(iter.next().unwrap(), b'o');
+        assert_byte_eq!(iter.next().unwrap(), b'r');
+        assert_byte_eq!(iter.next().unwrap(), b'd');
 
         assert_eq!(iter.next(), None);
     }
@@ -122,23 +123,23 @@ mod test {
         let message = b"username%3apassword";
         let mut iter = decode(message.into_iter());
 
-        assert_char_eq!(iter.next().unwrap(), b'u');
-        assert_char_eq!(iter.next().unwrap(), b's');
-        assert_char_eq!(iter.next().unwrap(), b'e');
-        assert_char_eq!(iter.next().unwrap(), b'r');
-        assert_char_eq!(iter.next().unwrap(), b'n');
-        assert_char_eq!(iter.next().unwrap(), b'a');
-        assert_char_eq!(iter.next().unwrap(), b'm');
-        assert_char_eq!(iter.next().unwrap(), b'e');
-        assert_char_eq!(iter.next().unwrap(), b':');
-        assert_char_eq!(iter.next().unwrap(), b'p');
-        assert_char_eq!(iter.next().unwrap(), b'a');
-        assert_char_eq!(iter.next().unwrap(), b's');
-        assert_char_eq!(iter.next().unwrap(), b's');
-        assert_char_eq!(iter.next().unwrap(), b'w');
-        assert_char_eq!(iter.next().unwrap(), b'o');
-        assert_char_eq!(iter.next().unwrap(), b'r');
-        assert_char_eq!(iter.next().unwrap(), b'd');
+        assert_byte_eq!(iter.next().unwrap(), b'u');
+        assert_byte_eq!(iter.next().unwrap(), b's');
+        assert_byte_eq!(iter.next().unwrap(), b'e');
+        assert_byte_eq!(iter.next().unwrap(), b'r');
+        assert_byte_eq!(iter.next().unwrap(), b'n');
+        assert_byte_eq!(iter.next().unwrap(), b'a');
+        assert_byte_eq!(iter.next().unwrap(), b'm');
+        assert_byte_eq!(iter.next().unwrap(), b'e');
+        assert_byte_eq!(iter.next().unwrap(), b':');
+        assert_byte_eq!(iter.next().unwrap(), b'p');
+        assert_byte_eq!(iter.next().unwrap(), b'a');
+        assert_byte_eq!(iter.next().unwrap(), b's');
+        assert_byte_eq!(iter.next().unwrap(), b's');
+        assert_byte_eq!(iter.next().unwrap(), b'w');
+        assert_byte_eq!(iter.next().unwrap(), b'o');
+        assert_byte_eq!(iter.next().unwrap(), b'r');
+        assert_byte_eq!(iter.next().unwrap(), b'd');
 
         assert_eq!(iter.next(), None);
     }
@@ -148,19 +149,19 @@ mod test {
         let message = b"Hello%0GWorld";
         let mut iter = decode(message.into_iter());
 
-        assert_char_eq!(iter.next().unwrap(), b'H');
-        assert_char_eq!(iter.next().unwrap(), b'e');
-        assert_char_eq!(iter.next().unwrap(), b'l');
-        assert_char_eq!(iter.next().unwrap(), b'l');
-        assert_char_eq!(iter.next().unwrap(), b'o');
-        assert_char_eq!(iter.next().unwrap(), b'%');
-        assert_char_eq!(iter.next().unwrap(), b'0');
-        assert_char_eq!(iter.next().unwrap(), b'G');
-        assert_char_eq!(iter.next().unwrap(), b'W');
-        assert_char_eq!(iter.next().unwrap(), b'o');
-        assert_char_eq!(iter.next().unwrap(), b'r');
-        assert_char_eq!(iter.next().unwrap(), b'l');
-        assert_char_eq!(iter.next().unwrap(), b'd');
+        assert_byte_eq!(iter.next().unwrap(), b'H');
+        assert_byte_eq!(iter.next().unwrap(), b'e');
+        assert_byte_eq!(iter.next().unwrap(), b'l');
+        assert_byte_eq!(iter.next().unwrap(), b'l');
+        assert_byte_eq!(iter.next().unwrap(), b'o');
+        assert_byte_eq!(iter.next().unwrap(), b'%');
+        assert_byte_eq!(iter.next().unwrap(), b'0');
+        assert_byte_eq!(iter.next().unwrap(), b'G');
+        assert_byte_eq!(iter.next().unwrap(), b'W');
+        assert_byte_eq!(iter.next().unwrap(), b'o');
+        assert_byte_eq!(iter.next().unwrap(), b'r');
+        assert_byte_eq!(iter.next().unwrap(), b'l');
+        assert_byte_eq!(iter.next().unwrap(), b'd');
 
         assert_eq!(iter.next(), None);
     }
