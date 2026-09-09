@@ -221,6 +221,7 @@ name = "http_1"
 version = "0.0.1"
 dependencies = [
  "http_primitives",
+ "http_url",
  "itoa",
  "memchr",
  "tracing",
@@ -232,6 +233,19 @@ name = "http_primitives"
 version = "0.0.1"
 dependencies = [
  "bolero",
+ "macro_derive",
+ "macro_util",
+ "memchr",
+ "pretty_assertions",
+ "rstest",
+]
+
+[[package]]
+name = "http_url"
+version = "0.1.0"
+dependencies = [
+ "bolero",
+ "http_primitives",
  "macro_derive",
  "macro_util",
  "memchr",

@@ -1,6 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["http_1", "http_primitives", "macro_derive", "macro_util"]
+members = [
+  "http_1",
+  "http_primitives",
+  "http_url",
+  "macro_derive",
+  "macro_util",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -57,6 +63,7 @@ semicolon_if_nothing_returned = "warn"
 # http
 http_1.path = "http_1"
 http_primitives.path = "http_primitives"
+http_url.path = "http_url"
 
 # Logging
 tracing = "0.1.44"

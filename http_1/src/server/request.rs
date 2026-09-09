@@ -1,4 +1,5 @@
 use http_primitives::prelude::*;
+use http_url::prelude::*;
 
 use crate::prelude::*;
 

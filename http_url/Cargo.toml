@@ -1,0 +1,20 @@
+[package]
+name = "http_url"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+metadata.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+http_primitives.workspace = true
+macro_util.workspace = true
+macro_derive.workspace = true
+memchr.workspace = true
+
+[dev-dependencies]
+rstest.workspace = true
+pretty_assertions.workspace = true
+bolero.workspace = true

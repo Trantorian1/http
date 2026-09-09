@@ -13,8 +13,6 @@ memchr.workspace = true
 macro_util.workspace = true
 macro_derive.workspace = true
 
-# Testing
-
 [dev-dependencies]
 rstest.workspace = true
 pretty_assertions.workspace = true
