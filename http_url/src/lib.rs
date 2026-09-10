@@ -32,6 +32,7 @@ pub struct Url<'data> {
     pub scheme: &'data [u8],
     pub username: &'data [u8],
     pub password: &'data [u8],
+    // TODO: convert `host` to an enum with IPV6, IPV4 and hostname variants
     pub host: &'data [u8],
     pub port: Option<u16>,
     pub path: &'data [u8],
