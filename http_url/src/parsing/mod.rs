@@ -1,10 +1,8 @@
 mod buffer;
 mod error;
-mod iter;
 
 use buffer::UrlBuffer;
 pub use error::*;
-use iter::ByteIter;
 
 use super::*;
 
@@ -26,19 +24,9 @@ impl<'data> Url<'data> {
         // =========================================================================================
 
         c0_control_or_space::parse(c0_control_or_space::Context {
-            bytes: &mut bytes,
+            cursor: &mut bytes,
             error_bitset: &mut error_bitset,
         });
-
-        // == ASCII tab or newline sanitization ====================================================
-        //
-        // - 2. If input contains any ASCII tab or newline, invalid-URL-unit validation error.
-        //
-        // - 3. Remove all ASCII tab or newline from input.
-        //
-        // =========================================================================================
-
-        let iter = ByteIter::new(bytes);
 
         // == section parsing ======================================================================
         //
@@ -48,9 +36,9 @@ impl<'data> Url<'data> {
         // =========================================================================================
 
         scheme::parse(scheme::Context {
-            iter,
+            cursor: &mut bytes,
             buffer,
-            error_bitset,
+            error_bitset: &mut error_bitset,
         })
     }
 }
@@ -92,7 +80,7 @@ mod segment {
     pub(super) struct Host(pub std::ops::Range<usize>);
 
     #[repr(transparent)]
-    pub(super) struct Port(pub std::ops::Range<usize>);
+    pub(super) struct Port(pub Option<u16>);
 
     #[repr(transparent)]
     pub(super) struct Path(pub std::ops::Range<usize>);
@@ -104,11 +92,17 @@ mod segment {
     pub(super) struct Fragment(std::ops::Range<usize>);
 }
 
+macro_rules! ascii_tab_or_newline {
+    () => {
+        b'\t' | b'\n' | b'\r'
+    };
+}
+
 mod c0_control_or_space {
     use super::*;
 
     pub(super) struct Context<'parsing, 'input> {
-        pub bytes: &'parsing mut &'input [u8],
+        pub cursor: &'parsing mut &'input [u8],
         pub error_bitset: &'parsing mut ValidationErrorBitSet,
     }
 
@@ -122,40 +116,41 @@ mod c0_control_or_space {
     ///
     /// [C0 control of space]: https://infra.spec.whatwg.org/#c0-control-or-space
     /// [`InvalidURLUnit`]: ValidationError::InvalidURLUnit
+    #[inline]
     pub(super) fn parse<'parsing, 'input>(context: Context<'parsing, 'input>) {
         let Context {
-            bytes,
+            cursor,
             error_bitset,
         } = context;
 
         // Leading C0 control or space
-        if let Some(c) = bytes.first()
+        if let Some(c) = cursor.first()
             && matchers::c0_control_or_space(*c)
         {
             error_bitset.add(ValidationError::InvalidURLUnit);
-            *bytes = &bytes[1..];
+            *cursor = &cursor[1..];
 
-            while let Some(c) = bytes.first()
+            while let Some(c) = cursor.first()
                 && matchers::c0_control_or_space(*c)
             {
-                *bytes = &bytes[1..];
+                *cursor = &cursor[1..];
             }
         }
 
         // Trailing C0 control or space
-        if let Some(c) = bytes.last()
+        if let Some(c) = cursor.last()
             && matchers::c0_control_or_space(*c)
         {
             error_bitset.add(ValidationError::InvalidURLUnit);
 
-            let len = bytes.len();
-            *bytes = &bytes[..len - 1];
+            let len = cursor.len();
+            *cursor = &cursor[..len - 1];
 
-            while let Some(c) = bytes.last()
+            while let Some(c) = cursor.last()
                 && matchers::c0_control_or_space(*c)
             {
-                let len = bytes.len();
-                *bytes = &bytes[..len - 1];
+                let len = cursor.len();
+                *cursor = &cursor[..len - 1];
             }
         }
     }
@@ -164,11 +159,11 @@ mod c0_control_or_space {
 mod scheme {
     use super::*;
 
-    pub(super) struct Context<'input, 'output> {
-        pub iter: ByteIter<'input>,
+    pub(super) struct Context<'parsing, 'input, 'output> {
+        pub cursor: &'parsing mut &'input [u8],
         pub buffer: UrlBuffer<'output>,
 
-        pub error_bitset: ValidationErrorBitSet,
+        pub error_bitset: &'parsing mut ValidationErrorBitSet,
     }
 
     /// # [Scheme state]
@@ -178,29 +173,45 @@ mod scheme {
     ///
     /// [Scheme state]: https://url.spec.whatwg.org/#scheme-start-state
     #[inline]
-    pub(super) fn parse<'input, 'output>(
-        context: Context<'input, 'output>,
+    pub(super) fn parse<'parsing, 'input, 'output>(
+        context: Context<'parsing, 'input, 'output>,
     ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
         let Context {
-            mut iter,
+            cursor,
             mut buffer,
             error_bitset,
         } = context;
 
-        if let Some(c) = iter.next()
+        if let Some(c) = cursor.first()
             && matchers::ascii_alpha(*c)
         {
             buffer.push(c.to_ascii_lowercase())?;
+            *cursor = &cursor[1..];
 
-            while let Some(c) = iter.next() {
+            while !cursor.is_empty() {
+                let c = cursor[0];
+
+                #[cfg(test)]
+                let _c = char::from_u32(c as u32).unwrap_or_default();
+
+                *cursor = &cursor[1..];
+
                 match c {
+                    ascii_tab_or_newline!() => {
+                        error_bitset.add(ValidationError::InvalidURLUnit);
+                    },
+
                     // Only the first character in a scheme must be strictly `ascii_alpha`. Scheme
                     // characters after that may be ASCII alphanumeric, U+002B (+), U+002D (-), or
                     // U+002E (.).
-                    b'a'..=b'z' | b'0'..=b'9' | b'+' | b'-' | b'.' => buffer.push(*c)?,
+                    b'a'..=b'z' | b'0'..=b'9' | b'+' | b'-' | b'.' => {
+                        buffer.push(c)?;
+                    },
 
                     // Input is normalized, only lowercase characters are pushed to the final buffer
-                    b'A'..=b'Z' => buffer.push(c.to_ascii_lowercase())?,
+                    b'A'..=b'Z' => {
+                        buffer.push(c.to_ascii_lowercase())?;
+                    },
 
                     // End of scheme
                     b':' => {
@@ -220,12 +231,15 @@ mod scheme {
                 #[cfg(test)]
                 let _scheme = str::from_utf8(&buffer[scheme.0.clone()]).unwrap_or_default();
 
+                #[cfg(test)]
+                let _remaining = str::from_utf8(cursor).unwrap_or_default();
+
                 match &buffer[scheme.0.clone()] {
-                    b"file" => todo!(),
+                    b"file" => todo!("file state: https://url.spec.whatwg.org/#file-state"),
 
                     b"ftp" => {
                         return scheme::special::parse(scheme::special::Context {
-                            iter,
+                            cursor,
                             buffer,
                             error_bitset,
                             scheme,
@@ -235,7 +249,7 @@ mod scheme {
 
                     b"http" | b"ws" => {
                         return scheme::special::parse(scheme::special::Context {
-                            iter,
+                            cursor,
                             buffer,
                             error_bitset,
                             scheme,
@@ -245,7 +259,7 @@ mod scheme {
 
                     b"https" | b"wss" => {
                         return scheme::special::parse(scheme::special::Context {
-                            iter,
+                            cursor,
                             buffer,
                             error_bitset,
                             scheme,
@@ -266,7 +280,6 @@ mod scheme {
         // =========================================================================================
 
         buffer.clear();
-        iter.reset();
 
         todo!()
     }
@@ -274,11 +287,11 @@ mod scheme {
     pub(super) mod special {
         use super::*;
 
-        pub(crate) struct Context<'input, 'output> {
-            pub iter: ByteIter<'input>,
+        pub(crate) struct Context<'parsing, 'input, 'output> {
+            pub cursor: &'parsing mut &'input [u8],
             pub buffer: UrlBuffer<'output>,
 
-            pub error_bitset: ValidationErrorBitSet,
+            pub error_bitset: &'parsing mut ValidationErrorBitSet,
             pub scheme: segment::Scheme,
             pub default_scheme_port: u16,
         }
@@ -318,13 +331,13 @@ mod scheme {
         /// [`userinfo`]: userinfo::parse
         /// [`host_and_port`]: host_and_port::parse
         #[inline]
-        pub(crate) fn parse<'input, 'output>(
-            context: Context<'input, 'output>,
+        pub(crate) fn parse<'parsing, 'input, 'output>(
+            context: Context<'parsing, 'input, 'output>,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             let Context {
-                mut iter,
+                cursor,
                 mut buffer,
-                mut error_bitset,
+                error_bitset,
                 scheme,
                 default_scheme_port,
             } = context;
@@ -335,13 +348,24 @@ mod scheme {
             //
             // =========================================================================
 
-            if !iter.skip_if_matches(b"//") {
-                error_bitset.add(ValidationError::SpecialSchemeMissingFollowingSolidus);
+            while !cursor.is_empty() {
+                match *cursor {
+                    [ascii_tab_or_newline!(), ..] => {
+                        error_bitset.add(ValidationError::InvalidURLUnit);
+                        *cursor = &cursor[1..];
+                    },
 
-                // TODO: relative state
-                // https://url.spec.whatwg.org/#relative-state
+                    [b'/', b'/', ..] => {
+                        *cursor = &cursor[2..];
+                        break;
+                    },
 
-                todo!()
+                    _ => {
+                        error_bitset.add(ValidationError::SpecialSchemeMissingFollowingSolidus);
+
+                        todo!("relative state: https://url.spec.whatwg.org/#relative-state")
+                    },
+                }
             }
 
             // Special authority ignore slashes state ==================================
@@ -355,16 +379,36 @@ mod scheme {
             //
             // =========================================================================
 
-            if iter.skip_while_matches2(b'/', b'\\') {
-                error_bitset.add(ValidationError::SpecialSchemeMissingFollowingSolidus);
+            while !cursor.is_empty() {
+                let c = cursor[0];
+
+                #[cfg(test)]
+                let _c = char::from_u32(c as u32).unwrap_or_default();
+
+                match c {
+                    ascii_tab_or_newline!() => {
+                        error_bitset.add(ValidationError::InvalidURLUnit);
+                        *cursor = &cursor[1..];
+                    },
+
+                    b'/' | b'\\' => {
+                        error_bitset.add(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                        *cursor = &cursor[1..];
+                    },
+
+                    _ => break,
+                }
             }
 
             buffer.push_str(b"//")?;
 
+            #[cfg(test)]
+            let _remaining_userinfo = str::from_utf8(cursor).unwrap_or_default();
+
             let (username, password) = userinfo::parse(userinfo::Context {
-                iter: &mut iter,
+                cursor,
                 buffer: &mut buffer,
-                error_bitset: &mut error_bitset,
+                error_bitset,
                 scheme: &scheme,
             })?;
 
@@ -372,10 +416,15 @@ mod scheme {
             let _username = str::from_utf8(&buffer[username.0.clone()]).unwrap_or_default();
             #[cfg(test)]
             let _password = str::from_utf8(&buffer[password.0.clone()]).unwrap_or_default();
+            #[cfg(test)]
+            let _remaining_host = str::from_utf8(cursor).unwrap_or_default();
 
-            let (host, port) = host_and_port::parse(host_and_port::Context {
-                iter: &mut iter,
+            let (host, port, port_size) = host_and_port::parse(host_and_port::Context {
+                cursor,
                 buffer: &mut buffer,
+
+                error_bitset,
+
                 username: &username,
                 password: &password,
                 default_scheme_port,
@@ -394,7 +443,7 @@ mod scheme {
                     username: &backing[username.0],
                     password: &backing[password.0],
                     host: &backing[host.0],
-                    port,
+                    port: port.0,
                     path: &[],
                     query: &[],
                     fragment: &[],
@@ -409,7 +458,7 @@ mod userinfo {
     use super::*;
 
     pub(super) struct Context<'parsing, 'input, 'output> {
-        pub iter: &'parsing mut ByteIter<'input>,
+        pub cursor: &'parsing mut &'input [u8],
         pub buffer: &'parsing mut UrlBuffer<'output>,
 
         pub error_bitset: &'parsing mut ValidationErrorBitSet,
@@ -437,7 +486,7 @@ mod userinfo {
         context: Context<'parsing, 'input, 'output>,
     ) -> Result<(segment::Username, segment::Password), Error> {
         let Context {
-            iter,
+            cursor,
             buffer,
             error_bitset,
             scheme,
@@ -461,7 +510,7 @@ mod userinfo {
         //
         // =========================================================================
 
-        let checkpoint_authority = iter.checkpoint();
+        let checkpoint = cursor.clone();
 
         let mut at_sign = None;
         let mut char_count_authority = 0;
@@ -478,22 +527,36 @@ mod userinfo {
         // components yet, but we still need to find the terminating U+0040 (@),
         // userinfo delimiter which is only bounded by the end of the host segment
         // of the url.
-        while let Some(c) = iter.next() {
+        while !cursor.is_empty() {
+            let c = cursor[0];
+
+            #[cfg(test)]
+            let _c = char::from_u32(c as u32).unwrap_or_default();
+
             match c {
+                ascii_tab_or_newline!() => {
+                    error_bitset.add(ValidationError::InvalidURLUnit);
+                },
+
                 // EOF code point is implied in the below check
-                b'/' | b'\\' | b'?' | b'#' => break,
+                b'/' | b'\\' | b'?' | b'#' => {
+                    break;
+                },
+
                 b'@' => {
                     error_bitset.add(ValidationError::InvalidCredentials);
-
                     at_sign = Some(char_count_authority);
+                    char_count_authority += 1;
                 },
-                _ => (),
+                _ => {
+                    char_count_authority += 1;
+                },
             }
 
-            char_count_authority += 1
+            *cursor = &cursor[1..];
         }
 
-        iter.reset_to(checkpoint_authority);
+        *cursor = checkpoint;
 
         let mut char_count_userinfo = match at_sign {
             Some(n) => {
@@ -524,11 +587,12 @@ mod userinfo {
 
         // Here is where we actually parse the userinfo
         while char_count_userinfo > 0 {
+            let c = cursor[0];
+
+            *cursor = &cursor[1..];
             char_count_userinfo -= 1;
 
-            // SAFETY: we have already iterated over these characters so we know
-            // they exist.
-            match unsafe { iter.next().unwrap_unchecked() } {
+            match c {
                 b':' => {
                     match password_token {
                         Some(_) => {
@@ -547,15 +611,20 @@ mod userinfo {
                 },
                 c => {
                     #[cfg(test)]
-                    let _c = char::from_u32(*c as u32).unwrap_or_default();
+                    let _c = char::from_u32(c as u32).unwrap_or_default();
 
-                    userinfo_stop = buffer.push_encode_byte(*c, percent::USERINFO)?;
+                    userinfo_stop = buffer.push_encode_byte(c, percent::USERINFO)?;
                 },
             }
         }
 
         let (username, password) = match password_token {
-            Some(n) => (userinfo_start..n, n + 1..userinfo_stop),
+            Some(n) => {
+                // We need to skip over the terminating userinfo U+0040 (@) delimiter again as we
+                // have reset the cursor.
+                *cursor = &cursor[1..];
+                (userinfo_start..n, n + 1..userinfo_stop)
+            },
             None => (userinfo_start..userinfo_stop, userinfo_stop..userinfo_stop),
         };
 
@@ -571,8 +640,10 @@ mod host_and_port {
     use super::*;
 
     pub(super) struct Context<'parsing, 'input, 'output> {
-        pub iter: &'parsing mut ByteIter<'input>,
+        pub cursor: &'parsing mut &'input [u8],
         pub buffer: &'parsing mut UrlBuffer<'output>,
+
+        pub error_bitset: &'parsing mut ValidationErrorBitSet,
 
         pub username: &'parsing segment::Username,
         pub password: &'parsing segment::Password,
@@ -592,10 +663,11 @@ mod host_and_port {
     #[inline]
     pub(super) fn parse<'parsing, 'input, 'output>(
         context: Context<'parsing, 'input, 'output>,
-    ) -> Result<(segment::Host, Option<u16>), Error> {
+    ) -> Result<(segment::Host, segment::Port, usize), Error> {
         let Context {
-            iter,
+            cursor,
             buffer,
+            error_bitset,
             username,
             password,
             default_scheme_port,
@@ -607,61 +679,94 @@ mod host_and_port {
         //
         // =========================================================================
 
-        let checkpoint_hostname = iter.checkpoint();
+        let checkpoint = cursor.clone();
         let mut inside_brackets = false;
         let mut char_count_hostname = 0;
 
-        loop {
-            match iter.next() {
-                // host and port
-                Some(b':') if !inside_brackets => {
-                    iter.reset_to(checkpoint_hostname);
+        while !cursor.is_empty() {
+            let c = cursor[0];
+
+            #[cfg(test)]
+            let _c = char::from_u32(c as u32).unwrap_or_default();
+
+            match c {
+                ascii_tab_or_newline!() => {
+                    error_bitset.add(ValidationError::InvalidURLUnit);
+                },
+
+                b':' if !inside_brackets => {
+                    *cursor = checkpoint;
+
+                    #[cfg(test)]
+                    let _remaining_host = str::from_utf8(cursor).unwrap_or_default();
 
                     let host = host::parse(host::Context {
-                        iter,
+                        cursor,
                         buffer,
+
+                        error_bitset,
 
                         username,
                         password,
-
                         char_count_hostname,
                     })?;
 
-                    assert_eq!(iter.next(), Some(&b':'));
+                    #[cfg(test)]
+                    let _remaining_port = str::from_utf8(cursor).unwrap_or_default();
+
+                    // We need to skip the port delimiter again as we reset the cursor.
+                    *cursor = &cursor[1..];
 
                     let port = port::parse(port::Context {
-                        iter,
+                        cursor,
+                        error_bitset,
                         default_scheme_port,
                     })?;
 
-                    break Ok((host, port));
+                    return Ok((host, port.0, port.1));
                 },
-                // End of host section, no port was provided
-                None | Some(b'/' | b'\\' | b'?' | b'#') => {
-                    iter.reset_to(checkpoint_hostname);
 
-                    let host = host::parse(host::Context {
-                        iter,
-                        buffer,
+                b'/' | b'\\' | b'?' | b'#' => {
+                    *cursor = checkpoint;
 
-                        username,
-                        password,
-
-                        char_count_hostname,
-                    })?;
-
-                    break Ok((host, None));
+                    break;
                 },
-                Some(b'[') => inside_brackets = true,
-                Some(b']') => inside_brackets = false,
-                Some(_b) => {
-                    #[cfg(test)]
-                    let _c = char::from_u32(*_b as u32).unwrap_or_default();
+
+                b'[' => {
+                    inside_brackets = true;
+                    char_count_hostname += 1;
+                },
+
+                b']' => {
+                    inside_brackets = false;
+                    char_count_hostname += 1;
+                },
+
+                _ => {
+                    char_count_hostname += 1;
                 },
             }
 
-            char_count_hostname += 1;
+            *cursor = &cursor[1..];
         }
+
+        *cursor = checkpoint;
+
+        #[cfg(test)]
+        let _remaining_host = str::from_utf8(cursor).unwrap_or_default();
+
+        let host = host::parse(host::Context {
+            cursor,
+            buffer,
+
+            error_bitset,
+
+            username,
+            password,
+            char_count_hostname,
+        })?;
+
+        Ok((host, segment::Port(None), 0))
     }
 }
 
@@ -669,12 +774,13 @@ mod host {
     use super::*;
 
     pub(super) struct Context<'parsing, 'input, 'output> {
-        pub iter: &'parsing mut ByteIter<'input>,
+        pub cursor: &'parsing mut &'input [u8],
         pub buffer: &'parsing mut UrlBuffer<'output>,
+
+        pub error_bitset: &'parsing mut ValidationErrorBitSet,
 
         pub username: &'parsing segment::Username,
         pub password: &'parsing segment::Password,
-
         pub char_count_hostname: usize,
     }
 
@@ -697,8 +803,9 @@ mod host {
         context: Context<'parsing, 'input, 'output>,
     ) -> Result<segment::Host, Error> {
         let Context {
-            iter,
+            cursor,
             buffer,
+            error_bitset: _,
             username,
             password,
             char_count_hostname,
@@ -710,37 +817,45 @@ mod host {
         //
         // =========================================================================
 
-        if iter.skip_if_matches(b"[") {
-            todo!("IPV6 parsing");
-        } else {
-            // TODO: refactor this into its own function once we support IPV6 parsing and IPV4
-            // parsing as well
+        if cursor.is_empty() {
+            return Err(Error::HostMissing);
+        }
 
-            // userinfo end, skipping U+0040 (@)
-            let host_start = if !password.0.is_empty() {
-                password.0.end + 1
-            } else if !username.0.is_empty() {
-                username.0.end + 1
-            } else {
-                username.0.end
-            };
+        match cursor[0] {
+            b'[' => {
+                todo!("IPV6 parsing");
+            },
+            _ => {
+                // TODO: refactor this into its own function once we support IPV6 parsing and IPV4
+                // parsing as well
 
-            let host_stop = host_start + char_count_hostname;
-            let host = host_start..host_stop;
+                // userinfo end, skipping U+0040 (@)
+                let host_start = if !password.0.is_empty() {
+                    password.0.end + 1
+                } else if !username.0.is_empty() {
+                    username.0.end + 1
+                } else {
+                    username.0.end
+                };
 
-            if host.is_empty() {
-                return Err(Error::HostMissing);
-            }
+                let host_stop = host_start + char_count_hostname;
+                let host = host_start..host_stop;
 
-            // TODO: IDNA domain parser
-            let domain = percent::decode(iter);
-            for c in domain.take(char_count_hostname) {
-                buffer.push(c)?;
-            }
+                if host.is_empty() {
+                    return Err(Error::HostMissing);
+                }
 
-            // TODO: IPV4 parsing
+                // TODO: IDNA domain parser
+                let domain = percent::decode(cursor.iter());
+                for c in domain.take(char_count_hostname) {
+                    buffer.push(c)?;
+                }
+                *cursor = &cursor[char_count_hostname..];
 
-            Ok(segment::Host(host))
+                // TODO: IPV4 parsing
+
+                Ok(segment::Host(host))
+            },
         }
     }
 }
@@ -748,8 +863,9 @@ mod host {
 mod port {
     use super::*;
 
-    pub(super) struct Context<'parse, 'input> {
-        pub iter: &'parse mut ByteIter<'input>,
+    pub(super) struct Context<'parsing, 'input> {
+        pub cursor: &'parsing mut &'input [u8],
+        pub error_bitset: &'parsing mut ValidationErrorBitSet,
         pub default_scheme_port: u16,
     }
 
@@ -786,40 +902,55 @@ mod port {
     /// [`PortInvalid`]: Error::PortInvalid
     /// [ASCII digit]: https://infra.spec.whatwg.org/#ascii-digit
     #[inline]
-    pub(super) fn parse<'parse, 'input>(
-        context: Context<'parse, 'input>,
-    ) -> Result<Option<u16>, Error> {
+    pub(super) fn parse<'parsing, 'input>(
+        context: Context<'parsing, 'input>,
+    ) -> Result<(segment::Port, usize), Error> {
         let Context {
-            iter,
+            cursor,
+            error_bitset,
             default_scheme_port,
         } = context;
 
         let mut port = 0u32;
-        let mut is_empty = true;
+        let mut char_count_port = 0;
 
-        while let Some(c) = iter.next() {
+        while !cursor.is_empty() {
+            let c = cursor[0];
+
             #[cfg(test)]
-            let _c = char::from_u32(*c as u32).unwrap_or_default();
+            let _c = char::from_u32(c as u32).unwrap_or_default();
+
+            *cursor = &cursor[1..];
 
             match c {
+                ascii_tab_or_newline!() => {
+                    error_bitset.add(ValidationError::InvalidURLUnit);
+                },
+
                 b'0'..=b'9' => {
-                    port = port * 10 + *c as u32 - b'0' as u32;
+                    port = port * 10 + c as u32 - b'0' as u32;
 
                     if port > u16::MAX as u32 {
                         return Err(Error::PortOutOfRange);
                     }
 
-                    is_empty = false;
+                    char_count_port += 1;
                 },
-                b'/' | b'\\' | b'?' | b'#' => break,
-                _ => return Err(Error::PortInvalid),
+
+                b'/' | b'\\' | b'?' | b'#' => {
+                    break;
+                },
+
+                _ => {
+                    return Err(Error::PortInvalid);
+                },
             }
         }
 
-        if port as u16 == default_scheme_port || is_empty {
-            Ok(None)
+        if port as u16 == default_scheme_port || char_count_port == 0 {
+            Ok((segment::Port(None), char_count_port))
         } else {
-            Ok(Some(port as u16))
+            Ok((segment::Port(Some(port as u16)), char_count_port))
         }
     }
 }
@@ -832,7 +963,7 @@ mod test {
 
     #[test]
     fn url_parse_userinfo_full() {
-        const URL: &str = "http://user:password@example.com";
+        const URL: &str = "http://user:password@example.com:123";
 
         let mut backing = [0; 128];
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
@@ -846,6 +977,8 @@ mod test {
         assert_utf8_eq!(url.scheme, b"http");
         assert_utf8_eq!(url.username, b"user");
         assert_utf8_eq!(url.password, b"password");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, Some(123));
     }
 
     #[test]
