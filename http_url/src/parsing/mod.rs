@@ -1030,6 +1030,7 @@ mod utf8 {
         mask
     };
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub(super) enum CodePoint {
         UrlValid { len: u8 },
         UrlInvalid { len: u8 },
@@ -1169,6 +1170,53 @@ mod utf8 {
             CodePoint::UrlInvalid { len: len as u8 }
         } else {
             CodePoint::UrlValid { len: len as u8 }
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn url_code_point_reference(bytes: &[u8]) -> CodePoint {
+        let head = &bytes[..bytes.len().min(4)];
+
+        let c = match std::str::from_utf8(head) {
+            Ok(s) => match s.chars().next() {
+                Some(c) => c,
+                None => return CodePoint::Truncated,
+            },
+            Err(e) => {
+                let valid_up_to = e.valid_up_to();
+                if valid_up_to > 0 {
+                    std::str::from_utf8(&head[..valid_up_to])
+                        .unwrap()
+                        .chars()
+                        .next()
+                        .unwrap()
+                } else {
+                    match e.error_len() {
+                        Some(len) => return CodePoint::InvalidUtf8 { len: len as u8 },
+                        None => return CodePoint::Truncated,
+                    }
+                }
+            },
+        };
+
+        let len = c.len_utf8() as u8;
+        let code_point = c as u32;
+
+        let is_url_code_point = match code_point {
+            // ASCII code points
+            0..=0x7F => (ASCII_URL_CODE_POINT >> code_point) & 1 == 1,
+            // Under U+00A0
+            0x80..=0x9F => false,
+            // 3-byte non-characters
+            0xFDD0..=0xFDEF => false,
+            // Other non-characters
+            _ => code_point & 0xFFFE != 0xFFFE,
+        };
+
+        if is_url_code_point {
+            CodePoint::UrlValid { len }
+        } else {
+            CodePoint::UrlInvalid { len }
         }
     }
 }
@@ -1515,4 +1563,45 @@ mod test {
         let mut backing = [0; 0];
         let _ = Url::new(URL.as_bytes(), &mut backing);
     }
+
+    #[test]
+    fn utf8_url_code_point_matches_reference() {
+        let mut backing = [0; 4];
+
+        for code_point in 0..0x10FFFF {
+            let Some(c) = char::from_u32(code_point) else {
+                continue;
+            };
+
+            let bytes = c.encode_utf8(&mut backing);
+
+            let actual = utf8::url_code_point(bytes.as_bytes());
+            let expected = utf8::url_code_point_reference(bytes.as_bytes());
+
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn utf8_url_code_point_harness() {
+        bolero::check!()
+            .with_max_len(4)
+            .exhaustive()
+            .for_each(|bytes| {
+                let actual = utf8::url_code_point(bytes);
+                let expected = utf8::url_code_point_reference(bytes);
+
+                assert_eq!(actual, expected);
+            });
+    }
+
+    // #[test]
+    // fn utf8_url_code_point_harness_failure() {
+    //     let bytes = [0xf6];
+    //
+    //     let actual = utf8::url_code_point(&bytes);
+    //     let expected = utf8::url_code_point_reference(&bytes);
+    //
+    //     assert_eq!(actual, expected);
+    // }
 }
