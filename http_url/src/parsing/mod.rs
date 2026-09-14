@@ -1014,10 +1014,10 @@ mod path {
                 },
 
                 b'?' => {
-                    let path = segment::Path(path_start..path_stop);
-
                     // Skip U+003F (?) query segment delimiter
                     *cursor = &cursor[1..];
+
+                    let path = segment::Path(path_start..path_stop);
 
                     #[cfg(test)]
                     let _remaining_query = str::from_utf8(cursor).unwrap_or_default();
@@ -1031,7 +1031,24 @@ mod path {
                     return Ok((path, query, fragment));
                 },
 
-                b'#' => todo!(),
+                b'#' => {
+                    // Skip U+0023 (#) fragment segment delimiter
+                    *cursor = &cursor[1..];
+
+                    let path = segment::Path(path_start..path_stop);
+                    let query = segment::Query(path_stop..path_stop);
+
+                    #[cfg(test)]
+                    let _remaining_fragment = str::from_utf8(cursor).unwrap_or_default();
+
+                    let fragment = fragment::parse(fragment::Context {
+                        cursor,
+                        buffer,
+                        error_bitset,
+                    })?;
+
+                    return Ok((path, query, fragment));
+                },
 
                 b'%' => {
                     // Invalid percent-encodings are still serialized and an error is logged.
@@ -1135,7 +1152,23 @@ mod query {
                     *cursor = &cursor[1..];
                 },
 
-                b'#' => todo!(),
+                b'#' => {
+                    // Skip U+0023 (#) fragment segment delimiter
+                    *cursor = &cursor[1..];
+
+                    let query = segment::Query(query_start..query_stop);
+
+                    #[cfg(test)]
+                    let _remaining_fragment = str::from_utf8(cursor).unwrap_or_default();
+
+                    let fragment = fragment::parse(fragment::Context {
+                        cursor,
+                        buffer,
+                        error_bitset,
+                    })?;
+
+                    return Ok((query, fragment));
+                },
 
                 b'%' => {
                     // Invalid percent-encodings are still serialized and an error is logged.
@@ -1200,6 +1233,99 @@ mod query {
         let fragment = segment::Fragment(query_stop..query_stop);
 
         Ok((query, fragment))
+    }
+}
+
+mod fragment {
+    use super::*;
+
+    pub(super) struct Context<'parsing, 'input, 'output> {
+        pub cursor: &'parsing mut &'input [u8],
+        pub buffer: &'parsing mut UrlBuffer<'output>,
+
+        pub error_bitset: &'parsing mut ValidationErrorBitSet,
+    }
+
+    #[inline]
+    pub(super) fn parse<'parsing, 'input, 'output>(
+        context: Context<'parsing, 'input, 'output>,
+    ) -> Result<segment::Fragment, Error> {
+        let Context {
+            cursor,
+            buffer,
+            error_bitset,
+        } = context;
+
+        let fragment_start = buffer.push(b'#')?;
+        let mut fragment_stop = fragment_start;
+
+        while !cursor.is_empty() {
+            let c = cursor[0];
+
+            #[cfg(test)]
+            let _c = char::from_u32(c as u32).unwrap_or_default();
+
+            match c {
+                b'%' => {
+                    // Invalid percent-encodings are still serialized and an error is logged.
+                    *cursor = &cursor[1..];
+                    fragment_stop = buffer.push(b'%')?;
+
+                    if let Some(b0) = cursor.first()
+                        && let Some(b1) = cursor.get(1)
+                    {
+                        if !b0.is_ascii_hexdigit() || !b1.is_ascii_hexdigit() {
+                            error_bitset.add(ValidationError::InvalidURLUnit);
+                        } else {
+                            *cursor = &cursor[2..];
+                            buffer.push(*b0)?;
+                            fragment_stop = buffer.push(*b1)?;
+                        }
+                    } else {
+                        error_bitset.add(ValidationError::InvalidURLUnit);
+                    }
+                },
+
+                _ => {
+                    // Invalid utf-8 bytes are skipped and do not terminate parsing.
+                    let len = match utf8::url_code_point(cursor) {
+                        utf8::UrlCodePoint::Valid { len } => len,
+
+                        utf8::UrlCodePoint::Invalid { len } => {
+                            error_bitset.add(ValidationError::InvalidURLUnit);
+                            len
+                        },
+
+                        // Invalid utf-8 bytes are skipped. We don't check for utf-8 encoding in
+                        // other url sections. However, in the case of the fragment section where we
+                        // potentially have to deal with multi-byte url code points, this
+                        // information comes as free so we might as well act on it.
+                        utf8::UrlCodePoint::InvalidUtf8 { len } => {
+                            fragment_stop = buffer.push_str(utf8::REPLACEMENT)?;
+                            *cursor = &cursor[len as usize..];
+                            continue;
+                        },
+
+                        // A truncated code point indicates we have reached the end of the cursor
+                        // before the end of the code point. This information too is ignored, and we
+                        // instead stop at the last valid code point.
+                        utf8::UrlCodePoint::Truncated => {
+                            fragment_stop = buffer.push_str(utf8::REPLACEMENT)?;
+                            *cursor = &[];
+                            break;
+                        },
+                    };
+
+                    for c in &cursor[..len as usize] {
+                        fragment_stop = buffer.push_encode_byte(*c, percent::FRAGMENT)?;
+                    }
+
+                    *cursor = &cursor[len as usize..];
+                },
+            }
+        }
+
+        Ok(segment::Fragment(fragment_start..fragment_stop))
     }
 }
 
@@ -2003,6 +2129,25 @@ mod test {
         assert_eq!(url.port, None);
         assert_utf8_eq!(url.path, b"/path/to/file");
         assert_utf8_eq!(url.query, b"name=cat.txt%EF%BF%BD");
+    }
+
+    #[test]
+    fn url_parse_fragment_simple() {
+        const URL: &str = "http://example.com/path/to/file?name=cat.txt#about";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.query, b"name=cat.txt");
+        assert_utf8_eq!(url.fragment, b"about");
     }
 
     #[test]
