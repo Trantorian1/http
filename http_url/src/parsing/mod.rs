@@ -1013,8 +1013,10 @@ mod path {
     }
 }
 
-mod utf8 {
-    pub(super) const ASCII_URL_CODE_POINT: u128 = {
+/// UTF-8 parsing utilities.
+pub mod utf8 {
+    /// Bitmask of ASCII code points which are also [URL code points].
+    const ASCII_URL_CODE_POINT: u128 = {
         let mut mask = 0;
         let mut c = 0;
 
@@ -1030,17 +1032,85 @@ mod utf8 {
         mask
     };
 
+    /// Stores information about a [URL code point].
+    ///
+    /// [URL code point]: https://url.spec.whatwg.org/#url-code-points
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub(super) enum CodePoint {
-        UrlValid { len: u8 },
-        UrlInvalid { len: u8 },
-        InvalidUtf8 { len: u8 },
+    pub enum UrlCodePoint {
+        /// Code point is a valid URL code point.
+        ///
+        /// # Examples
+        ///
+        /// ```rust
+        /// # use http_url::parsing::utf8::*;
+        /// assert_eq!(url_code_point(b"a"), UrlCodePoint::Valid { len: 1 });
+        /// ```
+        Valid {
+            /// Length of the code point in bytes.
+            len: u8,
+        },
+
+        /// Code point is not a valid URL code point, but is valid utf-8.
+        ///
+        /// # Examples
+        ///
+        /// ```rust
+        /// # use http_url::parsing::utf8::*;
+        /// assert_eq!(url_code_point(b"%"), UrlCodePoint::Invalid { len: 1 });
+        /// ```
+        Invalid {
+            /// Length of the code point in bytes.
+            len: u8,
+        },
+
+        /// Code point is invalid under utf-8. This can be because it is overlong, a utf-16
+        /// surrogate, a continuation byte instead of a lead byte or has a lead byte exceeding the
+        /// utf-8 max range of U+10FFFF.
+        ///
+        /// # Examples
+        ///
+        /// ```rust
+        /// # use http_url::parsing::utf8::*;
+        /// // 0xF5 as a lead byte is outside of the utf-8 max range.
+        /// assert_eq!(
+        ///     url_code_point(&[0xF5]),
+        ///     UrlCodePoint::InvalidUtf8 { len: 1 }
+        /// );
+        /// ```
+        InvalidUtf8 {
+            /// Number of bytes which are invalid utf-8.
+            len: u8,
+        },
+
+        /// Byte input ends before the code point could be fully parsed.
+        ///
+        /// # Examples
+        ///
+        /// ```rust
+        /// # use http_url::parsing::utf8::*;
+        /// // 0xF4 as a lead byte denotes a four-bytes code point,
+        /// // however the remaining bytes are missing
+        /// assert_eq!(url_code_point(&[0xF4]), UrlCodePoint::Truncated);
+        /// ```
         Truncated,
     }
 
-    pub(super) fn url_code_point(bytes: &[u8]) -> CodePoint {
+    /// Determines if a sequence of bytes begins with a [URL code point]
+    ///
+    /// Input is not assumed to be valid utf-8: this method can be passed untrusted raw network
+    /// bytes to parse and will still work.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use http_url::parsing::utf8::*;
+    /// assert_eq!(url_code_point(b"a"), UrlCodePoint::Valid { len: 1 });
+    /// ```
+    ///
+    /// [URL code point]: https://url.spec.whatwg.org/#url-code-points
+    pub fn url_code_point(bytes: &[u8]) -> UrlCodePoint {
         let Some(b0) = bytes.first() else {
-            return CodePoint::Truncated;
+            return UrlCodePoint::Truncated;
         };
 
         // == Step 1 ===============================================================================
@@ -1051,9 +1121,9 @@ mod utf8 {
 
         if b0.is_ascii() {
             if (ASCII_URL_CODE_POINT >> *b0 & 1) > 0 {
-                return CodePoint::UrlValid { len: 1 };
+                return UrlCodePoint::Valid { len: 1 };
             } else {
-                return CodePoint::UrlInvalid { len: 1 };
+                return UrlCodePoint::Invalid { len: 1 };
             }
         }
 
@@ -1093,7 +1163,7 @@ mod utf8 {
             // overlong, so the second byte must start at 0x90.
             0xF0 => (4, 0x90, 0xBF),
 
-            // 4-byte code points before the 10FFFF lead byte.
+            // 4-byte code points before the U+10FFFF lead byte.
             0xF1..=0xF3 => (4, 0x80, 0xBF),
 
             // utf8 ends at 10FFFF, with a 4-byte lead of 0xF4. The maximum value for the second
@@ -1102,17 +1172,17 @@ mod utf8 {
 
             // 0x80..=0xBF: a continuation byte where a lead should be.
             // 0xC0, 0xC1, 0xF5..=0xFF: never valid leads.
-            _ => return CodePoint::InvalidUtf8 { len: 1 },
+            _ => return UrlCodePoint::InvalidUtf8 { len: 1 },
         };
 
         // Second byte must exist and be in a specific range to be valid utf8.
         let Some(b1) = bytes.get(1) else {
-            return CodePoint::Truncated;
+            return UrlCodePoint::Truncated;
         };
 
         if *b1 < b1_min || *b1 > b1_max {
             // Only the leading byte is decisively invalid.
-            return CodePoint::InvalidUtf8 { len: 1 };
+            return UrlCodePoint::InvalidUtf8 { len: 1 };
         }
 
         // Third and fourth bytes only need to be valid continuation bytes.
@@ -1120,8 +1190,8 @@ mod utf8 {
             match bytes.get(i) {
                 Some(0x80..=0xBF) => continue,
                 // Counts all malformed continuation bytes as invalid.
-                Some(_) => return CodePoint::InvalidUtf8 { len: i as u8 },
-                None => return CodePoint::Truncated,
+                Some(_) => return UrlCodePoint::InvalidUtf8 { len: i as u8 },
+                None => return UrlCodePoint::Truncated,
             }
         }
 
@@ -1167,20 +1237,21 @@ mod utf8 {
         };
 
         if excluded {
-            CodePoint::UrlInvalid { len: len as u8 }
+            UrlCodePoint::Invalid { len: len as u8 }
         } else {
-            CodePoint::UrlValid { len: len as u8 }
+            UrlCodePoint::Valid { len: len as u8 }
         }
     }
 
+    /// Reference naive url code point implementation for use in tests.
     #[cfg(test)]
-    pub(super) fn url_code_point_reference(bytes: &[u8]) -> CodePoint {
+    pub(super) fn url_code_point_reference(bytes: &[u8]) -> UrlCodePoint {
         let head = &bytes[..bytes.len().min(4)];
 
         let c = match std::str::from_utf8(head) {
             Ok(s) => match s.chars().next() {
                 Some(c) => c,
-                None => return CodePoint::Truncated,
+                None => return UrlCodePoint::Truncated,
             },
             Err(e) => {
                 let valid_up_to = e.valid_up_to();
@@ -1192,8 +1263,8 @@ mod utf8 {
                         .unwrap()
                 } else {
                     match e.error_len() {
-                        Some(len) => return CodePoint::InvalidUtf8 { len: len as u8 },
-                        None => return CodePoint::Truncated,
+                        Some(len) => return UrlCodePoint::InvalidUtf8 { len: len as u8 },
+                        None => return UrlCodePoint::Truncated,
                     }
                 }
             },
@@ -1214,9 +1285,9 @@ mod utf8 {
         };
 
         if is_url_code_point {
-            CodePoint::UrlValid { len }
+            UrlCodePoint::Valid { len }
         } else {
-            CodePoint::UrlInvalid { len }
+            UrlCodePoint::Invalid { len }
         }
     }
 }
@@ -1583,6 +1654,8 @@ mod test {
     }
 
     #[test]
+    #[cfg_attr(kani, kani::proof)]
+    #[cfg_attr(kani, kani::unwind(5))]
     fn utf8_url_code_point_harness() {
         bolero::check!()
             .with_max_len(4)
