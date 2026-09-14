@@ -91,15 +91,6 @@ pub enum ValidationError {
     /// "https://example.org\path\to\file"
     /// ```
     InvalidReverseSolidus,
-
-    /// The URL contains invalid utf-8 code points in its path section.
-    ///
-    /// # Example
-    ///
-    /// ```text
-    /// "http://example.org/path\{0x80}to/\{0xC0}fil\{0xF5}e{0xF4}"
-    /// ```
-    InvalidUtf8,
 }
 
 #[cfg(test)]

@@ -1056,7 +1056,7 @@ mod path {
                         // potentially have to deal with multi-byte url code points, this
                         // information comes as free so we might as well act on it.
                         utf8::UrlCodePoint::InvalidUtf8 { len } => {
-                            error_bitset.add(ValidationError::InvalidUtf8);
+                            path_stop = buffer.push_str(utf8::REPLACEMENT)?;
                             *cursor = &cursor[len as usize..];
                             continue;
                         },
@@ -1065,7 +1065,7 @@ mod path {
                         // before the end of the code point. This information too is ignored, and we
                         // instead stop at the last valid code point.
                         utf8::UrlCodePoint::Truncated => {
-                            error_bitset.add(ValidationError::InvalidUtf8);
+                            path_stop = buffer.push_str(utf8::REPLACEMENT)?;
                             *cursor = &[];
                             break;
                         },
@@ -1090,6 +1090,9 @@ mod path {
 
 /// UTF-8 parsing utilities.
 pub mod utf8 {
+    /// U+FFFD utf-8 replacement character
+    pub const REPLACEMENT: &[u8] = b"%EF%BF%BD";
+
     /// Bitmask of ASCII code points which are also [URL code points].
     const ASCII_URL_CODE_POINT: u128 = {
         let mut mask = 0;
@@ -1700,7 +1703,7 @@ mod test {
     }
 
     #[test]
-    fn url_parse_path_ignore_utf8_invalid() {
+    fn url_parse_path_utf8_invalid() {
         // http://example.com/pi\{0x80}c\{0xC0}tu\{0xF5}res
         const URL: &[u8] = &[
             104, 116, 116, 112, 58, 47, 47, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 47,
@@ -1710,7 +1713,6 @@ mod test {
         let mut backing = [0; 128];
         let (url, mut validation_errors) = Url::new(URL, &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), Some(ValidationError::InvalidUtf8));
         assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"http");
@@ -1718,11 +1720,11 @@ mod test {
         assert_utf8_eq!(url.password, b"");
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/pictures");
+        assert_utf8_eq!(url.path, b"/pi%EF%BF%BDc%EF%BF%BDtu%EF%BF%BDres");
     }
 
     #[test]
-    fn url_parse_path_ignore_utf8_truncated() {
+    fn url_parse_path_utf8_truncated() {
         // http://example.com/pictures\{0xF4}
         const URL: &[u8] = &[
             104, 116, 116, 112, 58, 47, 47, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 47,
@@ -1732,7 +1734,6 @@ mod test {
         let mut backing = [0; 128];
         let (url, mut validation_errors) = Url::new(URL, &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), Some(ValidationError::InvalidUtf8));
         assert_eq!(validation_errors.next(), None);
 
         assert_utf8_eq!(url.scheme, b"http");
@@ -1740,7 +1741,7 @@ mod test {
         assert_utf8_eq!(url.password, b"");
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/pictures");
+        assert_utf8_eq!(url.path, b"/pictures%EF%BF%BD");
     }
 
     #[test]
