@@ -1013,7 +1013,23 @@ mod path {
                     path_stop = buffer.push(c)?;
                 },
 
-                b'?' => todo!(),
+                b'?' => {
+                    let path = segment::Path(path_start..path_stop);
+
+                    // Skip U+003F (?) query segment delimiter
+                    *cursor = &cursor[1..];
+
+                    #[cfg(test)]
+                    let _remaining_query = str::from_utf8(cursor).unwrap_or_default();
+
+                    let (query, fragment) = query::parse(query::Context {
+                        cursor,
+                        buffer,
+                        error_bitset,
+                    })?;
+
+                    return Ok((path, query, fragment));
+                },
 
                 b'#' => todo!(),
 
@@ -1022,19 +1038,15 @@ mod path {
                     *cursor = &cursor[1..];
                     path_stop = buffer.push(b'%')?;
 
-                    if let Some(b0) = cursor.first() {
-                        *cursor = &cursor[1..];
-                        path_stop = buffer.push(*b0)?;
-
-                        if let Some(b1) = cursor.first() {
-                            *cursor = &cursor[1..];
-                            path_stop = buffer.push(*b1)?;
-
-                            if !b0.is_ascii_hexdigit() || !b1.is_ascii_hexdigit() {
-                                error_bitset.add(ValidationError::InvalidURLUnit);
-                            }
-                        } else if !b0.is_ascii_hexdigit() {
+                    if let Some(b0) = cursor.first()
+                        && let Some(b1) = cursor.get(1)
+                    {
+                        if !b0.is_ascii_hexdigit() || !b1.is_ascii_hexdigit() {
                             error_bitset.add(ValidationError::InvalidURLUnit);
+                        } else {
+                            *cursor = &cursor[2..];
+                            buffer.push(*b0)?;
+                            path_stop = buffer.push(*b1)?;
                         }
                     } else {
                         error_bitset.add(ValidationError::InvalidURLUnit);
@@ -1072,7 +1084,7 @@ mod path {
                     };
 
                     for c in &cursor[..len as usize] {
-                        path_stop = buffer.push_encode_byte(*c, percent::PATH)?;
+                        path_stop = buffer.push_encode_byte(*c, percent::QUERY_SPECIAL)?;
                     }
 
                     *cursor = &cursor[len as usize..];
@@ -1088,9 +1100,112 @@ mod path {
     }
 }
 
+mod query {
+    use super::*;
+
+    pub(super) struct Context<'parsing, 'input, 'output> {
+        pub cursor: &'parsing mut &'input [u8],
+        pub buffer: &'parsing mut UrlBuffer<'output>,
+
+        pub error_bitset: &'parsing mut ValidationErrorBitSet,
+    }
+
+    #[inline]
+    pub(super) fn parse<'parsing, 'input, 'output>(
+        context: Context<'parsing, 'input, 'output>,
+    ) -> Result<(segment::Query, segment::Fragment), Error> {
+        let Context {
+            cursor,
+            buffer,
+            error_bitset,
+        } = context;
+
+        let query_start = buffer.push(b'?')?;
+        let mut query_stop = query_start;
+
+        while !cursor.is_empty() {
+            let c = cursor[0];
+
+            #[cfg(test)]
+            let _c = char::from_u32(c as u32).unwrap_or_default();
+
+            match c {
+                ascii_tab_or_newline!() => {
+                    error_bitset.add(ValidationError::InvalidURLUnit);
+                    *cursor = &cursor[1..];
+                },
+
+                b'#' => todo!(),
+
+                b'%' => {
+                    // Invalid percent-encodings are still serialized and an error is logged.
+                    *cursor = &cursor[1..];
+                    query_stop = buffer.push(b'%')?;
+
+                    if let Some(b0) = cursor.first()
+                        && let Some(b1) = cursor.get(1)
+                    {
+                        if !b0.is_ascii_hexdigit() || !b1.is_ascii_hexdigit() {
+                            error_bitset.add(ValidationError::InvalidURLUnit);
+                        } else {
+                            *cursor = &cursor[2..];
+                            buffer.push(*b0)?;
+                            query_stop = buffer.push(*b1)?;
+                        }
+                    } else {
+                        error_bitset.add(ValidationError::InvalidURLUnit);
+                    }
+                },
+
+                _ => {
+                    // Invalid utf-8 bytes are skipped and do not terminate parsing.
+                    let len = match utf8::url_code_point(cursor) {
+                        utf8::UrlCodePoint::Valid { len } => len,
+
+                        utf8::UrlCodePoint::Invalid { len } => {
+                            error_bitset.add(ValidationError::InvalidURLUnit);
+                            len
+                        },
+
+                        // Invalid utf-8 bytes are skipped. We don't check for utf-8 encoding in
+                        // other url sections. However, in the case of the query section where we
+                        // potentially have to deal with multi-byte url code points, this
+                        // information comes as free so we might as well act on it.
+                        utf8::UrlCodePoint::InvalidUtf8 { len } => {
+                            query_stop = buffer.push_str(utf8::REPLACEMENT)?;
+                            *cursor = &cursor[len as usize..];
+                            continue;
+                        },
+
+                        // A truncated code point indicates we have reached the end of the cursor
+                        // before the end of the code point. This information too is ignored, and we
+                        // instead stop at the last valid code point.
+                        utf8::UrlCodePoint::Truncated => {
+                            query_stop = buffer.push_str(utf8::REPLACEMENT)?;
+                            *cursor = &[];
+                            break;
+                        },
+                    };
+
+                    for c in &cursor[..len as usize] {
+                        query_stop = buffer.push_encode_byte(*c, percent::QUERY_SPECIAL)?;
+                    }
+
+                    *cursor = &cursor[len as usize..];
+                },
+            }
+        }
+
+        let query = segment::Query(query_start..query_stop);
+        let fragment = segment::Fragment(query_stop..query_stop);
+
+        Ok((query, fragment))
+    }
+}
+
 /// UTF-8 parsing utilities.
 pub mod utf8 {
-    /// U+FFFD utf-8 replacement character
+    /// U+FFFD (�) utf-8 replacement character
     pub const REPLACEMENT: &[u8] = b"%EF%BF%BD";
 
     /// Bitmask of ASCII code points which are also [URL code points].
@@ -1641,7 +1756,7 @@ mod test {
 
     #[test]
     fn url_parse_path_percent_encoded_empty() {
-        const URL: &str = "http://example.com/pictures/of%my%cat/";
+        const URL: &str = "http://example.com/pictures/of% my% cat/";
 
         let mut backing = [0; 128];
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
@@ -1657,7 +1772,7 @@ mod test {
         assert_utf8_eq!(url.password, b"");
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/pictures/of%my%cat/");
+        assert_utf8_eq!(url.path, b"/pictures/of%%20my%%20cat/");
     }
 
     #[test]
@@ -1742,6 +1857,152 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
         assert_utf8_eq!(url.path, b"/pictures%EF%BF%BD");
+    }
+
+    #[test]
+    fn url_parse_query_simple() {
+        const URL: &str = "http://example.com/path/to/file?name=cat.txt";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.query, b"name=cat.txt");
+    }
+
+    #[test]
+    fn url_parse_query_percent_encode_valid() {
+        const URL: &str = "http://example.com/path/to/file?name=my%20cat.txt";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.query, b"name=my%20cat.txt");
+    }
+
+    #[test]
+    fn url_parse_query_percent_encode_empty() {
+        const URL: &str = "http://example.com/path/to/file?name=my% cat.txt";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidURLUnit)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.query, b"name=my%%20cat.txt");
+    }
+
+    #[test]
+    fn url_parse_query_percent_encode_invalid() {
+        const URL: &str = "http://example.com/path/to/file?name=my%Azcat%Za.txt";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidURLUnit)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.query, b"name=my%Azcat%Za.txt");
+    }
+
+    #[test]
+    fn url_parse_query_percent_encode_non_url_code_points() {
+        const URL: &str = "http://example.com/path/to/file?name=my cat.txt";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidURLUnit)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.query, b"name=my%20cat.txt");
+    }
+
+    #[test]
+    fn url_parse_query_percent_utf8_invalid() {
+        const URL: &[u8] = &[
+            104, 116, 116, 112, 58, 47, 47, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 47,
+            112, 97, 116, 104, 47, 116, 111, 47, 102, 105, 108, 101, 63, 110, 97, 109, 0x80, 101,
+            0xC0, 61, 99, 0xF5, 97, 116, 46, 116, 120, 116,
+        ];
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL, &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.query, b"nam%EF%BF%BDe%EF%BF%BD=c%EF%BF%BDat.txt");
+    }
+
+    #[test]
+    fn url_parse_query_percent_utf8_truncated() {
+        const URL: &[u8] = &[
+            104, 116, 116, 112, 58, 47, 47, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 47,
+            112, 97, 116, 104, 47, 116, 111, 47, 102, 105, 108, 101, 63, 110, 97, 109, 101, 61, 99,
+            97, 116, 46, 116, 120, 116, 0xF4,
+        ];
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL, &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.query, b"name=cat.txt%EF%BF%BD");
     }
 
     #[test]
