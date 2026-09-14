@@ -1,7 +1,7 @@
 //! [Url] parsing utilities.
 
 mod old;
-mod parsing;
+pub mod parsing;
 pub mod percent;
 mod query;
 
