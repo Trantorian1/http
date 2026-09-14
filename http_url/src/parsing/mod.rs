@@ -955,6 +955,224 @@ mod port {
     }
 }
 
+mod path {
+    use super::*;
+
+    pub(super) struct Context<'parsing, 'input, 'output> {
+        pub cursor: &'parsing mut &'input [u8],
+        pub buffer: &'parsing mut UrlBuffer<'output>,
+
+        pub error_bitset: &'parsing mut ValidationErrorBitSet,
+    }
+
+    #[inline]
+    pub(super) fn parse<'parsing, 'input, 'output>(
+        context: Context<'parsing, 'input, 'output>,
+    ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
+        let Context {
+            cursor,
+            buffer,
+            error_bitset,
+        } = context;
+
+        let path_start = buffer.push(b'/')?;
+        let mut path_stop = path_start;
+
+        while !cursor.is_empty() {
+            let c = cursor[0];
+
+            #[cfg(test)]
+            let _c = char::from_u32(c as u32).unwrap_or_default();
+
+            match c {
+                ascii_tab_or_newline!() => {
+                    error_bitset.add(ValidationError::InvalidURLUnit);
+                    *cursor = &cursor[1..];
+                },
+
+                b'/' | b'\\' => {
+                    if c == b'\\' {
+                        error_bitset.add(ValidationError::InvalidReverseSolidus);
+                    }
+
+                    *cursor = &cursor[1..];
+
+                    todo!()
+                },
+
+                b'?' => todo!(),
+
+                b'#' => todo!(),
+
+                // TODO: URL code points
+                _ => todo!(),
+            }
+        }
+
+        todo!()
+    }
+}
+
+mod utf8 {
+    pub(super) const ASCII_URL_CODE_POINT: u128 = {
+        let mut mask = 0;
+        let mut c = 0;
+
+        while c <= 0x80 {
+            if matches!(c, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b'-' | b'.' | b'/' | b':' | b';' | b'=' | b'?' | b'@' | b'_' | b'~')
+            {
+                mask |= 1 << c;
+            }
+
+            c += 1;
+        }
+
+        mask
+    };
+
+    pub(super) enum CodePoint {
+        UrlValid { len: u8 },
+        UrlInvalid { len: u8 },
+        InvalidUtf8 { len: u8 },
+        Truncated,
+    }
+
+    pub(super) fn url_code_point(bytes: &[u8]) -> CodePoint {
+        let Some(b0) = bytes.first() else {
+            return CodePoint::Truncated;
+        };
+
+        // == Step 1 ===============================================================================
+        //
+        // Check all valid ASCII values.
+        //
+        // =========================================================================================
+
+        if b0.is_ascii() {
+            if (ASCII_URL_CODE_POINT >> *b0 & 1) > 0 {
+                return CodePoint::UrlValid { len: 1 };
+            } else {
+                return CodePoint::UrlInvalid { len: 1 };
+            }
+        }
+
+        // == Step 2 ===============================================================================
+        //
+        // Make sure the rest of the input is valid utf8.
+        //
+        // =========================================================================================
+
+        let (len, b1_min, b1_max) = match b0 {
+            // utf8 2-byte lead is 110xxxxx, giving us 0xC0 (11000000) as the smallest possible
+            // 2-byte lead. C0 and C1 are overlong though, so the range of valid 2-byte leads is
+            // C2 (11000010) up to DF (11011111).
+            0xC2..=0xDF => (2, 0x80, 0xBF),
+
+            // utf8 3-byte leads 1110xxxx get more complicated. Values before U+0800 should not be
+            // encoded in 3 bytes, as that would be overlong, so the second byte must start at A0.
+            0xE0 => (3, 0xA0, 0xBF),
+
+            // The rest of 3-byte utf8 values are valid, except for surrogates.
+            0xE1..=0xEC => (3, 0x80, 0xBF),
+
+            // Surrogate code points are reserved for use in utf16 and cannot be used in utf8. A
+            // leading surrogate is a code point that is in the range U+D800 to U+DBFF, inclusive.
+            // A trailing surrogate is a code point that is in the range U+DC00 to U+DFFF,
+            // inclusive. If you look at the byte representation of surrogate code points, you will
+            // notice they all start with 0xED, with a second byte in the range 0xA0 to 0xBF
+            // inclusive. So the range of valid second bytes in a 3-byte code point are 0x80 to 0x9F
+            // inclusive. Any other values are invalid utf8.
+            0xED => (3, 0x80, 0x9F),
+
+            // The rest of the 3-byte range.
+            0xEE..=0xEF => (3, 0x80, 0xBF),
+
+            // utf8 4-byte lead is 11110xxx, giving us 0xF0 (11110000) as the smallest possible
+            // 4-byte lead. Values under U+10000 should not be encoded in 4 bytes, as that would be
+            // overlong, so the second byte must start at 0x90.
+            0xF0 => (4, 0x90, 0xBF),
+
+            // 4-byte code points before the 10FFFF lead byte.
+            0xF1..=0xF3 => (4, 0x80, 0xBF),
+
+            // utf8 ends at 10FFFF, with a 4-byte lead of 0xF4. The maximum value for the second
+            // byte here is 0x8F without exceeding this range.
+            0xF4 => (4, 0x80, 0x8F),
+
+            // 0x80..=0xBF: a continuation byte where a lead should be.
+            // 0xC0, 0xC1, 0xF5..=0xFF: never valid leads.
+            _ => return CodePoint::InvalidUtf8 { len: 1 },
+        };
+
+        // Second byte must exist and be in a specific range to be valid utf8.
+        let Some(b1) = bytes.get(1) else {
+            return CodePoint::Truncated;
+        };
+
+        if *b1 < b1_min || *b1 > b1_max {
+            // Only the leading byte is decisively invalid.
+            return CodePoint::InvalidUtf8 { len: 1 };
+        }
+
+        // Third and fourth bytes only need to be valid continuation bytes.
+        for i in 2..len {
+            match bytes.get(i) {
+                Some(0x80..=0xBF) => continue,
+                // Counts all malformed continuation bytes as invalid.
+                Some(_) => return CodePoint::InvalidUtf8 { len: i as u8 },
+                None => return CodePoint::Truncated,
+            }
+        }
+
+        // == Step 3 ===============================================================================
+        //
+        // Check if the code point is a URL code point.
+        //
+        // =========================================================================================
+
+        // It is simpler to check for non-URL code points.
+        let excluded = match len {
+            // All code points before U+00A0
+            2 => *b0 == 0xC2 && *b1 <= 0x9F,
+
+            3 => {
+                let b2 = bytes[2];
+
+                // All 3-byte non-character code points: U+FDD0 to U+FDEF inclusive, U+FFFE and
+                // U+FFFF.
+                *b0 == 0xEF
+                    && ((*b1 == 0xB7 && (0x90..=0xAF).contains(&b2))
+                        || (*b1 == 0xBF && (0xBE..=0xBF).contains(&b2)))
+            },
+
+            _ => {
+                let b2 = bytes[2];
+                let b3 = bytes[3];
+
+                // All 4-byte non-character code points: U+FFFE and U+FFFF at the end of each utf8
+                // plane. These take the form U+nFFFE and U+nFFFE, with all low 16 bits of the code
+                // point set to 1, except for the last.
+                //
+                //                       low bytes
+                //                  ┌────────┬────────┐
+                //               ┌──┤   ┌────┤   ┌────┤
+                // ┌────────┬────▼──▼┬──▼────▼┬──▼────▼┐
+                // │11110000│10011111│10111111│1011111x│
+                // └────────┴────────┴────────┴────────┘
+                //     b0       b1       b2       b3
+
+                (*b1 & 0x0F) == 0x0F && b2 == 0xBF && b3 >= 0xBE
+            },
+        };
+
+        if excluded {
+            CodePoint::UrlInvalid { len: len as u8 }
+        } else {
+            CodePoint::UrlValid { len: len as u8 }
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use macro_util::prelude::*;

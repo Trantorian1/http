@@ -82,6 +82,15 @@ pub enum ValidationError {
     /// "https:example.org"
     /// ```
     SpecialSchemeMissingFollowingSolidus,
+
+    /// The URL has a special scheme and it uses U+005C (\) instead of U+002F (/).
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// "https://example.org\path\to\file"
+    /// ```
+    InvalidReverseSolidus,
 }
 
 #[cfg(test)]
