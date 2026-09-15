@@ -1,6 +1,7 @@
 //! Procedural macro helpers.
 
 mod bitset;
+mod context;
 
 /// Generates a bitset representation of a given enum.
 ///
@@ -9,13 +10,12 @@ mod bitset;
 ///
 /// # Panics
 ///
-/// If [`syn`] fails to parse the macro input.
+/// If `#[derive(BitSet)]` is not attached to an enum or [`syn`] fails to parse the macro input.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
-/// # use macro_derive::*;
-/// #[derive(BitSet, PartialEq, Eq, Debug)]
+/// #[derive(macro_derive::BitSet, PartialEq, Eq, Debug)]
 /// #[repr(u8)]
 /// enum Error {
 ///     UserError,
@@ -124,6 +124,83 @@ pub fn bitset_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream 
     };
 
     match bitset::impl_bitset_derive(&ast) {
+        Ok(token_stream) => token_stream,
+        Err(err) => err.into_compile_error().into(),
+    }
+}
+
+/// Wrap function arguments in a `Context` struct.
+///
+/// Helps improve legibility for complex function by essentially acting as named arguments.
+///
+/// # Panics
+///
+/// If `context` is not attached to a function or [`syn`] fails to parse the macro input.
+///
+/// # Examples
+///
+/// ```rust
+/// #[macro_derive::context]
+/// fn greet(name: &'static str, surname: &'static str, age: u8, country: &'static str) {
+///     if age < 18 {
+///         println!("You are too young to use this service");
+///     } else if country == "USA" {
+///         println!("Your country's jurisdiction does not allow you to use this service");
+///     } else {
+///         println!("Greetings {name} {surname}, what shall we do today?");
+///     }
+/// }
+///
+/// greet(Context {
+///     name: "Trantorian",
+///     surname: "Seldon",
+///     age: 42,
+///     country: "Terminus",
+/// });
+/// ```
+///
+/// # Codegen
+///
+/// The following is an example of the kind of output you can expect from this macro.
+///
+/// ```rust
+/// struct Context {
+///     name: &'static str,
+///     surname: &'static str,
+///     age: u8,
+///     country: &'static str,
+/// }
+///
+/// fn greet(context: Context) {
+///     let Context {
+///         name,
+///         surname,
+///         age,
+///         country,
+///     } = context;
+///
+///     {
+///         if age < 18 {
+///             println!("You are too young to use this service");
+///         } else if country == "USA" {
+///             println!("Your country's jurisdiction does not allow you to use this service");
+///         } else {
+///             println!("Greetings {name} {surname}, what shall we do today?");
+///         }
+///     }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn context(
+    _attr: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let ast = match syn::parse(item) {
+        Ok(ast) => ast,
+        Err(err) => panic!("Failed to parse macro input: {err}"),
+    };
+
+    match context::impl_context(ast) {
         Ok(token_stream) => token_stream,
         Err(err) => err.into_compile_error().into(),
     }

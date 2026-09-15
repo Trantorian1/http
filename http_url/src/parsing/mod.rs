@@ -102,11 +102,6 @@ macro_rules! ascii_tab_or_newline {
 mod c0_control_or_space {
     use super::*;
 
-    pub(super) struct Context<'parsing, 'input> {
-        pub cursor: &'parsing mut &'input [u8],
-        pub error_bitset: &'parsing mut ValidationErrorBitSet,
-    }
-
     /// # C0 control or space sanitization
     ///
     /// Remove any leading and trailing [C0 control or space] from input.
@@ -118,12 +113,11 @@ mod c0_control_or_space {
     /// [C0 control of space]: https://infra.spec.whatwg.org/#c0-control-or-space
     /// [`InvalidURLUnit`]: ValidationError::InvalidURLUnit
     #[inline]
-    pub(super) fn parse<'parsing, 'input>(context: Context<'parsing, 'input>) {
-        let Context {
-            cursor,
-            error_bitset,
-        } = context;
-
+    #[macro_derive::context]
+    pub(super) fn parse<'parsing, 'input>(
+        cursor: &'parsing mut &'input [u8],
+        error_bitset: &'parsing mut ValidationErrorBitSet,
+    ) {
         // Leading C0 control or space
         if let Some(c) = cursor.first()
             && matchers::c0_control_or_space(*c)
@@ -160,13 +154,6 @@ mod c0_control_or_space {
 mod scheme {
     use super::*;
 
-    pub(super) struct Context<'parsing, 'input, 'output> {
-        pub cursor: &'parsing mut &'input [u8],
-        pub buffer: UrlBuffer<'output>,
-
-        pub error_bitset: &'parsing mut ValidationErrorBitSet,
-    }
-
     /// # [Scheme state]
     ///
     /// Tries to parse a [`Url]'s scheme, if there is any, otherwise falls back to the "no scheme"
@@ -174,15 +161,12 @@ mod scheme {
     ///
     /// [Scheme state]: https://url.spec.whatwg.org/#scheme-start-state
     #[inline]
+    #[macro_derive::context]
     pub(super) fn parse<'parsing, 'input, 'output>(
-        context: Context<'parsing, 'input, 'output>,
+        cursor: &'parsing mut &'input [u8],
+        mut buffer: UrlBuffer<'output>,
+        error_bitset: &'parsing mut ValidationErrorBitSet,
     ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
-        let Context {
-            cursor,
-            mut buffer,
-            error_bitset,
-        } = context;
-
         if let Some(c) = cursor.first()
             && matchers::ascii_alpha(*c)
         {
@@ -288,15 +272,6 @@ mod scheme {
     pub(super) mod special {
         use super::*;
 
-        pub(crate) struct Context<'parsing, 'input, 'output> {
-            pub cursor: &'parsing mut &'input [u8],
-            pub buffer: UrlBuffer<'output>,
-
-            pub error_bitset: &'parsing mut ValidationErrorBitSet,
-            pub scheme: segment::Scheme,
-            pub default_scheme_port: u16,
-        }
-
         /// # [Special relative or authority state]
         ///
         /// Parses out each [`Url] segment after a special scheme.
@@ -332,17 +307,14 @@ mod scheme {
         /// [`userinfo`]: userinfo::parse
         /// [`host_and_port`]: host_and_port::parse
         #[inline]
+        #[macro_derive::context]
         pub(crate) fn parse<'parsing, 'input, 'output>(
-            context: Context<'parsing, 'input, 'output>,
+            cursor: &'parsing mut &'input [u8],
+            mut buffer: UrlBuffer<'output>,
+            error_bitset: &'parsing mut ValidationErrorBitSet,
+            scheme: segment::Scheme,
+            default_scheme_port: u16,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
-            let Context {
-                cursor,
-                mut buffer,
-                error_bitset,
-                scheme,
-                default_scheme_port,
-            } = context;
-
             // == Special authority slashes state ======================================
             //
             // Ensure the scheme is followed by two U+002F (/).
@@ -420,7 +392,7 @@ mod scheme {
             #[cfg(test)]
             let _remaining_host = str::from_utf8(cursor).unwrap_or_default();
 
-            let (host, port, port_size) = host_and_port::parse(host_and_port::Context {
+            let (host, port) = host_and_port::parse(host_and_port::Context {
                 cursor,
                 buffer: &mut buffer,
 
@@ -471,14 +443,6 @@ mod scheme {
 mod userinfo {
     use super::*;
 
-    pub(super) struct Context<'parsing, 'input, 'output> {
-        pub cursor: &'parsing mut &'input [u8],
-        pub buffer: &'parsing mut UrlBuffer<'output>,
-
-        pub error_bitset: &'parsing mut ValidationErrorBitSet,
-        pub scheme: &'parsing segment::Scheme,
-    }
-
     /// # Authority state
     ///
     /// Parses the `username` and `password` sections of a [`Url], if there are any. This really
@@ -496,16 +460,13 @@ mod userinfo {
     /// [`InvalidCredentials`]: ValidationError::InvalidCredentials
     /// [`HostMissing`]: Error::HostMissing
     #[inline]
+    #[macro_derive::context]
     pub(super) fn parse<'parsing, 'input, 'output>(
-        context: Context<'parsing, 'input, 'output>,
+        cursor: &'parsing mut &'input [u8],
+        buffer: &'parsing mut UrlBuffer<'output>,
+        error_bitset: &'parsing mut ValidationErrorBitSet,
+        scheme: &'parsing segment::Scheme,
     ) -> Result<(segment::Username, segment::Password), Error> {
-        let Context {
-            cursor,
-            buffer,
-            error_bitset,
-            scheme,
-        } = context;
-
         // == authority state ======================================================
         //
         // https://url.spec.whatwg.org/#authority-state
@@ -653,17 +614,6 @@ mod userinfo {
 mod host_and_port {
     use super::*;
 
-    pub(super) struct Context<'parsing, 'input, 'output> {
-        pub cursor: &'parsing mut &'input [u8],
-        pub buffer: &'parsing mut UrlBuffer<'output>,
-
-        pub error_bitset: &'parsing mut ValidationErrorBitSet,
-
-        pub username: &'parsing segment::Username,
-        pub password: &'parsing segment::Password,
-        pub default_scheme_port: u16,
-    }
-
     /// Parses out a [`Url`]'s [`host`] and [`port`] components. This is done to optimize branching
     /// so that the presence of a port is only ever checked once.
     ///
@@ -675,18 +625,15 @@ mod host_and_port {
     /// [`host`]: host::parse
     /// [`port`]: port::parse
     #[inline]
+    #[macro_derive::context]
     pub(super) fn parse<'parsing, 'input, 'output>(
-        context: Context<'parsing, 'input, 'output>,
-    ) -> Result<(segment::Host, segment::Port, usize), Error> {
-        let Context {
-            cursor,
-            buffer,
-            error_bitset,
-            username,
-            password,
-            default_scheme_port,
-        } = context;
-
+        cursor: &'parsing mut &'input [u8],
+        buffer: &'parsing mut UrlBuffer<'output>,
+        error_bitset: &'parsing mut ValidationErrorBitSet,
+        username: &'parsing segment::Username,
+        password: &'parsing segment::Password,
+        default_scheme_port: u16,
+    ) -> Result<(segment::Host, segment::Port), Error> {
         // == hostname state =======================================================
         //
         // https://url.spec.whatwg.org/#hostname-state
@@ -718,8 +665,6 @@ mod host_and_port {
                         cursor,
                         buffer,
 
-                        error_bitset,
-
                         username,
                         password,
                         char_count_hostname,
@@ -737,7 +682,7 @@ mod host_and_port {
                         default_scheme_port,
                     })?;
 
-                    return Ok((host, port.0, port.1));
+                    return Ok((host, port));
                 },
 
                 b'/' | b'\\' | b'?' | b'#' => {
@@ -773,30 +718,17 @@ mod host_and_port {
             cursor,
             buffer,
 
-            error_bitset,
-
             username,
             password,
             char_count_hostname,
         })?;
 
-        Ok((host, segment::Port(None), 0))
+        Ok((host, segment::Port(None)))
     }
 }
 
 mod host {
     use super::*;
-
-    pub(super) struct Context<'parsing, 'input, 'output> {
-        pub cursor: &'parsing mut &'input [u8],
-        pub buffer: &'parsing mut UrlBuffer<'output>,
-
-        pub error_bitset: &'parsing mut ValidationErrorBitSet,
-
-        pub username: &'parsing segment::Username,
-        pub password: &'parsing segment::Password,
-        pub char_count_hostname: usize,
-    }
 
     /// # [Hostname state]
     ///
@@ -813,18 +745,14 @@ mod host {
     /// [Hostname state]: https://url.spec.whatwg.org/#hostname-state
     /// [`HostMissing`]: Error::HostMissing
     #[inline]
+    #[macro_derive::context]
     pub(super) fn parse<'parsing, 'input, 'output>(
-        context: Context<'parsing, 'input, 'output>,
+        cursor: &'parsing mut &'input [u8],
+        buffer: &'parsing mut UrlBuffer<'output>,
+        username: &'parsing segment::Username,
+        password: &'parsing segment::Password,
+        char_count_hostname: usize,
     ) -> Result<segment::Host, Error> {
-        let Context {
-            cursor,
-            buffer,
-            error_bitset: _,
-            username,
-            password,
-            char_count_hostname,
-        } = context;
-
         // == host parsing =========================================================
         //
         // https://url.spec.whatwg.org/#host-parsing
@@ -877,12 +805,6 @@ mod host {
 mod port {
     use super::*;
 
-    pub(super) struct Context<'parsing, 'input> {
-        pub cursor: &'parsing mut &'input [u8],
-        pub error_bitset: &'parsing mut ValidationErrorBitSet,
-        pub default_scheme_port: u16,
-    }
-
     /// # [Port state]
     ///
     /// Parses out the port segment of a [`Url`]. Ports are normalized according to that scheme's
@@ -916,15 +838,12 @@ mod port {
     /// [`PortInvalid`]: Error::PortInvalid
     /// [ASCII digit]: https://infra.spec.whatwg.org/#ascii-digit
     #[inline]
+    #[macro_derive::context]
     pub(super) fn parse<'parsing, 'input>(
-        context: Context<'parsing, 'input>,
-    ) -> Result<(segment::Port, usize), Error> {
-        let Context {
-            cursor,
-            error_bitset,
-            default_scheme_port,
-        } = context;
-
+        cursor: &'parsing mut &'input [u8],
+        error_bitset: &'parsing mut ValidationErrorBitSet,
+        default_scheme_port: u16,
+    ) -> Result<segment::Port, Error> {
         let mut port = 0u32;
         let mut char_count_port = 0;
 
@@ -962,9 +881,9 @@ mod port {
         }
 
         if port as u16 == default_scheme_port || char_count_port == 0 {
-            Ok((segment::Port(None), char_count_port))
+            Ok(segment::Port(None))
         } else {
-            Ok((segment::Port(Some(port as u16)), char_count_port))
+            Ok(segment::Port(Some(port as u16)))
         }
     }
 }
@@ -972,23 +891,13 @@ mod port {
 mod path {
     use super::*;
 
-    pub(super) struct Context<'parsing, 'input, 'output> {
-        pub cursor: &'parsing mut &'input [u8],
-        pub buffer: &'parsing mut UrlBuffer<'output>,
-
-        pub error_bitset: &'parsing mut ValidationErrorBitSet,
-    }
-
     #[inline]
+    #[macro_derive::context]
     pub(super) fn parse<'parsing, 'input, 'output>(
-        context: Context<'parsing, 'input, 'output>,
+        cursor: &'parsing mut &'input [u8],
+        buffer: &'parsing mut UrlBuffer<'output>,
+        error_bitset: &'parsing mut ValidationErrorBitSet,
     ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
-        let Context {
-            cursor,
-            buffer,
-            error_bitset,
-        } = context;
-
         let path_start = buffer.push(b'/')?;
         let mut path_stop = path_start;
 
@@ -1081,23 +990,13 @@ mod path {
 mod query {
     use super::*;
 
-    pub(super) struct Context<'parsing, 'input, 'output> {
-        pub cursor: &'parsing mut &'input [u8],
-        pub buffer: &'parsing mut UrlBuffer<'output>,
-
-        pub error_bitset: &'parsing mut ValidationErrorBitSet,
-    }
-
     #[inline]
+    #[macro_derive::context]
     pub(super) fn parse<'parsing, 'input, 'output>(
-        context: Context<'parsing, 'input, 'output>,
+        cursor: &'parsing mut &'input [u8],
+        buffer: &'parsing mut UrlBuffer<'output>,
+        error_bitset: &'parsing mut ValidationErrorBitSet,
     ) -> Result<(segment::Query, segment::Fragment), Error> {
-        let Context {
-            cursor,
-            buffer,
-            error_bitset,
-        } = context;
-
         let query_start = buffer.push(b'?')?;
         let mut query_stop = query_start;
 
@@ -1160,23 +1059,13 @@ mod query {
 mod fragment {
     use super::*;
 
-    pub(super) struct Context<'parsing, 'input, 'output> {
-        pub cursor: &'parsing mut &'input [u8],
-        pub buffer: &'parsing mut UrlBuffer<'output>,
-
-        pub error_bitset: &'parsing mut ValidationErrorBitSet,
-    }
-
     #[inline]
+    #[macro_derive::context]
     pub(super) fn parse<'parsing, 'input, 'output>(
-        context: Context<'parsing, 'input, 'output>,
+        cursor: &'parsing mut &'input [u8],
+        buffer: &'parsing mut UrlBuffer<'output>,
+        error_bitset: &'parsing mut ValidationErrorBitSet,
     ) -> Result<segment::Fragment, Error> {
-        let Context {
-            cursor,
-            buffer,
-            error_bitset,
-        } = context;
-
         let fragment_start = buffer.push(b'#')?;
         let mut fragment_stop = fragment_start;
 
@@ -1216,22 +1105,13 @@ mod common {
     pub(super) mod percent {
         use super::*;
 
-        pub(crate) struct Context<'parsing, 'input, 'output> {
-            pub cursor: &'parsing mut &'input [u8],
-            pub buffer: &'parsing mut UrlBuffer<'output>,
-
-            pub error_bitset: &'parsing mut ValidationErrorBitSet,
-        }
-
+        #[inline]
+        #[macro_derive::context]
         pub(crate) fn delimiter<'parsing, 'input, 'output>(
-            context: Context<'parsing, 'input, 'output>,
+            cursor: &'parsing mut &'input [u8],
+            buffer: &'parsing mut UrlBuffer<'output>,
+            error_bitset: &'parsing mut ValidationErrorBitSet,
         ) -> Result<usize, Error> {
-            let Context {
-                cursor,
-                buffer,
-                error_bitset,
-            } = context;
-
             // Invalid percent-encodings are still serialized and an error is logged.
             let mut position = buffer.push(b'%')?;
 
@@ -1259,24 +1139,14 @@ mod common {
     pub(super) mod url_cp {
         use super::*;
 
-        pub(crate) struct Context<'parsing, 'input, 'output> {
-            pub cursor: &'parsing mut &'input [u8],
-            pub buffer: &'parsing mut UrlBuffer<'output>,
-
-            pub error_bitset: &'parsing mut ValidationErrorBitSet,
-            pub encoding: crate::percent::EncodeSet,
-        }
-
+        #[inline]
+        #[macro_derive::context]
         pub(crate) fn encode<'parsing, 'input, 'output>(
-            context: Context<'parsing, 'input, 'output>,
+            cursor: &'parsing mut &'input [u8],
+            buffer: &'parsing mut UrlBuffer<'output>,
+            error_bitset: &'parsing mut ValidationErrorBitSet,
+            encoding: crate::percent::EncodeSet,
         ) -> Result<usize, Error> {
-            let Context {
-                cursor,
-                buffer,
-                error_bitset,
-                encoding,
-            } = context;
-
             #[cfg(test)]
             let _encoding_before = str::from_utf8(*cursor).unwrap_or_default();
 
