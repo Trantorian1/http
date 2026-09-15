@@ -41,6 +41,7 @@ pub const C0_CONTROL: EncodeSet = EncodeSet::new()
     // Code points greater than U+007E (~)
     .add(0x7F);
 
+#[allow(clippy::doc_markdown)]
 /// The fragment [`PercentEncodeSet`] is a percent-encode set consisting of the C0 control
 /// percent-encode set and U+0020 SPACE, U+0022 ("), U+003C (<), U+003E (>), and U+0060 (`).
 pub const FRAGMENT: EncodeSet = C0_CONTROL
@@ -75,6 +76,7 @@ pub const QUERY_SPECIAL: EncodeSet = QUERY
     // U+0027
     .add(b'\'');
 
+#[allow(clippy::doc_markdown)]
 /// The path percent-encode set is a [`PercentEncodeSet`] consisting of the query percent-encode
 /// set and U+003F (?), U+005E (^), U+0060 (`), U+007B ({), and U+007D (}).
 pub const PATH: EncodeSet = QUERY
@@ -141,6 +143,7 @@ impl EncodeSet {
     /// New code points can be added later by calling [`add`].
     ///
     /// [`add`]: Self::add
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             bitset: [0; ASCII_RANGE / BITS_PER_CHUNK],
@@ -149,6 +152,11 @@ impl EncodeSet {
 
     /// Adds a new code point to the percent-encode set. This means that code point will be encoded
     /// if using this set.
+    ///
+    /// # Panics
+    ///
+    /// If `c` is not ASCII.
+    #[must_use]
     pub const fn add(mut self, c: u8) -> Self {
         assert!(c.is_ascii());
 

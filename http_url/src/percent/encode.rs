@@ -1,4 +1,4 @@
-use super::*;
+use super::EncodeSet;
 
 /// Percent-encodes a single ASCII byte to a target buffer. The resulting encoding, if any, is
 /// written at the **start** of the buffer. Whether or not the byte should be encoded is based on
@@ -66,12 +66,12 @@ fn encode_ascii_byte(c: u8) -> &'static [u8] {
 mod test {
     use macro_util::prelude::*;
 
-    use super::*;
+    use crate::percent;
 
     #[test]
     fn encode_path() {
         let mut buffer = [0; 128];
-        let written = encode_byte_to(b' ', &mut buffer, sets::PATH);
+        let written = percent::encode::encode_byte_to(b' ', &mut buffer, percent::sets::PATH);
 
         assert_eq!(written, 3);
         assert_utf8_eq!(&buffer[..written], b"%20");
