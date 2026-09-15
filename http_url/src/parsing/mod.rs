@@ -3,6 +3,7 @@ mod error;
 
 use buffer::UrlBuffer;
 pub use error::*;
+use macro_util::prelude::*;
 
 use super::*;
 
@@ -1051,60 +1052,20 @@ mod path {
                 },
 
                 b'%' => {
-                    // Invalid percent-encodings are still serialized and an error is logged.
-                    *cursor = &cursor[1..];
-                    path_stop = buffer.push(b'%')?;
-
-                    if let Some(b0) = cursor.first()
-                        && let Some(b1) = cursor.get(1)
-                    {
-                        if !b0.is_ascii_hexdigit() || !b1.is_ascii_hexdigit() {
-                            error_bitset.add(ValidationError::InvalidURLUnit);
-                        } else {
-                            *cursor = &cursor[2..];
-                            buffer.push(*b0)?;
-                            path_stop = buffer.push(*b1)?;
-                        }
-                    } else {
-                        error_bitset.add(ValidationError::InvalidURLUnit);
-                    }
+                    path_stop = common::percent::delimiter(common::percent::Context {
+                        cursor,
+                        buffer,
+                        error_bitset,
+                    })?;
                 },
 
                 _ => {
-                    // Invalid utf-8 bytes are skipped and do not terminate parsing.
-                    let len = match utf8::url_code_point(cursor) {
-                        utf8::UrlCodePoint::Valid { len } => len,
-
-                        utf8::UrlCodePoint::Invalid { len } => {
-                            error_bitset.add(ValidationError::InvalidURLUnit);
-                            len
-                        },
-
-                        // Invalid utf-8 bytes are skipped. We don't check for utf-8 encoding in
-                        // other url sections. However, in the case of the path section where we
-                        // potentially have to deal with multi-byte url code points, this
-                        // information comes as free so we might as well act on it.
-                        utf8::UrlCodePoint::InvalidUtf8 { len } => {
-                            path_stop = buffer.push_str(utf8::REPLACEMENT)?;
-                            *cursor = &cursor[len as usize..];
-                            continue;
-                        },
-
-                        // A truncated code point indicates we have reached the end of the cursor
-                        // before the end of the code point. This information too is ignored, and we
-                        // instead stop at the last valid code point.
-                        utf8::UrlCodePoint::Truncated => {
-                            path_stop = buffer.push_str(utf8::REPLACEMENT)?;
-                            *cursor = &[];
-                            break;
-                        },
-                    };
-
-                    for c in &cursor[..len as usize] {
-                        path_stop = buffer.push_encode_byte(*c, percent::QUERY_SPECIAL)?;
-                    }
-
-                    *cursor = &cursor[len as usize..];
+                    path_stop = common::url_cp::encode(common::url_cp::Context {
+                        cursor,
+                        buffer,
+                        error_bitset,
+                        encoding: percent::PATH,
+                    })?;
                 },
             }
         }
@@ -1171,60 +1132,20 @@ mod query {
                 },
 
                 b'%' => {
-                    // Invalid percent-encodings are still serialized and an error is logged.
-                    *cursor = &cursor[1..];
-                    query_stop = buffer.push(b'%')?;
-
-                    if let Some(b0) = cursor.first()
-                        && let Some(b1) = cursor.get(1)
-                    {
-                        if !b0.is_ascii_hexdigit() || !b1.is_ascii_hexdigit() {
-                            error_bitset.add(ValidationError::InvalidURLUnit);
-                        } else {
-                            *cursor = &cursor[2..];
-                            buffer.push(*b0)?;
-                            query_stop = buffer.push(*b1)?;
-                        }
-                    } else {
-                        error_bitset.add(ValidationError::InvalidURLUnit);
-                    }
+                    query_stop = common::percent::delimiter(common::percent::Context {
+                        cursor,
+                        buffer,
+                        error_bitset,
+                    })?;
                 },
 
                 _ => {
-                    // Invalid utf-8 bytes are skipped and do not terminate parsing.
-                    let len = match utf8::url_code_point(cursor) {
-                        utf8::UrlCodePoint::Valid { len } => len,
-
-                        utf8::UrlCodePoint::Invalid { len } => {
-                            error_bitset.add(ValidationError::InvalidURLUnit);
-                            len
-                        },
-
-                        // Invalid utf-8 bytes are skipped. We don't check for utf-8 encoding in
-                        // other url sections. However, in the case of the query section where we
-                        // potentially have to deal with multi-byte url code points, this
-                        // information comes as free so we might as well act on it.
-                        utf8::UrlCodePoint::InvalidUtf8 { len } => {
-                            query_stop = buffer.push_str(utf8::REPLACEMENT)?;
-                            *cursor = &cursor[len as usize..];
-                            continue;
-                        },
-
-                        // A truncated code point indicates we have reached the end of the cursor
-                        // before the end of the code point. This information too is ignored, and we
-                        // instead stop at the last valid code point.
-                        utf8::UrlCodePoint::Truncated => {
-                            query_stop = buffer.push_str(utf8::REPLACEMENT)?;
-                            *cursor = &[];
-                            break;
-                        },
-                    };
-
-                    for c in &cursor[..len as usize] {
-                        query_stop = buffer.push_encode_byte(*c, percent::QUERY_SPECIAL)?;
-                    }
-
-                    *cursor = &cursor[len as usize..];
+                    query_stop = common::url_cp::encode(common::url_cp::Context {
+                        cursor,
+                        buffer,
+                        error_bitset,
+                        encoding: percent::QUERY_SPECIAL,
+                    })?;
                 },
             }
         }
@@ -1267,60 +1188,20 @@ mod fragment {
 
             match c {
                 b'%' => {
-                    // Invalid percent-encodings are still serialized and an error is logged.
-                    *cursor = &cursor[1..];
-                    fragment_stop = buffer.push(b'%')?;
-
-                    if let Some(b0) = cursor.first()
-                        && let Some(b1) = cursor.get(1)
-                    {
-                        if !b0.is_ascii_hexdigit() || !b1.is_ascii_hexdigit() {
-                            error_bitset.add(ValidationError::InvalidURLUnit);
-                        } else {
-                            *cursor = &cursor[2..];
-                            buffer.push(*b0)?;
-                            fragment_stop = buffer.push(*b1)?;
-                        }
-                    } else {
-                        error_bitset.add(ValidationError::InvalidURLUnit);
-                    }
+                    fragment_stop = common::percent::delimiter(common::percent::Context {
+                        cursor,
+                        buffer,
+                        error_bitset,
+                    })?;
                 },
 
                 _ => {
-                    // Invalid utf-8 bytes are skipped and do not terminate parsing.
-                    let len = match utf8::url_code_point(cursor) {
-                        utf8::UrlCodePoint::Valid { len } => len,
-
-                        utf8::UrlCodePoint::Invalid { len } => {
-                            error_bitset.add(ValidationError::InvalidURLUnit);
-                            len
-                        },
-
-                        // Invalid utf-8 bytes are skipped. We don't check for utf-8 encoding in
-                        // other url sections. However, in the case of the fragment section where we
-                        // potentially have to deal with multi-byte url code points, this
-                        // information comes as free so we might as well act on it.
-                        utf8::UrlCodePoint::InvalidUtf8 { len } => {
-                            fragment_stop = buffer.push_str(utf8::REPLACEMENT)?;
-                            *cursor = &cursor[len as usize..];
-                            continue;
-                        },
-
-                        // A truncated code point indicates we have reached the end of the cursor
-                        // before the end of the code point. This information too is ignored, and we
-                        // instead stop at the last valid code point.
-                        utf8::UrlCodePoint::Truncated => {
-                            fragment_stop = buffer.push_str(utf8::REPLACEMENT)?;
-                            *cursor = &[];
-                            break;
-                        },
-                    };
-
-                    for c in &cursor[..len as usize] {
-                        fragment_stop = buffer.push_encode_byte(*c, percent::FRAGMENT)?;
-                    }
-
-                    *cursor = &cursor[len as usize..];
+                    fragment_stop = common::url_cp::encode(common::url_cp::Context {
+                        cursor,
+                        buffer,
+                        error_bitset,
+                        encoding: percent::FRAGMENT,
+                    })?;
                 },
             }
         }
@@ -1329,9 +1210,132 @@ mod fragment {
     }
 }
 
+mod common {
+    use super::*;
+
+    pub(super) mod percent {
+        use super::*;
+
+        pub(crate) struct Context<'parsing, 'input, 'output> {
+            pub cursor: &'parsing mut &'input [u8],
+            pub buffer: &'parsing mut UrlBuffer<'output>,
+
+            pub error_bitset: &'parsing mut ValidationErrorBitSet,
+        }
+
+        pub(crate) fn delimiter<'parsing, 'input, 'output>(
+            context: Context<'parsing, 'input, 'output>,
+        ) -> Result<usize, Error> {
+            let Context {
+                cursor,
+                buffer,
+                error_bitset,
+            } = context;
+
+            // Invalid percent-encodings are still serialized and an error is logged.
+            let mut position = buffer.push(b'%')?;
+
+            let mut len = 1;
+
+            if let Some(b0) = cursor.get(1)
+                && let Some(b1) = cursor.get(2)
+            {
+                if !b0.is_ascii_hexdigit() || !b1.is_ascii_hexdigit() {
+                    error_bitset.add(ValidationError::InvalidURLUnit);
+                } else {
+                    buffer.push(*b0)?;
+                    position = buffer.push(*b1)?;
+                    len = 3;
+                }
+            } else {
+                error_bitset.add(ValidationError::InvalidURLUnit);
+            }
+
+            *cursor = &cursor[len..];
+            Ok(position)
+        }
+    }
+
+    pub(super) mod url_cp {
+        use super::*;
+
+        pub(crate) struct Context<'parsing, 'input, 'output> {
+            pub cursor: &'parsing mut &'input [u8],
+            pub buffer: &'parsing mut UrlBuffer<'output>,
+
+            pub error_bitset: &'parsing mut ValidationErrorBitSet,
+            pub encoding: crate::percent::EncodeSet,
+        }
+
+        pub(crate) fn encode<'parsing, 'input, 'output>(
+            context: Context<'parsing, 'input, 'output>,
+        ) -> Result<usize, Error> {
+            let Context {
+                cursor,
+                buffer,
+                error_bitset,
+                encoding,
+            } = context;
+
+            #[cfg(test)]
+            let _encoding_before = str::from_utf8(*cursor).unwrap_or_default();
+
+            // Invalid utf-8 bytes are replaced with the U+FFFD (�) utf-8 replacement code point.
+            let len = match utf8::url_code_point(cursor) {
+                utf8::CodePointUrl::Valid { len } => len,
+
+                utf8::CodePointUrl::Invalid { len } => {
+                    error_bitset.add(ValidationError::InvalidURLUnit);
+                    len
+                },
+
+                // Invalid utf-8 bytes are skipped. We don't check for utf-8 encoding in other url
+                // sections. However, in the case of the path section where we potentially have to
+                // deal with multi-byte url code points, this information comes as free so we might
+                // as well act on it.
+                utf8::CodePointUrl::InvalidUtf8 { invalid: len } => {
+                    let position = buffer.push_str(utf8::REPLACEMENT)?;
+                    *cursor = &cursor[len.get() as usize..];
+
+                    return Ok(position);
+                },
+
+                // A truncated code point indicates we have reached the end of the cursor before the
+                // end of the code point. This information too is ignored, and we instead stop at
+                // the last valid code point.
+                utf8::CodePointUrl::Truncated => {
+                    let position = buffer.push_str(utf8::REPLACEMENT)?;
+                    *cursor = &cursor[1..];
+
+                    return Ok(position);
+                },
+            };
+
+            // NOTE: len is nonzero so position will always be overridden
+            let mut position = 0;
+
+            for c in &cursor[..len.get() as usize] {
+                position = buffer.push_encode_byte(*c, encoding)?;
+            }
+
+            #[cfg(test)]
+            let _encoding_after = str::from_utf8(buffer.as_ref()).unwrap_or_default();
+
+            *cursor = &cursor[len.get() as usize..];
+
+            #[cfg(test)]
+            let _remaining = str::from_utf8(*cursor).unwrap_or_default();
+
+            Ok(position)
+        }
+    }
+}
+
 /// UTF-8 parsing utilities.
 pub mod utf8 {
-    /// U+FFFD (�) utf-8 replacement character
+    use super::*;
+
+    /// U+FFFD (�) utf-8 replacement code point.
     pub const REPLACEMENT: &[u8] = b"%EF%BF%BD";
 
     /// Bitmask of ASCII code points which are also [URL code points].
@@ -1355,18 +1359,22 @@ pub mod utf8 {
     ///
     /// [URL code point]: https://url.spec.whatwg.org/#url-code-points
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum UrlCodePoint {
+    pub enum CodePointUrl {
         /// Code point is a valid URL code point.
         ///
         /// # Examples
         ///
         /// ```rust
         /// # use http_url::parsing::utf8::*;
-        /// assert_eq!(url_code_point(b"a"), UrlCodePoint::Valid { len: 1 });
+        /// # use macro_util::prelude::*;
+        /// assert_eq!(
+        ///     url_code_point(b"a"),
+        ///     CodePointUrl::Valid { len: nonzero!(1) }
+        /// );
         /// ```
         Valid {
             /// Length of the code point in bytes.
-            len: u8,
+            len: std::num::NonZeroU8,
         },
 
         /// Code point is not a valid URL code point, but is valid utf-8.
@@ -1375,11 +1383,15 @@ pub mod utf8 {
         ///
         /// ```rust
         /// # use http_url::parsing::utf8::*;
-        /// assert_eq!(url_code_point(b"%"), UrlCodePoint::Invalid { len: 1 });
+        /// # use macro_util::prelude::*;
+        /// assert_eq!(
+        ///     url_code_point(b"%"),
+        ///     CodePointUrl::Invalid { len: nonzero!(1) }
+        /// );
         /// ```
         Invalid {
             /// Length of the code point in bytes.
-            len: u8,
+            len: std::num::NonZeroU8,
         },
 
         /// Code point is invalid under utf-8. This can be because it is overlong, a utf-16
@@ -1390,15 +1402,18 @@ pub mod utf8 {
         ///
         /// ```rust
         /// # use http_url::parsing::utf8::*;
+        /// # use macro_util::prelude::*;
         /// // 0xF5 as a lead byte is outside of the utf-8 max range.
         /// assert_eq!(
         ///     url_code_point(&[0xF5]),
-        ///     UrlCodePoint::InvalidUtf8 { len: 1 }
+        ///     CodePointUrl::InvalidUtf8 {
+        ///         invalid: nonzero!(1)
+        ///     }
         /// );
         /// ```
         InvalidUtf8 {
             /// Number of bytes which are invalid utf-8.
-            len: u8,
+            invalid: std::num::NonZeroU8,
         },
 
         /// Byte input ends before the code point could be fully parsed.
@@ -1409,7 +1424,7 @@ pub mod utf8 {
         /// # use http_url::parsing::utf8::*;
         /// // 0xF4 as a lead byte denotes a four-bytes code point,
         /// // however the remaining bytes are missing
-        /// assert_eq!(url_code_point(&[0xF4]), UrlCodePoint::Truncated);
+        /// assert_eq!(url_code_point(&[0xF4]), CodePointUrl::Truncated);
         /// ```
         Truncated,
     }
@@ -1423,13 +1438,17 @@ pub mod utf8 {
     ///
     /// ```rust
     /// # use http_url::parsing::utf8::*;
-    /// assert_eq!(url_code_point(b"a"), UrlCodePoint::Valid { len: 1 });
+    /// # use macro_util::prelude::*;
+    /// assert_eq!(
+    ///     url_code_point(b"a"),
+    ///     CodePointUrl::Valid { len: nonzero!(1) }
+    /// );
     /// ```
     ///
     /// [URL code point]: https://url.spec.whatwg.org/#url-code-points
-    pub fn url_code_point(bytes: &[u8]) -> UrlCodePoint {
+    pub fn url_code_point(bytes: &[u8]) -> CodePointUrl {
         let Some(b0) = bytes.first() else {
-            return UrlCodePoint::Truncated;
+            return CodePointUrl::Truncated;
         };
 
         // == Step 1 ===============================================================================
@@ -1440,9 +1459,13 @@ pub mod utf8 {
 
         if b0.is_ascii() {
             if (ASCII_URL_CODE_POINT >> *b0 & 1) > 0 {
-                return UrlCodePoint::Valid { len: 1 };
+                return CodePointUrl::Valid {
+                    len: std::num::NonZeroU8::MIN,
+                };
             } else {
-                return UrlCodePoint::Invalid { len: 1 };
+                return CodePointUrl::Invalid {
+                    len: std::num::NonZeroU8::MIN,
+                };
             }
         }
 
@@ -1456,14 +1479,14 @@ pub mod utf8 {
             // utf8 2-byte lead is 110xxxxx, giving us 0xC0 (11000000) as the smallest possible
             // 2-byte lead. C0 and C1 are overlong though, so the range of valid 2-byte leads is
             // C2 (11000010) up to DF (11011111).
-            0xC2..=0xDF => (2, 0x80, 0xBF),
+            0xC2..=0xDF => (nonzero!(2u8), 0x80, 0xBF),
 
             // utf8 3-byte leads 1110xxxx get more complicated. Values before U+0800 should not be
             // encoded in 3 bytes, as that would be overlong, so the second byte must start at A0.
-            0xE0 => (3, 0xA0, 0xBF),
+            0xE0 => (nonzero!(3u8), 0xA0, 0xBF),
 
             // The rest of 3-byte utf8 values are valid, except for surrogates.
-            0xE1..=0xEC => (3, 0x80, 0xBF),
+            0xE1..=0xEC => (nonzero!(3u8), 0x80, 0xBF),
 
             // Surrogate code points are reserved for use in utf16 and cannot be used in utf8. A
             // leading surrogate is a code point that is in the range U+D800 to U+DBFF, inclusive.
@@ -1472,45 +1495,56 @@ pub mod utf8 {
             // notice they all start with 0xED, with a second byte in the range 0xA0 to 0xBF
             // inclusive. So the range of valid second bytes in a 3-byte code point are 0x80 to 0x9F
             // inclusive. Any other values are invalid utf8.
-            0xED => (3, 0x80, 0x9F),
+            0xED => (nonzero!(3u8), 0x80, 0x9F),
 
             // The rest of the 3-byte range.
-            0xEE..=0xEF => (3, 0x80, 0xBF),
+            0xEE..=0xEF => (nonzero!(3u8), 0x80, 0xBF),
 
             // utf8 4-byte lead is 11110xxx, giving us 0xF0 (11110000) as the smallest possible
             // 4-byte lead. Values under U+10000 should not be encoded in 4 bytes, as that would be
             // overlong, so the second byte must start at 0x90.
-            0xF0 => (4, 0x90, 0xBF),
+            0xF0 => (nonzero!(4u8), 0x90, 0xBF),
 
             // 4-byte code points before the U+10FFFF lead byte.
-            0xF1..=0xF3 => (4, 0x80, 0xBF),
+            0xF1..=0xF3 => (nonzero!(4u8), 0x80, 0xBF),
 
             // utf8 ends at 10FFFF, with a 4-byte lead of 0xF4. The maximum value for the second
             // byte here is 0x8F without exceeding this range.
-            0xF4 => (4, 0x80, 0x8F),
+            0xF4 => (nonzero!(4u8), 0x80, 0x8F),
 
             // 0x80..=0xBF: a continuation byte where a lead should be.
             // 0xC0, 0xC1, 0xF5..=0xFF: never valid leads.
-            _ => return UrlCodePoint::InvalidUtf8 { len: 1 },
+            _ => {
+                return CodePointUrl::InvalidUtf8 {
+                    invalid: std::num::NonZeroU8::MIN,
+                };
+            },
         };
 
         // Second byte must exist and be in a specific range to be valid utf8.
         let Some(b1) = bytes.get(1) else {
-            return UrlCodePoint::Truncated;
+            return CodePointUrl::Truncated;
         };
 
         if *b1 < b1_min || *b1 > b1_max {
             // Only the leading byte is decisively invalid.
-            return UrlCodePoint::InvalidUtf8 { len: 1 };
+            return CodePointUrl::InvalidUtf8 {
+                invalid: std::num::NonZeroU8::MIN,
+            };
         }
 
         // Third and fourth bytes only need to be valid continuation bytes.
-        for i in 2..len {
+        for i in 2..len.get() as usize {
             match bytes.get(i) {
                 Some(0x80..=0xBF) => continue,
                 // Counts all malformed continuation bytes as invalid.
-                Some(_) => return UrlCodePoint::InvalidUtf8 { len: i as u8 },
-                None => return UrlCodePoint::Truncated,
+                Some(_) => {
+                    return CodePointUrl::InvalidUtf8 {
+                        // SAFETY: `i` is guaranteed to be >= 2 in the loop range
+                        invalid: unsafe { std::num::NonZeroU8::new(i as u8).unwrap_unchecked() },
+                    };
+                },
+                None => return CodePointUrl::Truncated,
             }
         }
 
@@ -1521,7 +1555,7 @@ pub mod utf8 {
         // =========================================================================================
 
         // It is simpler to check for non-URL code points.
-        let excluded = match len {
+        let excluded = match len.get() {
             // All code points before U+00A0
             2 => *b0 == 0xC2 && *b1 <= 0x9F,
 
@@ -1556,21 +1590,21 @@ pub mod utf8 {
         };
 
         if excluded {
-            UrlCodePoint::Invalid { len: len as u8 }
+            CodePointUrl::Invalid { len }
         } else {
-            UrlCodePoint::Valid { len: len as u8 }
+            CodePointUrl::Valid { len }
         }
     }
 
     /// Reference naive url code point implementation for use in tests.
     #[cfg(test)]
-    pub(super) fn url_code_point_reference(bytes: &[u8]) -> UrlCodePoint {
+    pub(super) fn url_code_point_reference(bytes: &[u8]) -> CodePointUrl {
         let head = &bytes[..bytes.len().min(4)];
 
         let c = match std::str::from_utf8(head) {
             Ok(s) => match s.chars().next() {
                 Some(c) => c,
-                None => return UrlCodePoint::Truncated,
+                None => return CodePointUrl::Truncated,
             },
             Err(e) => {
                 let valid_up_to = e.valid_up_to();
@@ -1582,8 +1616,12 @@ pub mod utf8 {
                         .unwrap()
                 } else {
                     match e.error_len() {
-                        Some(len) => return UrlCodePoint::InvalidUtf8 { len: len as u8 },
-                        None => return UrlCodePoint::Truncated,
+                        Some(len) => {
+                            return CodePointUrl::InvalidUtf8 {
+                                invalid: nonzero!(len as u8),
+                            };
+                        },
+                        None => return CodePointUrl::Truncated,
                     }
                 }
             },
@@ -1604,17 +1642,19 @@ pub mod utf8 {
         };
 
         if is_url_code_point {
-            UrlCodePoint::Valid { len }
+            CodePointUrl::Valid {
+                len: nonzero!(len as u8),
+            }
         } else {
-            UrlCodePoint::Invalid { len }
+            CodePointUrl::Invalid {
+                len: nonzero!(len as u8),
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use macro_util::prelude::*;
-
     use super::*;
 
     #[test]
@@ -1864,7 +1904,44 @@ mod test {
     }
 
     #[test]
-    fn url_parse_path_percent_encoded_valid() {
+    fn url_parse_query_simple() {
+        const URL: &str = "http://example.com/path/to/file?name=cat.txt";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.query, b"name=cat.txt");
+    }
+
+    #[test]
+    fn url_parse_fragment_simple() {
+        const URL: &str = "http://example.com/path/to/file?name=cat.txt#about";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.query, b"name=cat.txt");
+        assert_utf8_eq!(url.fragment, b"about");
+    }
+
+    #[test]
+    fn url_percent_encoded_valid() {
         const URL: &str = "http://example.com/pictures/of%20my%20cat/";
 
         let mut backing = [0; 128];
@@ -1881,7 +1958,7 @@ mod test {
     }
 
     #[test]
-    fn url_parse_path_percent_encoded_empty() {
+    fn url_percent_encoded_empty() {
         const URL: &str = "http://example.com/pictures/of% my% cat/";
 
         let mut backing = [0; 128];
@@ -1902,7 +1979,7 @@ mod test {
     }
 
     #[test]
-    fn url_parse_path_percent_encoded_invalid() {
+    fn url_percent_encoded_invalid() {
         const URL: &str = "http://example.com/pictures/of%Azmy%Zacat/";
 
         let mut backing = [0; 128];
@@ -1923,7 +2000,7 @@ mod test {
     }
 
     #[test]
-    fn url_parse_path_percent_encode_non_url_code_points() {
+    fn url_code_point_percent_encode_non_url_code_points() {
         const URL: &str = "http://example.com/pictures/of my cat/";
 
         let mut backing = [0; 128];
@@ -1944,7 +2021,7 @@ mod test {
     }
 
     #[test]
-    fn url_parse_path_utf8_invalid() {
+    fn url_code_point_percent_encode_utf8_invalid() {
         // http://example.com/pi\{0x80}c\{0xC0}tu\{0xF5}res
         const URL: &[u8] = &[
             104, 116, 116, 112, 58, 47, 47, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 47,
@@ -1965,7 +2042,7 @@ mod test {
     }
 
     #[test]
-    fn url_parse_path_utf8_truncated() {
+    fn url_code_point_percent_encode_utf8_truncated() {
         // http://example.com/pictures\{0xF4}
         const URL: &[u8] = &[
             104, 116, 116, 112, 58, 47, 47, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 47,
@@ -1983,171 +2060,6 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
         assert_utf8_eq!(url.path, b"/pictures%EF%BF%BD");
-    }
-
-    #[test]
-    fn url_parse_query_simple() {
-        const URL: &str = "http://example.com/path/to/file?name=cat.txt";
-
-        let mut backing = [0; 128];
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
-
-        assert_eq!(validation_errors.next(), None);
-
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/path/to/file");
-        assert_utf8_eq!(url.query, b"name=cat.txt");
-    }
-
-    #[test]
-    fn url_parse_query_percent_encode_valid() {
-        const URL: &str = "http://example.com/path/to/file?name=my%20cat.txt";
-
-        let mut backing = [0; 128];
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
-
-        assert_eq!(validation_errors.next(), None);
-
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/path/to/file");
-        assert_utf8_eq!(url.query, b"name=my%20cat.txt");
-    }
-
-    #[test]
-    fn url_parse_query_percent_encode_empty() {
-        const URL: &str = "http://example.com/path/to/file?name=my% cat.txt";
-
-        let mut backing = [0; 128];
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
-
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(validation_errors.next(), None);
-
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/path/to/file");
-        assert_utf8_eq!(url.query, b"name=my%%20cat.txt");
-    }
-
-    #[test]
-    fn url_parse_query_percent_encode_invalid() {
-        const URL: &str = "http://example.com/path/to/file?name=my%Azcat%Za.txt";
-
-        let mut backing = [0; 128];
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
-
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(validation_errors.next(), None);
-
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/path/to/file");
-        assert_utf8_eq!(url.query, b"name=my%Azcat%Za.txt");
-    }
-
-    #[test]
-    fn url_parse_query_percent_encode_non_url_code_points() {
-        const URL: &str = "http://example.com/path/to/file?name=my cat.txt";
-
-        let mut backing = [0; 128];
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
-
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(validation_errors.next(), None);
-
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/path/to/file");
-        assert_utf8_eq!(url.query, b"name=my%20cat.txt");
-    }
-
-    #[test]
-    fn url_parse_query_percent_utf8_invalid() {
-        const URL: &[u8] = &[
-            104, 116, 116, 112, 58, 47, 47, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 47,
-            112, 97, 116, 104, 47, 116, 111, 47, 102, 105, 108, 101, 63, 110, 97, 109, 0x80, 101,
-            0xC0, 61, 99, 0xF5, 97, 116, 46, 116, 120, 116,
-        ];
-
-        let mut backing = [0; 128];
-        let (url, mut validation_errors) = Url::new(URL, &mut backing).unwrap();
-
-        assert_eq!(validation_errors.next(), None);
-
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/path/to/file");
-        assert_utf8_eq!(url.query, b"nam%EF%BF%BDe%EF%BF%BD=c%EF%BF%BDat.txt");
-    }
-
-    #[test]
-    fn url_parse_query_percent_utf8_truncated() {
-        const URL: &[u8] = &[
-            104, 116, 116, 112, 58, 47, 47, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 47,
-            112, 97, 116, 104, 47, 116, 111, 47, 102, 105, 108, 101, 63, 110, 97, 109, 101, 61, 99,
-            97, 116, 46, 116, 120, 116, 0xF4,
-        ];
-
-        let mut backing = [0; 128];
-        let (url, mut validation_errors) = Url::new(URL, &mut backing).unwrap();
-
-        assert_eq!(validation_errors.next(), None);
-
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/path/to/file");
-        assert_utf8_eq!(url.query, b"name=cat.txt%EF%BF%BD");
-    }
-
-    #[test]
-    fn url_parse_fragment_simple() {
-        const URL: &str = "http://example.com/path/to/file?name=cat.txt#about";
-
-        let mut backing = [0; 128];
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
-
-        assert_eq!(validation_errors.next(), None);
-
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/path/to/file");
-        assert_utf8_eq!(url.query, b"name=cat.txt");
-        assert_utf8_eq!(url.fragment, b"about");
     }
 
     #[test]
@@ -2303,15 +2215,12 @@ mod test {
     #[cfg_attr(kani, kani::proof)]
     #[cfg_attr(kani, kani::unwind(5))]
     fn utf8_url_code_point_harness() {
-        bolero::check!()
-            .with_max_len(4)
-            .exhaustive()
-            .for_each(|bytes| {
-                let actual = utf8::url_code_point(bytes);
-                let expected = utf8::url_code_point_reference(bytes);
+        bolero::check!().with_max_len(4).for_each(|bytes| {
+            let actual = utf8::url_code_point(bytes);
+            let expected = utf8::url_code_point_reference(bytes);
 
-                assert_eq!(actual, expected);
-            });
+            assert_eq!(actual, expected);
+        });
     }
 
     // #[test]
