@@ -1,3 +1,5 @@
+//! [`Url`] parsing utilities.
+
 mod buffer;
 mod error;
 
@@ -5,15 +7,47 @@ use buffer::UrlBuffer;
 pub use error::*;
 use macro_util::prelude::*;
 
-use super::*;
+use super::Url;
+use super::percent;
 
 impl<'data> Url<'data> {
-    /// Based off https://url.spec.whatwg.org/#url-parsing
+    /// Tries to parse a stream of network bytes into a URL.
+    ///
+    /// # Panics
+    ///
+    /// If the backing array passed to this method is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns a hard [`Error`] in case of failed parsing. Other errors which attest to a malformed
+    /// input but are recoverable are reported as [`ValidationError`]s.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use http_url::Url;
+    /// # use macro_util::*;
+    /// let mut backing = [0; 128];
+    /// let (url, validation_errors) = Url::new(
+    ///     b"http://example.com:123/path/to/file?query#fragment",
+    ///     &mut backing,
+    /// )
+    /// .unwrap();
+    ///
+    /// assert_eq!(validation_errors.len(), 0);
+    ///
+    /// assert_utf8_eq!(url.scheme, b"http");
+    /// assert_utf8_eq!(url.host, b"example.com");
+    /// assert_eq!(url.port, Some(123));
+    /// assert_utf8_eq!(url.path, b"/path/to/file");
+    /// assert_utf8_eq!(url.query, b"query");
+    /// assert_utf8_eq!(url.fragment, b"fragment");
+    /// ```
     pub fn new(
         mut bytes: &[u8],
         backing: &'data mut [u8],
     ) -> Result<(Self, ValidationErrorIter), Error> {
-        assert!(!backing.is_empty());
+        assert_ne!(backing, []);
 
         let mut error_bitset = ValidationErrorBitSet::new();
         let buffer = UrlBuffer::new(backing);
@@ -100,6 +134,7 @@ macro_rules! ascii_tab_or_newline {
 }
 
 mod c0_control_or_space {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     /// # C0 control or space sanitization
@@ -119,47 +154,48 @@ mod c0_control_or_space {
         error_bitset: &'parsing mut ValidationErrorBitSet,
     ) {
         // Leading C0 control or space
-        if let Some(c) = cursor.first()
-            && matchers::c0_control_or_space(*c)
+        if let Some(c0_first) = cursor.first()
+            && matchers::c0_control_or_space(*c0_first)
         {
             error_bitset.add(ValidationError::InvalidURLUnit);
             *cursor = &cursor[1..];
 
-            while let Some(c) = cursor.first()
-                && matchers::c0_control_or_space(*c)
+            while let Some(c0_continuation) = cursor.first()
+                && matchers::c0_control_or_space(*c0_continuation)
             {
                 *cursor = &cursor[1..];
             }
         }
 
         // Trailing C0 control or space
-        if let Some(c) = cursor.last()
-            && matchers::c0_control_or_space(*c)
+        if let Some(c0_last) = cursor.last()
+            && matchers::c0_control_or_space(*c0_last)
         {
             error_bitset.add(ValidationError::InvalidURLUnit);
 
             let len = cursor.len();
             *cursor = &cursor[..len - 1];
 
-            while let Some(c) = cursor.last()
-                && matchers::c0_control_or_space(*c)
+            while let Some(c0_continuation) = cursor.last()
+                && matchers::c0_control_or_space(*c0_continuation)
             {
-                let len = cursor.len();
-                *cursor = &cursor[..len - 1];
+                let len_continuation = cursor.len();
+                *cursor = &cursor[..len_continuation - 1];
             }
         }
     }
 }
 
 mod scheme {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     /// # [Scheme state]
     ///
-    /// Tries to parse a [`Url]'s scheme, if there is any, otherwise falls back to the "no scheme"
+    /// Tries to parse a [`Url`]'s scheme, if there is any, otherwise falls back to the "no scheme"
     /// state. This is the entry point for parsing further segments.
     ///
-    /// [Scheme state]: https://url.spec.whatwg.org/#scheme-start-state
+    /// [Scheme state]: https://url.spec.whatwg.org#scheme-start-state
     #[inline]
     #[macro_derive::context]
     pub(super) fn parse<'parsing, 'input, 'output>(
@@ -167,10 +203,10 @@ mod scheme {
         mut buffer: UrlBuffer<'output>,
         error_bitset: &'parsing mut ValidationErrorBitSet,
     ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
-        if let Some(c) = cursor.first()
-            && matchers::ascii_alpha(*c)
+        if let Some(first) = cursor.first()
+            && matchers::ascii_alpha(*first)
         {
-            buffer.push(c.to_ascii_lowercase())?;
+            buffer.push(first.to_ascii_lowercase())?;
             *cursor = &cursor[1..];
 
             while !cursor.is_empty() {
@@ -206,7 +242,7 @@ mod scheme {
 
                     // Invalid character, scheme error.
                     _ => break,
-                };
+                }
             }
 
             // This is safe to index as we have already pushed at least one character to `buffer`.
@@ -270,11 +306,12 @@ mod scheme {
     }
 
     pub(super) mod special {
+        #[allow(clippy::wildcard_imports)]
         use super::*;
 
         /// # [Special relative or authority state]
         ///
-        /// Parses out each [`Url] segment after a special scheme.
+        /// Parses out each [`Url`] segment after a special scheme.
         ///
         /// ## Special scheme
         ///
@@ -441,11 +478,12 @@ mod scheme {
 }
 
 mod userinfo {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     /// # Authority state
     ///
-    /// Parses the `username` and `password` sections of a [`Url], if there are any. This really
+    /// Parses the `username` and `password` sections of a [`Url`], if there are any. This really
     /// only exists for legacy compatibility reasons. You should **NOT** use this to embed plain
     /// text credentials into a URL for authentication!
     ///
@@ -485,6 +523,7 @@ mod userinfo {
         //
         // =========================================================================
 
+        #[allow(suspicious_double_ref_op)]
         let checkpoint = cursor.clone();
 
         let mut at_sign = None;
@@ -548,9 +587,9 @@ mod userinfo {
                 // https://url.spec.whatwg.org/#authority-state
                 if char_count_authority - n - 1 == 0 {
                     return Err(Error::HostMissing);
-                } else {
-                    n
                 }
+
+                n
             },
             None => 0,
         };
@@ -584,11 +623,11 @@ mod userinfo {
                         },
                     }
                 },
-                c => {
+                byte => {
                     #[cfg(test)]
-                    let _c = char::from_u32(c as u32).unwrap_or_default();
+                    let _c = char::from_u32(byte as u32).unwrap_or_default();
 
-                    userinfo_stop = buffer.push_encode_byte(c, percent::USERINFO)?;
+                    userinfo_stop = buffer.push_encode_byte(byte, percent::USERINFO)?;
                 },
             }
         }
@@ -612,6 +651,7 @@ mod userinfo {
 }
 
 mod host_and_port {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     /// Parses out a [`Url`]'s [`host`] and [`port`] components. This is done to optimize branching
@@ -640,7 +680,9 @@ mod host_and_port {
         //
         // =========================================================================
 
+        #[allow(suspicious_double_ref_op)]
         let checkpoint = cursor.clone();
+
         let mut inside_brackets = false;
         let mut char_count_hostname = 0;
 
@@ -678,6 +720,7 @@ mod host_and_port {
 
                     let port = port::parse(port::Context {
                         cursor,
+                        buffer,
                         error_bitset,
                         default_scheme_port,
                     })?;
@@ -728,6 +771,7 @@ mod host_and_port {
 }
 
 mod host {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     /// # [Hostname state]
@@ -759,50 +803,53 @@ mod host {
         //
         // =========================================================================
 
+        while let Some(c) = cursor.first()
+            && matches!(c, ascii_tab_or_newline!())
+        {
+            *cursor = &cursor[1..];
+        }
+
         if cursor.is_empty() {
             return Err(Error::HostMissing);
         }
 
-        match cursor[0] {
-            b'[' => {
-                todo!("IPV6 parsing");
-            },
-            _ => {
-                // TODO: refactor this into its own function once we support IPV6 parsing and IPV4
-                // parsing as well
-
-                // userinfo end, skipping U+0040 (@)
-                let host_start = if !password.0.is_empty() {
-                    password.0.end + 1
-                } else if !username.0.is_empty() {
-                    username.0.end + 1
-                } else {
-                    username.0.end
-                };
-
-                let host_stop = host_start + char_count_hostname;
-                let host = host_start..host_stop;
-
-                if host.is_empty() {
-                    return Err(Error::HostMissing);
-                }
-
-                // TODO: IDNA domain parser
-                let domain = percent::decode(cursor.iter());
-                for c in domain.take(char_count_hostname) {
-                    buffer.push(c)?;
-                }
-                *cursor = &cursor[char_count_hostname..];
-
-                // TODO: IPV4 parsing
-
-                Ok(segment::Host(host))
-            },
+        if cursor[0] == b'[' {
+            todo!("IPV6 parsing");
         }
+        // TODO: refactor this into its own function once we support IPV6 parsing and IPV4
+        // parsing as well
+
+        // userinfo end, skipping U+0040 (@)
+        let host_start = if !password.0.is_empty() {
+            password.0.end + 1
+        } else if !username.0.is_empty() {
+            username.0.end + 1
+        } else {
+            username.0.end
+        };
+
+        let host_stop = host_start + char_count_hostname;
+        let host = host_start..host_stop;
+
+        if host.is_empty() {
+            return Err(Error::HostMissing);
+        }
+
+        // TODO: IDNA domain parser
+        let domain = percent::decode(cursor.iter());
+        for c in domain.take(char_count_hostname) {
+            buffer.push(c)?;
+        }
+        *cursor = &cursor[char_count_hostname..];
+
+        // TODO: IPV4 parsing
+
+        Ok(segment::Host(host))
     }
 }
 
 mod port {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     /// # [Port state]
@@ -839,11 +886,14 @@ mod port {
     /// [ASCII digit]: https://infra.spec.whatwg.org/#ascii-digit
     #[inline]
     #[macro_derive::context]
-    pub(super) fn parse<'parsing, 'input>(
+    pub(super) fn parse<'parsing, 'input, 'output>(
         cursor: &'parsing mut &'input [u8],
+        buffer: &'parsing mut UrlBuffer<'output>,
         error_bitset: &'parsing mut ValidationErrorBitSet,
         default_scheme_port: u16,
     ) -> Result<segment::Port, Error> {
+        buffer.push(b':')?;
+
         let mut port = 0u32;
         let mut char_count_port = 0;
 
@@ -861,13 +911,14 @@ mod port {
                 },
 
                 b'0'..=b'9' => {
-                    port = port * 10 + c as u32 - b'0' as u32;
+                    port = port * 10 + u32::from(c) - u32::from(b'0');
 
-                    if port > u16::MAX as u32 {
+                    if port > u32::from(u16::MAX) {
                         return Err(Error::PortOutOfRange);
                     }
 
                     char_count_port += 1;
+                    buffer.push(c)?;
                 },
 
                 b'/' | b'\\' | b'?' | b'#' => {
@@ -889,6 +940,7 @@ mod port {
 }
 
 mod path {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     #[inline]
@@ -898,8 +950,19 @@ mod path {
         buffer: &'parsing mut UrlBuffer<'output>,
         error_bitset: &'parsing mut ValidationErrorBitSet,
     ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
-        let path_start = buffer.push(b'/')?;
+        let path_start = buffer.push(b'/')? - 1;
         let mut path_stop = path_start;
+
+        // Skip first leading U+002F (/) or U+005C (\) so we don't end up appending `//` or `\/` to
+        // buffer if the path is non-empty.
+        if let Some(c) = cursor.first() {
+            if *c == b'/' {
+                *cursor = &cursor[1..];
+            } else if *c == b'\\' {
+                error_bitset.add(ValidationError::InvalidReverseSolidus);
+                *cursor = &cursor[1..];
+            }
+        }
 
         while !cursor.is_empty() {
             let c = cursor[0];
@@ -913,13 +976,14 @@ mod path {
                     *cursor = &cursor[1..];
                 },
 
-                b'/' | b'\\' => {
-                    if c == b'\\' {
-                        error_bitset.add(ValidationError::InvalidReverseSolidus);
-                    }
-
+                b'/' => {
                     *cursor = &cursor[1..];
+                    path_stop = buffer.push(c)?;
+                },
 
+                b'\\' => {
+                    error_bitset.add(ValidationError::InvalidReverseSolidus);
+                    *cursor = &cursor[1..];
                     path_stop = buffer.push(c)?;
                 },
 
@@ -988,6 +1052,7 @@ mod path {
 }
 
 mod query {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     #[inline]
@@ -1057,6 +1122,7 @@ mod query {
 }
 
 mod fragment {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     #[inline]
@@ -1100,9 +1166,11 @@ mod fragment {
 }
 
 mod common {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     pub(super) mod percent {
+        #[allow(clippy::wildcard_imports)]
         use super::*;
 
         #[inline]
@@ -1137,6 +1205,7 @@ mod common {
     }
 
     pub(super) mod url_cp {
+        #[allow(clippy::wildcard_imports)]
         use super::*;
 
         #[inline]
@@ -1203,6 +1272,7 @@ mod common {
 
 /// UTF-8 parsing utilities.
 pub mod utf8 {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     /// U+FFFD (�) utf-8 replacement code point.
@@ -1316,6 +1386,7 @@ pub mod utf8 {
     /// ```
     ///
     /// [URL code point]: https://url.spec.whatwg.org/#url-code-points
+    #[must_use]
     pub fn url_code_point(bytes: &[u8]) -> CodePointUrl {
         let Some(b0) = bytes.first() else {
             return CodePointUrl::Truncated;
@@ -1328,15 +1399,15 @@ pub mod utf8 {
         // =========================================================================================
 
         if b0.is_ascii() {
-            if (ASCII_URL_CODE_POINT >> *b0 & 1) > 0 {
-                return CodePointUrl::Valid {
+            return if (ASCII_URL_CODE_POINT >> *b0 & 1) > 0 {
+                CodePointUrl::Valid {
                     len: std::num::NonZeroU8::MIN,
-                };
+                }
             } else {
-                return CodePointUrl::Invalid {
+                CodePointUrl::Invalid {
                     len: std::num::NonZeroU8::MIN,
-                };
-            }
+                }
+            };
         }
 
         // == Step 2 ===============================================================================
@@ -1356,7 +1427,7 @@ pub mod utf8 {
             0xE0 => (nonzero!(3u8), 0xA0, 0xBF),
 
             // The rest of 3-byte utf8 values are valid, except for surrogates.
-            0xE1..=0xEC => (nonzero!(3u8), 0x80, 0xBF),
+            0xE1..=0xEC | 0xEE..=0xEF => (nonzero!(3u8), 0x80, 0xBF),
 
             // Surrogate code points are reserved for use in utf16 and cannot be used in utf8. A
             // leading surrogate is a code point that is in the range U+D800 to U+DBFF, inclusive.
@@ -1366,9 +1437,6 @@ pub mod utf8 {
             // inclusive. So the range of valid second bytes in a 3-byte code point are 0x80 to 0x9F
             // inclusive. Any other values are invalid utf8.
             0xED => (nonzero!(3u8), 0x80, 0x9F),
-
-            // The rest of the 3-byte range.
-            0xEE..=0xEF => (nonzero!(3u8), 0x80, 0xBF),
 
             // utf8 4-byte lead is 11110xxx, giving us 0xF0 (11110000) as the smallest possible
             // 4-byte lead. Values under U+10000 should not be encoded in 4 bytes, as that would be
@@ -1406,7 +1474,7 @@ pub mod utf8 {
         // Third and fourth bytes only need to be valid continuation bytes.
         for i in 2..len.get() as usize {
             match bytes.get(i) {
-                Some(0x80..=0xBF) => continue,
+                Some(0x80..=0xBF) => (),
                 // Counts all malformed continuation bytes as invalid.
                 Some(_) => {
                     return CodePointUrl::InvalidUtf8 {
@@ -1525,6 +1593,7 @@ pub mod utf8 {
 
 #[cfg(test)]
 mod test {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     #[test]
@@ -1750,6 +1819,25 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
         assert_utf8_eq!(url.path, b"/cat/pictures");
+    }
+
+    #[test]
+    fn foo() {
+        let mut backing = [0; 128];
+        let (url, validation_errors) = Url::new(
+            b"http://example.com:123/path/to/file?query#fragment",
+            &mut backing,
+        )
+        .unwrap();
+
+        assert_eq!(validation_errors.len(), 0);
+
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, Some(123));
+        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.query, b"query");
+        assert_utf8_eq!(url.fragment, b"fragment");
     }
 
     #[test]

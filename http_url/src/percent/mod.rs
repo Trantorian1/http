@@ -24,6 +24,7 @@
 //! segment is referred to as a percent-[`EncodeSet`].
 //!
 //! [`Url`]: crate::Url
+//! [standard]: https://url.spec.whatwg.org/
 
 mod decode;
 mod encode;
