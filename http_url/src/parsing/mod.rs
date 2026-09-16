@@ -212,14 +212,12 @@ mod scheme {
             while !cursor.is_empty() {
                 let c = cursor[0];
 
-                #[cfg(test)]
-                let _c = char::from_u32(c as u32).unwrap_or_default();
-
-                *cursor = &cursor[1..];
-
                 match c {
                     ascii_tab_or_newline!() => {
                         error_bitset.add(ValidationError::InvalidURLUnit);
+
+                        let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+                        *cursor = &cursor[skip..];
                     },
 
                     // Only the first character in a scheme must be strictly `ascii_alpha`. Scheme
@@ -227,21 +225,27 @@ mod scheme {
                     // U+002E (.).
                     b'a'..=b'z' | b'0'..=b'9' | b'+' | b'-' | b'.' => {
                         buffer.push(c)?;
+                        *cursor = &cursor[1..];
                     },
 
                     // Input is normalized, only lowercase characters are pushed to the final buffer
                     b'A'..=b'Z' => {
                         buffer.push(c.to_ascii_lowercase())?;
+                        *cursor = &cursor[1..];
                     },
 
                     // End of scheme
                     b':' => {
                         buffer.push(b':')?;
+                        *cursor = &cursor[1..];
                         break;
                     },
 
                     // Invalid character, scheme error.
-                    _ => break,
+                    _ => {
+                        *cursor = &cursor[1..];
+                        break;
+                    },
                 }
             }
 
@@ -358,16 +362,23 @@ mod scheme {
             //
             // =========================================================================
 
+            let mut sequential_solidus = 0;
             while !cursor.is_empty() {
                 match *cursor {
                     [ascii_tab_or_newline!(), ..] => {
                         error_bitset.add(ValidationError::InvalidURLUnit);
-                        *cursor = &cursor[1..];
+
+                        let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+                        *cursor = &cursor[skip..];
                     },
 
-                    [b'/', b'/', ..] => {
-                        *cursor = &cursor[2..];
-                        break;
+                    [b'/', ..] => {
+                        *cursor = &cursor[1..];
+                        sequential_solidus += 1;
+
+                        if sequential_solidus >= 2 {
+                            break;
+                        }
                     },
 
                     _ => {
@@ -392,13 +403,12 @@ mod scheme {
             while !cursor.is_empty() {
                 let c = cursor[0];
 
-                #[cfg(test)]
-                let _c = char::from_u32(c as u32).unwrap_or_default();
-
                 match c {
                     ascii_tab_or_newline!() => {
                         error_bitset.add(ValidationError::InvalidURLUnit);
-                        *cursor = &cursor[1..];
+
+                        let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+                        *cursor = &cursor[skip..];
                     },
 
                     b'/' | b'\\' => {
@@ -523,6 +533,15 @@ mod userinfo {
         //
         // =========================================================================
 
+        // ASCII tab or newline characters are skipped first so as not to cause the checkpoint to
+        // parse them again.
+        if let Some(c) = cursor.first()
+            && matches!(c, ascii_tab_or_newline!())
+        {
+            let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+            *cursor = &cursor[skip..];
+        }
+
         #[allow(suspicious_double_ref_op)]
         let checkpoint = cursor.clone();
 
@@ -544,12 +563,13 @@ mod userinfo {
         while !cursor.is_empty() {
             let c = cursor[0];
 
-            #[cfg(test)]
-            let _c = char::from_u32(c as u32).unwrap_or_default();
-
             match c {
                 ascii_tab_or_newline!() => {
                     error_bitset.add(ValidationError::InvalidURLUnit);
+
+                    let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+                    *cursor = &cursor[skip..];
+                    char_count_authority += skip;
                 },
 
                 // EOF code point is implied in the below check
@@ -560,14 +580,14 @@ mod userinfo {
                 b'@' => {
                     error_bitset.add(ValidationError::InvalidCredentials);
                     at_sign = Some(char_count_authority);
+                    *cursor = &cursor[1..];
                     char_count_authority += 1;
                 },
                 _ => {
+                    *cursor = &cursor[1..];
                     char_count_authority += 1;
                 },
             }
-
-            *cursor = &cursor[1..];
         }
 
         *cursor = checkpoint;
@@ -599,7 +619,7 @@ mod userinfo {
         let mut userinfo_stop = userinfo_start;
         let mut password_token = None;
 
-        // Here is where we actually parse the userinfo
+        // Here is where we actually parse the userinfo.
         while char_count_userinfo > 0 {
             let c = cursor[0];
 
@@ -607,6 +627,10 @@ mod userinfo {
             char_count_userinfo -= 1;
 
             match c {
+                // ASCII tab or newline code points have to be skipped again since we reset the
+                // cursor position to the previous checkpoint.
+                ascii_tab_or_newline!() => {},
+
                 b':' => {
                     match password_token {
                         Some(_) => {
@@ -614,7 +638,7 @@ mod userinfo {
                             buffer.push_str(b"%3A")?;
                         },
                         None => {
-                            // We only push U+003A (:) if the password is non-empty
+                            // We only push U+003A (:) if the password is non-empty.
                             //
                             // https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L907-L914
                             if char_count_userinfo > 0 {
@@ -623,26 +647,32 @@ mod userinfo {
                         },
                     }
                 },
-                byte => {
-                    #[cfg(test)]
-                    let _c = char::from_u32(byte as u32).unwrap_or_default();
 
-                    userinfo_stop = buffer.push_encode_byte(byte, percent::USERINFO)?;
+                _ => {
+                    userinfo_stop = buffer.push_encode_byte(c, percent::USERINFO)?;
                 },
             }
         }
 
         let (username, password) = match password_token {
-            Some(n) => {
-                // We need to skip over the terminating userinfo U+0040 (@) delimiter again as we
-                // have reset the cursor.
-                *cursor = &cursor[1..];
-                (userinfo_start..n, n + 1..userinfo_stop)
-            },
+            Some(n) => (userinfo_start..n, n + 1..userinfo_stop),
             None => (userinfo_start..userinfo_stop, userinfo_stop..userinfo_stop),
         };
 
+        // username and password can still be empty in case userinfo is `:@` (empty username and
+        // empty password separated by the password token).
         if !username.is_empty() || !password.is_empty() {
+            // SAFETY: this is either the terminating userinfo U+0040 (@) delimiter or an ascii tab
+            // or newline so cursor is guaranteed to be non-empty.
+            if matches!(cursor[0], ascii_tab_or_newline!()) {
+                let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+                *cursor = &cursor[skip..];
+            }
+
+            // We need to skip over the terminating userinfo U+0040 (@) delimiter again as we
+            // have reset the cursor.
+            *cursor = &cursor[1..];
+
             buffer.push(b'@')?;
         }
 
@@ -680,6 +710,15 @@ mod host_and_port {
         //
         // =========================================================================
 
+        // ASCII tab or newline characters are skipped first so as not to cause the checkpoint to
+        // parse them again.
+        if let Some(c) = cursor.first()
+            && matches!(c, ascii_tab_or_newline!())
+        {
+            let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+            *cursor = &cursor[skip..];
+        }
+
         #[allow(suspicious_double_ref_op)]
         let checkpoint = cursor.clone();
 
@@ -689,12 +728,13 @@ mod host_and_port {
         while !cursor.is_empty() {
             let c = cursor[0];
 
-            #[cfg(test)]
-            let _c = char::from_u32(c as u32).unwrap_or_default();
-
             match c {
                 ascii_tab_or_newline!() => {
                     error_bitset.add(ValidationError::InvalidURLUnit);
+
+                    let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+                    *cursor = &cursor[skip..];
+                    char_count_hostname += skip;
                 },
 
                 b':' if !inside_brackets => {
@@ -706,7 +746,6 @@ mod host_and_port {
                     let host = host::parse(host::Context {
                         cursor,
                         buffer,
-
                         username,
                         password,
                         char_count_hostname,
@@ -729,27 +768,26 @@ mod host_and_port {
                 },
 
                 b'/' | b'\\' | b'?' | b'#' => {
-                    *cursor = checkpoint;
-
                     break;
                 },
 
                 b'[' => {
                     inside_brackets = true;
                     char_count_hostname += 1;
+                    *cursor = &cursor[1..];
                 },
 
                 b']' => {
                     inside_brackets = false;
                     char_count_hostname += 1;
+                    *cursor = &cursor[1..];
                 },
 
                 _ => {
                     char_count_hostname += 1;
+                    *cursor = &cursor[1..];
                 },
             }
-
-            *cursor = &cursor[1..];
         }
 
         *cursor = checkpoint;
@@ -803,12 +841,6 @@ mod host {
         //
         // =========================================================================
 
-        while let Some(c) = cursor.first()
-            && matches!(c, ascii_tab_or_newline!())
-        {
-            *cursor = &cursor[1..];
-        }
-
         if cursor.is_empty() {
             return Err(Error::HostMissing);
         }
@@ -828,21 +860,27 @@ mod host {
             username.0.end
         };
 
-        let host_stop = host_start + char_count_hostname;
-        let host = host_start..host_stop;
-
-        if host.is_empty() {
-            return Err(Error::HostMissing);
-        }
-
         // TODO: IDNA domain parser
+
+        // char_count_hostname includes ASCII tab and newlines, so we can't use that outright to
+        // determine the size of the host.
+        let mut host_stop = host_start;
         let domain = percent::decode(cursor.iter());
+
         for c in domain.take(char_count_hostname) {
-            buffer.push(c)?;
+            if !matches!(c, ascii_tab_or_newline!()) {
+                buffer.push(c)?;
+                host_stop += 1;
+            }
         }
         *cursor = &cursor[char_count_hostname..];
 
         // TODO: IPV4 parsing
+
+        let host = host_start..host_stop;
+        if host.is_empty() {
+            return Err(Error::HostMissing);
+        }
 
         Ok(segment::Host(host))
     }
@@ -892,22 +930,31 @@ mod port {
         error_bitset: &'parsing mut ValidationErrorBitSet,
         default_scheme_port: u16,
     ) -> Result<segment::Port, Error> {
-        buffer.push(b':')?;
+        // ASCII tab or newline characters are skipped first so as not to cause the checkpoint to
+        // parse them again.
+        if let Some(c) = cursor.first()
+            && matches!(c, ascii_tab_or_newline!())
+        {
+            let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+            *cursor = &cursor[skip..];
+        }
 
         let mut port = 0u32;
         let mut char_count_port = 0;
 
+        #[allow(suspicious_double_ref_op)]
+        let checkpoint = cursor.clone();
+
         while !cursor.is_empty() {
             let c = cursor[0];
-
-            #[cfg(test)]
-            let _c = char::from_u32(c as u32).unwrap_or_default();
-
-            *cursor = &cursor[1..];
 
             match c {
                 ascii_tab_or_newline!() => {
                     error_bitset.add(ValidationError::InvalidURLUnit);
+
+                    let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+                    *cursor = &cursor[skip..];
+                    char_count_port += skip;
                 },
 
                 b'0'..=b'9' => {
@@ -917,11 +964,12 @@ mod port {
                         return Err(Error::PortOutOfRange);
                     }
 
+                    *cursor = &cursor[1..];
                     char_count_port += 1;
-                    buffer.push(c)?;
                 },
 
                 b'/' | b'\\' | b'?' | b'#' => {
+                    *cursor = &cursor[1..];
                     break;
                 },
 
@@ -934,6 +982,14 @@ mod port {
         if port as u16 == default_scheme_port || char_count_port == 0 {
             Ok(segment::Port(None))
         } else {
+            buffer.push(b':')?;
+
+            for c in &checkpoint[..char_count_port] {
+                if !matches!(c, ascii_tab_or_newline!()) {
+                    buffer.push(*c)?;
+                }
+            }
+
             Ok(segment::Port(Some(port as u16)))
         }
     }
@@ -950,11 +1006,12 @@ mod path {
         buffer: &'parsing mut UrlBuffer<'output>,
         error_bitset: &'parsing mut ValidationErrorBitSet,
     ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
+        // A path is never empty, it always contains at least the leading U+002F (/) code point
         let path_start = buffer.push(b'/')? - 1;
-        let mut path_stop = path_start;
+        let mut path_stop = path_start + 1;
 
-        // Skip first leading U+002F (/) or U+005C (\) so we don't end up appending `//` or `\/` to
-        // buffer if the path is non-empty.
+        // Skip first leading U+002F (/) or U+005C (\) code points so we don't end up appending `//`
+        // or `\/` to the buffer if the path is non-empty.
         if let Some(c) = cursor.first() {
             if *c == b'/' {
                 *cursor = &cursor[1..];
@@ -967,13 +1024,12 @@ mod path {
         while !cursor.is_empty() {
             let c = cursor[0];
 
-            #[cfg(test)]
-            let _c = char::from_u32(c as u32).unwrap_or_default();
-
             match c {
                 ascii_tab_or_newline!() => {
                     error_bitset.add(ValidationError::InvalidURLUnit);
-                    *cursor = &cursor[1..];
+
+                    let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+                    *cursor = &cursor[skip..];
                 },
 
                 b'/' => {
@@ -1068,13 +1124,12 @@ mod query {
         while !cursor.is_empty() {
             let c = cursor[0];
 
-            #[cfg(test)]
-            let _c = char::from_u32(c as u32).unwrap_or_default();
-
             match c {
                 ascii_tab_or_newline!() => {
                     error_bitset.add(ValidationError::InvalidURLUnit);
-                    *cursor = &cursor[1..];
+
+                    let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+                    *cursor = &cursor[skip..];
                 },
 
                 b'#' => {
@@ -1138,10 +1193,14 @@ mod fragment {
         while !cursor.is_empty() {
             let c = cursor[0];
 
-            #[cfg(test)]
-            let _c = char::from_u32(c as u32).unwrap_or_default();
-
             match c {
+                ascii_tab_or_newline!() => {
+                    error_bitset.add(ValidationError::InvalidURLUnit);
+
+                    let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+                    *cursor = &cursor[skip..];
+                },
+
                 b'%' => {
                     fragment_stop = common::percent::delimiter(common::percent::Context {
                         cursor,
@@ -1591,6 +1650,16 @@ pub mod utf8 {
     }
 }
 
+mod search {
+    // PERF: This already compiles down to a pretty optimal implementation, no need to further optimize.
+    pub(super) fn skip_ascii_tab_or_newline(haystack: &[u8]) -> usize {
+        haystack
+            .iter()
+            .position(|c| !matches!(c, b'\t' | b'\r' | b'\n'))
+            .unwrap_or(haystack.len())
+    }
+}
+
 #[cfg(test)]
 mod test {
     #[allow(clippy::wildcard_imports)]
@@ -1598,7 +1667,7 @@ mod test {
 
     #[test]
     fn url_parse_userinfo_full() {
-        const URL: &str = "http://user:password@example.com:123";
+        const URL: &str = "http://user:password@example.com:123/path/to/file?query#fragment";
 
         let mut backing = [0; 128];
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
@@ -1614,6 +1683,14 @@ mod test {
         assert_utf8_eq!(url.password, b"password");
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, Some(123));
+        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.query, b"query");
+        assert_utf8_eq!(url.fragment, b"fragment");
+
+        assert_eq!(
+            format!("{url}"),
+            "http://user:password@example.com:123/path/to/file?query#fragment"
+        );
     }
 
     #[test]
@@ -1632,6 +1709,8 @@ mod test {
         assert_utf8_eq!(url.scheme, b"http");
         assert_utf8_eq!(url.username, b"user");
         assert_utf8_eq!(url.password, b"");
+
+        assert_eq!(format!("{url}"), "http://user@example.com/");
     }
 
     #[test]
@@ -1650,6 +1729,8 @@ mod test {
         assert_utf8_eq!(url.scheme, b"http");
         assert_utf8_eq!(url.username, b"");
         assert_utf8_eq!(url.password, b"password");
+
+        assert_eq!(format!("{url}"), "http://:password@example.com/");
     }
 
     #[test]
@@ -1668,6 +1749,8 @@ mod test {
         assert_utf8_eq!(url.scheme, b"http");
         assert_utf8_eq!(url.username, b"user");
         assert_utf8_eq!(url.password, b"password%40");
+
+        assert_eq!(format!("{url}"), "http://user:password%40@example.com/");
     }
 
     #[test]
@@ -1683,10 +1766,12 @@ mod test {
         assert_utf8_eq!(url.username, b"");
         assert_utf8_eq!(url.password, b"");
         assert_utf8_eq!(url.host, b"example.com");
+
+        assert_eq!(format!("{url}"), "http://example.com/");
     }
 
     #[test]
-    fn url_parse_port_valid() {
+    fn url_parse_port_simple() {
         const URL: &str = "http://example.com:123";
 
         let mut backing = [0; 128];
@@ -1698,6 +1783,8 @@ mod test {
         assert_utf8_eq!(url.username, b"");
         assert_utf8_eq!(url.password, b"");
         assert_utf8_eq!(url.host, b"example.com");
+
+        assert_eq!(format!("{url}"), "http://example.com:123/");
 
         assert_eq!(url.port, Some(123));
     }
@@ -1717,6 +1804,8 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, None);
+
+        assert_eq!(format!("{url}"), "ftp://example.com/");
     }
 
     #[test]
@@ -1734,6 +1823,8 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, None);
+
+        assert_eq!(format!("{url}"), "http://example.com/");
     }
 
     #[test]
@@ -1751,6 +1842,8 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, None);
+
+        assert_eq!(format!("{url}"), "ws://example.com/");
     }
 
     #[test]
@@ -1768,6 +1861,8 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, None);
+
+        assert_eq!(format!("{url}"), "https://example.com/");
     }
 
     #[test]
@@ -1785,6 +1880,8 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, None);
+
+        assert_eq!(format!("{url}"), "wss://example.com/");
     }
 
     #[test]
@@ -1802,6 +1899,8 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(url.port, None);
+
+        assert_eq!(format!("{url}"), "http://example.com/");
     }
 
     #[test]
@@ -1819,25 +1918,8 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
         assert_utf8_eq!(url.path, b"/cat/pictures");
-    }
 
-    #[test]
-    fn foo() {
-        let mut backing = [0; 128];
-        let (url, validation_errors) = Url::new(
-            b"http://example.com:123/path/to/file?query#fragment",
-            &mut backing,
-        )
-        .unwrap();
-
-        assert_eq!(validation_errors.len(), 0);
-
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, Some(123));
-        assert_utf8_eq!(url.path, b"/path/to/file");
-        assert_utf8_eq!(url.query, b"query");
-        assert_utf8_eq!(url.fragment, b"fragment");
+        assert_eq!(format!("{url}"), "http://example.com/cat/pictures");
     }
 
     #[test]
@@ -1859,11 +1941,13 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
         assert_utf8_eq!(url.path, b"//\\////\\\\\\///////");
+
+        assert_eq!(format!("{url}"), "http://example.com//\\////\\\\\\///////");
     }
 
     #[test]
     fn url_parse_query_simple() {
-        const URL: &str = "http://example.com/path/to/file?name=cat.txt";
+        const URL: &str = "http://example.com?name=cat.txt";
 
         let mut backing = [0; 128];
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
@@ -1875,13 +1959,15 @@ mod test {
         assert_utf8_eq!(url.password, b"");
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/path/to/file");
+        assert_utf8_eq!(url.path, b"/");
         assert_utf8_eq!(url.query, b"name=cat.txt");
+
+        assert_eq!(format!("{url}"), "http://example.com/?name=cat.txt");
     }
 
     #[test]
     fn url_parse_fragment_simple() {
-        const URL: &str = "http://example.com/path/to/file?name=cat.txt#about";
+        const URL: &str = "http://example.com#about";
 
         let mut backing = [0; 128];
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
@@ -1893,9 +1979,11 @@ mod test {
         assert_utf8_eq!(url.password, b"");
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/path/to/file");
-        assert_utf8_eq!(url.query, b"name=cat.txt");
+        assert_utf8_eq!(url.path, b"/");
+        assert_utf8_eq!(url.query, b"");
         assert_utf8_eq!(url.fragment, b"about");
+
+        assert_eq!(format!("{url}"), "http://example.com/#about");
     }
 
     #[test]
@@ -1913,6 +2001,11 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
         assert_utf8_eq!(url.path, b"/pictures/of%20my%20cat/");
+
+        assert_eq!(
+            format!("{url}"),
+            "http://example.com/pictures/of%20my%20cat/"
+        );
     }
 
     #[test]
@@ -1934,6 +2027,11 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
         assert_utf8_eq!(url.path, b"/pictures/of%%20my%%20cat/");
+
+        assert_eq!(
+            format!("{url}"),
+            "http://example.com/pictures/of%%20my%%20cat/"
+        );
     }
 
     #[test]
@@ -1955,6 +2053,11 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
         assert_utf8_eq!(url.path, b"/pictures/of%Azmy%Zacat/");
+
+        assert_eq!(
+            format!("{url}"),
+            "http://example.com/pictures/of%Azmy%Zacat/"
+        );
     }
 
     #[test]
@@ -1976,6 +2079,11 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
         assert_utf8_eq!(url.path, b"/pictures/of%20my%20cat/");
+
+        assert_eq!(
+            format!("{url}"),
+            "http://example.com/pictures/of%20my%20cat/"
+        );
     }
 
     #[test]
@@ -1997,6 +2105,11 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
         assert_utf8_eq!(url.path, b"/pi%EF%BF%BDc%EF%BF%BDtu%EF%BF%BDres");
+
+        assert_eq!(
+            format!("{url}"),
+            "http://example.com/pi%EF%BF%BDc%EF%BF%BDtu%EF%BF%BDres"
+        );
     }
 
     #[test]
@@ -2018,6 +2131,8 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
         assert_eq!(url.port, None);
         assert_utf8_eq!(url.path, b"/pictures%EF%BF%BD");
+
+        assert_eq!(format!("{url}"), "http://example.com/pictures%EF%BF%BD");
     }
 
     #[test]
@@ -2025,13 +2140,15 @@ mod test {
         const URL: &str = "\u{0}\u{1}\u{2}\u{3}\u{4}\u{5}\u{6}\u{7}\u{8}\u{9}\u{10}\u{11}\u{12}\u{13}\u{14}\u{15}\u{16}\u{17}\u{18}\u{19}\u{20}http://example.com";
 
         let mut backing = [0; 128];
-        let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
             validation_errors.next(),
             Some(ValidationError::InvalidURLUnit)
         );
         assert_eq!(validation_errors.next(), None);
+
+        assert_eq!(format!("{url}"), "http://example.com/");
     }
 
     #[test]
@@ -2039,13 +2156,46 @@ mod test {
         const URL: &str = "http://example.com\u{20}\u{19}\u{18}\u{17}\u{16}\u{15}\u{14}\u{13}\u{12}\u{11}\u{10}\u{9}\u{8}\u{7}\u{6}\u{5}\u{4}\u{3}\u{2}\u{1}\u{0}";
 
         let mut backing = [0; 128];
-        let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
             validation_errors.next(),
             Some(ValidationError::InvalidURLUnit)
         );
         assert_eq!(validation_errors.next(), None);
+
+        assert_eq!(format!("{url}"), "http://example.com/");
+    }
+
+    #[test]
+    fn url_skip_ascii_tab_or_newline() {
+        let url_input = "http://username:password@example.com:123/path/to/file?query#fragment"
+            .chars()
+            .fold(String::new(), |mut acc, c| {
+                acc.push_str("\t\r\n");
+                acc.push(c);
+                acc
+            });
+
+        println!("{url_input:?}");
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(url_input.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidURLUnit)
+        );
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidCredentials)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_eq!(
+            format!("{url}"),
+            "http://username:password@example.com:123/path/to/file?query#fragment"
+        );
     }
 
     #[test]
@@ -2183,10 +2333,10 @@ mod test {
 
     // #[test]
     // fn utf8_url_code_point_harness_failure() {
-    //     let bytes = [0xf6];
+    //     let bytes = &[0xf6];
     //
-    //     let actual = utf8::url_code_point(&bytes);
-    //     let expected = utf8::url_code_point_reference(&bytes);
+    //     let actual = utf8::url_code_point(bytes);
+    //     let expected = utf8::url_code_point_reference(bytes);
     //
     //     assert_eq!(actual, expected);
     // }
