@@ -12,19 +12,17 @@
     ...
   }: let
     system = "x86_64-linux";
-    pkgs = import nixpkgs {
-      inherit system;
-      overlays = [
-        kani-flake.overlays.default
-      ];
-    };
+    pkgs = nixpkgs.legacyPackages.${system};
+    kaniPackages = kani-flake.packages.${system};
   in {
+    inherit pkgs;
+
     devShells.${system}.default = pkgs.mkShell {
       buildInputs = with pkgs; [
-        kani
         cargo-bolero
 
-        (rust-bin.override {
+        kaniPackages.kani
+        (kaniPackages.rust-bin.override {
           extensions = [
             "rust-analyzer"
             "rust-src"

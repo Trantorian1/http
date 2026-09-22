@@ -12,3 +12,6 @@ target/
 # Fuzzing-related
 core*
 **/__fuzz__/*/*
+
+# Secrets
+.env

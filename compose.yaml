@@ -1,0 +1,17 @@
+name: "opencode"
+services:
+  opencode:
+    build: .
+    env_file: ".env"
+
+    stdin_open: true
+    tty: true
+
+    volumes:
+      - .:/work
+
+    environment:
+      UNSLOTH_API_KEY: "${UNSLOTH_API_KEY}"
+
+    extra_hosts:
+      - "host.docker.internal:192.168.1.47"
