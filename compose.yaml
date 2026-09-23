@@ -13,7 +13,9 @@ services:
     environment:
       UNSLOTH_API_KEY: "${UNSLOTH_API_KEY}"
 
-    extra_hosts:
-      - "host.docker.internal:192.168.1.47"
+    # Networking
 
     network_mode: bridge
+
+    extra_hosts:
+      - "host.docker.internal:192.168.1.47"
