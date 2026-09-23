@@ -7,6 +7,7 @@
   };
 
   outputs = {
+    self,
     nixpkgs,
     kani-flake,
     ...
@@ -17,8 +18,13 @@
   in {
     inherit pkgs;
 
-    devShells.${system}.default = pkgs.mkShell {
-      buildInputs = with pkgs; [
+    packages.${system}.default = pkgs.buildEnv {
+      name = "opencode-sandbox";
+      paths = with pkgs; [
+        opencode
+        ripgrep
+        python3
+
         cargo-bolero
 
         kaniPackages.kani
@@ -29,6 +35,10 @@
           ];
         })
       ];
+    };
+
+    devShells.${system}.default = pkgs.mkShell {
+      buildInputs = [self.packages.${system}.default];
     };
   };
 }
