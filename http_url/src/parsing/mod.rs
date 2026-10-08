@@ -293,7 +293,19 @@ mod scheme {
                     },
 
                     // non-special scheme
-                    _ => todo!(),
+                    _ => {
+                        if let Some(b'/') = cursor.first() {
+                            *cursor = &cursor[1..];
+                            return scheme::nonspecial::parse(scheme::nonspecial::Context {
+                                cursor,
+                                buffer,
+                                error_bitset,
+                                scheme,
+                            });
+                        }
+
+                        todo!()
+                    },
                 }
             }
         }
@@ -351,16 +363,16 @@ mod scheme {
         #[macro_derive::context]
         pub(crate) fn parse<'parsing, 'input, 'output>(
             cursor: &'parsing mut &'input [u8],
-            mut buffer: UrlBuffer<'output>,
+            buffer: UrlBuffer<'output>,
             error_bitset: &'parsing mut ValidationErrorBitSet,
             scheme: segment::Scheme,
             default_scheme_port: u16,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
-            // == Special authority slashes state ======================================
+            // == Special authority slashes state ==================================================
             //
             // Ensure the scheme is followed by two U+002F (/).
             //
-            // =========================================================================
+            // =====================================================================================
 
             let mut sequential_solidus = 0;
             while !cursor.is_empty() {
@@ -389,16 +401,15 @@ mod scheme {
                 }
             }
 
-            // Special authority ignore slashes state ==================================
+            // == Special authority ignore slashes state ===========================================
             //
-            //  The specs aren't very clear on what happens in case an invalid
-            //  combination of slashes precedes the authority. However, based on the
-            //  rust_url source code, it seems the correct approach is to ignore ALL
-            //  slashes following the scheme.
+            //  The specs aren't very clear on what happens in case an invalid combination of
+            //  slashes precedes the authority. However, based on the rust_url source code, it seems
+            //  the correct approach is to ignore ALL slashes following the scheme.
             //
             // https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L451-L457
             //
-            // =========================================================================
+            // =====================================================================================
 
             while !cursor.is_empty() {
                 let c = cursor[0];
@@ -420,12 +431,70 @@ mod scheme {
                 }
             }
 
+            const SPECIAL: bool = true;
+            scheme::after_scheme::parse::<SPECIAL>(scheme::after_scheme::Context {
+                cursor,
+                buffer,
+                error_bitset,
+                scheme,
+                default_scheme_port,
+            })
+        }
+    }
+
+    pub(super) mod nonspecial {
+        #[allow(clippy::wildcard_imports)]
+        use super::*;
+
+        /// # [Path or authority state]
+        ///
+        /// [Path or authority state]: https://url.spec.whatwg.org/#path-or-authority-state
+        #[inline]
+        #[macro_derive::context]
+        pub(crate) fn parse<'parsing, 'input, 'output>(
+            cursor: &'parsing mut &'input [u8],
+            buffer: UrlBuffer<'output>,
+            error_bitset: &'parsing mut ValidationErrorBitSet,
+            scheme: segment::Scheme,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            if let Some(b'/') = cursor.first() {
+                *cursor = &cursor[1..];
+
+                const SPECIAL: bool = false;
+                scheme::after_scheme::parse::<SPECIAL>(scheme::after_scheme::Context {
+                    cursor,
+                    buffer,
+                    error_bitset,
+                    scheme,
+                    // No need for an option here: only special schemes can have a default port so
+                    // this is already encoded in the SPECIAL constant.
+                    default_scheme_port: 0,
+                })
+            } else {
+                todo!()
+            }
+        }
+    }
+
+    pub(super) mod after_scheme {
+        #[allow(clippy::wildcard_imports)]
+        use super::*;
+
+        #[inline]
+        #[macro_derive::context]
+        pub(crate) fn parse<const SPECIAL: bool, 'parsing, 'input, 'output>(
+            cursor: &'parsing mut &'input [u8],
+            mut buffer: UrlBuffer<'output>,
+            error_bitset: &'parsing mut ValidationErrorBitSet,
+            scheme: segment::Scheme,
+            default_scheme_port: u16,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             buffer.push_str(b"//")?;
 
             #[cfg(test)]
             let _remaining_userinfo = str::from_utf8(cursor).unwrap_or_default();
 
-            let (username, password) = userinfo::parse(userinfo::Context {
+            let (username, password) = userinfo::parse::<SPECIAL>(userinfo::Context {
                 cursor,
                 buffer: &mut buffer,
                 error_bitset,
@@ -439,7 +508,7 @@ mod scheme {
             #[cfg(test)]
             let _remaining_host = str::from_utf8(cursor).unwrap_or_default();
 
-            let (host, port) = host_and_port::parse(host_and_port::Context {
+            let (host, port) = host_and_port::parse::<SPECIAL>(host_and_port::Context {
                 cursor,
                 buffer: &mut buffer,
 
@@ -453,10 +522,11 @@ mod scheme {
             #[cfg(test)]
             let _host = str::from_utf8(&buffer[host.0.clone()]).unwrap_or_default();
 
-            let (path, query, fragment) = path::parse(path::Context {
+            let (path, query, fragment) = path::parse::<SPECIAL>(path::Context {
                 cursor,
                 buffer: &mut buffer,
                 error_bitset,
+                host: &host,
             })?;
 
             #[cfg(test)]
@@ -509,29 +579,27 @@ mod userinfo {
     /// [`HostMissing`]: Error::HostMissing
     #[inline]
     #[macro_derive::context]
-    pub(super) fn parse<'parsing, 'input, 'output>(
+    pub(super) fn parse<const SPECIAL: bool, 'parsing, 'input, 'output>(
         cursor: &'parsing mut &'input [u8],
         buffer: &'parsing mut UrlBuffer<'output>,
         error_bitset: &'parsing mut ValidationErrorBitSet,
         scheme: &'parsing segment::Scheme,
     ) -> Result<(segment::Username, segment::Password), Error> {
-        // == authority state ======================================================
+        // == authority state ======================================================================
         //
         // https://url.spec.whatwg.org/#authority-state
         //
-        // The spec has a really roundabout way of wording this but essentially all
-        // we need to do is linearly parse through the userinfo section, the end of
-        // which is determined by the LAST U+0040 (@) code point. Any character
-        // before that gets percent-encoded according to the userinfo percent-encode
-        // set. Any character before U+003A (:) is considered to be part of the
-        // username, and any character after is considered to be part of the user's
-        // password. We only skip the first U+003A (:) and percent-encode any other
-        // occurrences of it, even if those are not percent-encoded. If we encounter
-        // any other section delimiter but the remaining host section is empty AND
-        // we have seen a terminating U+0040 (@) code point, then we return a
-        // host-missing error.
+        // The spec has a really roundabout way of wording this but essentially all we need to do is
+        // linearly parse through the userinfo section, the end of which is determined by the LAST
+        // U+0040 (@) code point. Any character before that gets percent-encoded according to the
+        // userinfo percent-encode set. Any character before U+003A (:) is considered to be part of
+        // the username, and any character after is considered to be part of the user's password. We
+        // only skip the first U+003A (:) and percent-encode any other occurrences of it, even if
+        // those are not percent-encoded. If we encounter any other section delimiter but the
+        // remaining host section is empty AND we have seen a terminating U+0040 (@) code point,
+        // then we return a host-missing error.
         //
-        // =========================================================================
+        // =========================================================================================
 
         // ASCII tab or newline characters are skipped first so as not to cause the checkpoint to
         // parse them again.
@@ -550,15 +618,15 @@ mod userinfo {
 
         // Parsing has to take place in two steps:
         //
-        // 1. First, we iterate over the full range of authority characters to find
-        //    the terminating userinfo U+0040 (@) delimiter.
+        // 1. First, we iterate over the full range of authority characters to find the terminating
+        //    userinfo U+0040 (@) delimiter.
         //
-        // 2. We then iterate over all code points before the terminating userinfo
-        //    U+0040 (@) delimiter and encode them into the result buffer.
+        // 2. We then iterate over all code points before the terminating userinfo U+0040 (@)
+        //    delimiter and encode them into the result buffer.
         //
-        // This two step process is necessary as we don't want to parse any host
-        // components yet, but we still need to find the terminating U+0040 (@),
-        // userinfo delimiter which is only bounded by the end of the host segment
+        // This two step process is necessary as we don't want to parse any host components yet, but
+        // we still need to find the terminating U+0040 (@), userinfo delimiter which is only
+        // bounded by the end of the host segment
         // of the url.
         while !cursor.is_empty() {
             let c = cursor[0];
@@ -573,7 +641,11 @@ mod userinfo {
                 },
 
                 // EOF code point is implied in the below check
-                b'/' | b'\\' | b'?' | b'#' => {
+                b'/' | b'?' | b'#' => {
+                    break;
+                },
+
+                b'\\' if SPECIAL => {
                     break;
                 },
 
@@ -594,15 +666,15 @@ mod userinfo {
 
         let mut char_count_userinfo = match at_sign {
             Some(n) => {
-                // We only exit the above loop if we have  reached the end of the
-                // host segment of the url or the end of the url itself. This means
-                // that if there are no more characters after the terminating
-                // userinfo U+0040 (@) delimiter then the host must be empty.
+                // We only exit the above loop if we have  reached the end of the host segment of
+                // the url or the end of the url itself. This means that if there are no more
+                // characters after the terminating userinfo U+0040 (@) delimiter then the host must
+                // be empty.
                 //
                 // The specs word this somewhat more confusingly as:
                 //
-                // > If atSignSeen is true and buffer is the empty string, host-
-                // > missing validation error, return failure.
+                // > If atSignSeen is true and buffer is the empty string, host-missing validation
+                // > error, return failure.
                 //
                 // https://url.spec.whatwg.org/#authority-state
                 if char_count_authority - n - 1 == 0 {
@@ -696,7 +768,7 @@ mod host_and_port {
     /// [`port`]: port::parse
     #[inline]
     #[macro_derive::context]
-    pub(super) fn parse<'parsing, 'input, 'output>(
+    pub(super) fn parse<const SPECIAL: bool, 'parsing, 'input, 'output>(
         cursor: &'parsing mut &'input [u8],
         buffer: &'parsing mut UrlBuffer<'output>,
         error_bitset: &'parsing mut ValidationErrorBitSet,
@@ -704,11 +776,11 @@ mod host_and_port {
         password: &'parsing segment::Password,
         default_scheme_port: u16,
     ) -> Result<(segment::Host, segment::Port), Error> {
-        // == hostname state =======================================================
+        // == hostname state =======================================================================
         //
         // https://url.spec.whatwg.org/#hostname-state
         //
-        // =========================================================================
+        // =========================================================================================
 
         // ASCII tab or newline characters are skipped first so as not to cause the checkpoint to
         // parse them again.
@@ -738,12 +810,14 @@ mod host_and_port {
                 },
 
                 b':' if !inside_brackets => {
+                    const PORT: bool = true;
+
                     *cursor = checkpoint;
 
                     #[cfg(test)]
                     let _remaining_host = str::from_utf8(cursor).unwrap_or_default();
 
-                    let host = host::parse(host::Context {
+                    let host = host::parse::<SPECIAL, PORT>(host::Context {
                         cursor,
                         buffer,
                         username,
@@ -757,7 +831,7 @@ mod host_and_port {
                     // We need to skip the port delimiter again as we reset the cursor.
                     *cursor = &cursor[1..];
 
-                    let port = port::parse(port::Context {
+                    let port = port::parse::<SPECIAL>(port::Context {
                         cursor,
                         buffer,
                         error_bitset,
@@ -767,7 +841,12 @@ mod host_and_port {
                     return Ok((host, port));
                 },
 
-                b'/' | b'\\' | b'?' | b'#' => {
+                // TODO: optimize branching
+                b'/' | b'?' | b'#' => {
+                    break;
+                },
+
+                b'\\' if SPECIAL => {
                     break;
                 },
 
@@ -790,12 +869,14 @@ mod host_and_port {
             }
         }
 
+        const PORT: bool = false;
+
         *cursor = checkpoint;
 
         #[cfg(test)]
         let _remaining_host = str::from_utf8(cursor).unwrap_or_default();
 
-        let host = host::parse(host::Context {
+        let host = host::parse::<SPECIAL, PORT>(host::Context {
             cursor,
             buffer,
 
@@ -828,21 +909,26 @@ mod host {
     /// [`HostMissing`]: Error::HostMissing
     #[inline]
     #[macro_derive::context]
-    pub(super) fn parse<'parsing, 'input, 'output>(
+    pub(super) fn parse<const SPECIAL: bool, const PORT: bool, 'parsing, 'input, 'output>(
         cursor: &'parsing mut &'input [u8],
         buffer: &'parsing mut UrlBuffer<'output>,
         username: &'parsing segment::Username,
         password: &'parsing segment::Password,
         char_count_hostname: usize,
     ) -> Result<segment::Host, Error> {
-        // == host parsing =========================================================
+        // == host parsing =========================================================================
         //
         // https://url.spec.whatwg.org/#host-parsing
         //
-        // =========================================================================
+        // =========================================================================================
 
         if cursor.is_empty() {
-            return Err(Error::HostMissing);
+            if SPECIAL || PORT {
+                return Err(Error::HostMissing);
+            } else {
+                let next = buffer.len();
+                return Ok(segment::Host(next..next));
+            }
         }
 
         if cursor[0] == b'[' {
@@ -879,7 +965,12 @@ mod host {
 
         let host = host_start..host_stop;
         if host.is_empty() {
-            return Err(Error::HostMissing);
+            if SPECIAL || PORT {
+                return Err(Error::HostMissing);
+            } else {
+                let next = buffer.len();
+                return Ok(segment::Host(next..next));
+            }
         }
 
         Ok(segment::Host(host))
@@ -924,7 +1015,7 @@ mod port {
     /// [ASCII digit]: https://infra.spec.whatwg.org/#ascii-digit
     #[inline]
     #[macro_derive::context]
-    pub(super) fn parse<'parsing, 'input, 'output>(
+    pub(super) fn parse<const SPECIAL: bool, 'parsing, 'input, 'output>(
         cursor: &'parsing mut &'input [u8],
         buffer: &'parsing mut UrlBuffer<'output>,
         error_bitset: &'parsing mut ValidationErrorBitSet,
@@ -968,7 +1059,12 @@ mod port {
                     char_count_port += 1;
                 },
 
-                b'/' | b'\\' | b'?' | b'#' => {
+                b'/' | b'?' | b'#' => {
+                    *cursor = &cursor[1..];
+                    break;
+                },
+
+                b'\\' if SPECIAL => {
                     *cursor = &cursor[1..];
                     break;
                 },
@@ -979,7 +1075,8 @@ mod port {
             }
         }
 
-        if port as u16 == default_scheme_port || char_count_port == 0 {
+        // Only special schemes have a default port
+        if SPECIAL && (port as u16 == default_scheme_port || char_count_port == 0) {
             Ok(segment::Port(None))
         } else {
             buffer.push(b':')?;
@@ -1001,21 +1098,27 @@ mod path {
 
     #[inline]
     #[macro_derive::context]
-    pub(super) fn parse<'parsing, 'input, 'output>(
+    pub(super) fn parse<const SPECIAL: bool, 'parsing, 'input, 'output>(
         cursor: &'parsing mut &'input [u8],
         buffer: &'parsing mut UrlBuffer<'output>,
         error_bitset: &'parsing mut ValidationErrorBitSet,
+        host: &'parsing segment::Host,
     ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
-        // A path is never empty, it always contains at least the leading U+002F (/) code point
-        let path_start = buffer.push(b'/')? - 1;
-        let mut path_stop = path_start + 1;
+        let path_start = buffer.len();
+        let mut path_stop = path_start;
+
+        // A special scheme path is never empty, it always contains at least the leading U+002F (/)
+        // code point
+        if SPECIAL || !host.0.is_empty() {
+            path_stop = buffer.push(b'/')?;
+        }
 
         // Skip first leading U+002F (/) or U+005C (\) code points so we don't end up appending `//`
         // or `\/` to the buffer if the path is non-empty.
         if let Some(c) = cursor.first() {
             if *c == b'/' {
                 *cursor = &cursor[1..];
-            } else if *c == b'\\' {
+            } else if *c == b'\\' && SPECIAL {
                 error_bitset.add(ValidationError::InvalidReverseSolidus);
                 *cursor = &cursor[1..];
             }
@@ -1037,7 +1140,7 @@ mod path {
                     path_stop = buffer.push(c)?;
                 },
 
-                b'\\' => {
+                b'\\' if SPECIAL => {
                     error_bitset.add(ValidationError::InvalidReverseSolidus);
                     *cursor = &cursor[1..];
                     path_stop = buffer.push(c)?;
@@ -1052,7 +1155,7 @@ mod path {
                     #[cfg(test)]
                     let _remaining_query = str::from_utf8(cursor).unwrap_or_default();
 
-                    let (query, fragment) = query::parse(query::Context {
+                    let (query, fragment) = query::parse::<SPECIAL>(query::Context {
                         cursor,
                         buffer,
                         error_bitset,
@@ -1113,7 +1216,7 @@ mod query {
 
     #[inline]
     #[macro_derive::context]
-    pub(super) fn parse<'parsing, 'input, 'output>(
+    pub(super) fn parse<const SPECIAL: bool, 'parsing, 'input, 'output>(
         cursor: &'parsing mut &'input [u8],
         buffer: &'parsing mut UrlBuffer<'output>,
         error_bitset: &'parsing mut ValidationErrorBitSet,
@@ -1163,7 +1266,11 @@ mod query {
                         cursor,
                         buffer,
                         error_bitset,
-                        encoding: percent::QUERY_SPECIAL,
+                        encoding: if SPECIAL {
+                            percent::QUERY_SPECIAL
+                        } else {
+                            percent::QUERY
+                        },
                     })?;
                 },
             }
@@ -1666,7 +1773,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn url_parse_userinfo_full() {
+    fn url_parse_full_special() {
         const URL: &str = "http://user:password@example.com:123/path/to/file?query#fragment";
 
         let mut backing = [0; 128];
@@ -1690,6 +1797,83 @@ mod test {
         assert_eq!(
             format!("{url}"),
             "http://user:password@example.com:123/path/to/file?query#fragment"
+        );
+    }
+
+    #[test]
+    fn url_parse_full_nonspecial() {
+        const URL: &str =
+            "scheme://user:password@example.com:123/\\path\\to\\file?query\\nonspecial#fragment";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        // `\` is not a valid URL code point, even if it is not part of the PATH percent-encode set.
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidURLUnit)
+        );
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidCredentials)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"scheme");
+        assert_utf8_eq!(url.username, b"user");
+        assert_utf8_eq!(url.password, b"password");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, Some(123));
+        assert_utf8_eq!(url.path, b"/\\path\\to\\file");
+        assert_utf8_eq!(url.query, b"query\\nonspecial");
+        assert_utf8_eq!(url.fragment, b"fragment");
+
+        assert_eq!(
+            format!("{url}"),
+            "scheme://user:password@example.com:123/\\path\\to\\file?query\\nonspecial#fragment"
+        );
+    }
+
+    #[test]
+    fn url_parse_userinfo_special() {
+        const URL: &str = "http://user:password@example.com";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidCredentials)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"http");
+        assert_utf8_eq!(url.username, b"user");
+        assert_utf8_eq!(url.password, b"password");
+
+        assert_eq!(format!("{url}"), "http://user:password@example.com/");
+    }
+
+    #[test]
+    fn url_parse_userinfo_nonspecial() {
+        const URL: &str = "scheme://\\user:\\password\\@example.com";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidCredentials)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"scheme");
+        assert_utf8_eq!(url.username, b"%5Cuser");
+        assert_utf8_eq!(url.password, b"%5Cpassword%5C");
+
+        assert_eq!(
+            format!("{url}"),
+            "scheme://%5Cuser:%5Cpassword%5C@example.com/"
         );
     }
 
@@ -1754,7 +1938,7 @@ mod test {
     }
 
     #[test]
-    fn url_parse_host_domain() {
+    fn url_parse_host_domain_special() {
         const URL: &str = "http://example.com";
 
         let mut backing = [0; 128];
@@ -1771,7 +1955,42 @@ mod test {
     }
 
     #[test]
-    fn url_parse_port_simple() {
+    fn url_parse_host_domain_nonspecial_full() {
+        const URL: &str = "scheme://example.com";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"scheme");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+
+        assert_eq!(format!("{url}"), "scheme://example.com/");
+    }
+
+    #[test]
+    fn url_parse_host_domain_nonspecial_empty() {
+        // Non-special schemes allow for an empty host
+        const URL: &str = "scheme://";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"scheme");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"");
+
+        assert_eq!(format!("{url}"), "scheme://");
+    }
+
+    #[test]
+    fn url_parse_port_special() {
         const URL: &str = "http://example.com:123";
 
         let mut backing = [0; 128];
@@ -1785,6 +2004,25 @@ mod test {
         assert_utf8_eq!(url.host, b"example.com");
 
         assert_eq!(format!("{url}"), "http://example.com:123/");
+
+        assert_eq!(url.port, Some(123));
+    }
+
+    #[test]
+    fn url_parse_port_nonspecial() {
+        const URL: &str = "scheme://example.com:123";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"scheme");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+
+        assert_eq!(format!("{url}"), "scheme://example.com:123/");
 
         assert_eq!(url.port, Some(123));
     }
@@ -1904,7 +2142,7 @@ mod test {
     }
 
     #[test]
-    fn url_parse_path_simple() {
+    fn url_parse_path_special() {
         const URL: &str = "http://example.com/cat/pictures";
 
         let mut backing = [0; 128];
@@ -1923,7 +2161,7 @@ mod test {
     }
 
     #[test]
-    fn url_parse_path_strange_solidus() {
+    fn url_parse_path_special_strange_solidus() {
         const URL: &str = "http://example.com//\\////\\\\\\///////";
 
         let mut backing = [0; 128];
@@ -1946,7 +2184,31 @@ mod test {
     }
 
     #[test]
-    fn url_parse_query_simple() {
+    fn url_parse_path_nonspecial() {
+        const URL: &str = "scheme://example.com/\\cat\\pictures\\";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        // `\` is not a valid URL code point, even if it is not part of the PATH percent-encode set.
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidURLUnit)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"scheme");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/\\cat\\pictures\\");
+
+        assert_eq!(format!("{url}"), "scheme://example.com/\\cat\\pictures\\");
+    }
+
+    #[test]
+    fn url_parse_query_special() {
         const URL: &str = "http://example.com?name=cat.txt";
 
         let mut backing = [0; 128];
@@ -1966,7 +2228,32 @@ mod test {
     }
 
     #[test]
-    fn url_parse_fragment_simple() {
+    fn url_parse_query_nonspecial() {
+        const URL: &str = "scheme://example.com?\\name=\\cat.txt";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        // `\` is not a valid URL code point, even if it is not part of the QUERY percent-encode set.
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidURLUnit)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"scheme");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"example.com");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/");
+        assert_utf8_eq!(url.query, b"\\name=\\cat.txt");
+
+        assert_eq!(format!("{url}"), "scheme://example.com/?\\name=\\cat.txt");
+    }
+
+    #[test]
+    fn url_parse_fragment_special() {
         const URL: &str = "http://example.com#about";
 
         let mut backing = [0; 128];
@@ -2265,6 +2552,16 @@ mod test {
     #[test]
     fn url_err_empty_host_domain() {
         const URL: &str = "http://";
+
+        let mut backing = [0; 128];
+        let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
+
+        assert_eq!(err, Error::HostMissing)
+    }
+
+    #[test]
+    fn url_err_empty_host_domain_query() {
+        const URL: &str = "http://?query";
 
         let mut backing = [0; 128];
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
