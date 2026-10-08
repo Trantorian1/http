@@ -42,6 +42,28 @@
         "url": "https://github.com/model-checking/kani"
       }
     },
+    "microvm": {
+      "inputs": {
+        "nixpkgs": [
+          "opencode-sandbox",
+          "nixpkgs"
+        ],
+        "spectrum": "spectrum"
+      },
+      "locked": {
+        "lastModified": 1790526615,
+        "narHash": "sha256-33a6iTG1uFv12/zV8yo5VvdpftMNQms6TIHhMCVN6zE=",
+        "owner": "microvm-nix",
+        "repo": "microvm.nix",
+        "rev": "81f70a2002254f75b572fc34c55e7df16e9bb176",
+        "type": "github"
+      },
+      "original": {
+        "owner": "microvm-nix",
+        "repo": "microvm.nix",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1788179007,
@@ -58,10 +80,46 @@
         "type": "github"
       }
     },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1790822859,
+        "narHash": "sha256-69xHQhAeMAD2wDXO7T2pcOZIF9Sga2W+JkmY2a11Ops=",
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "rev": "c59305bab2065cfecc4944690d9eedbb56f3a9fa",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nixos",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "opencode-sandbox": {
+      "inputs": {
+        "microvm": "microvm",
+        "nixpkgs": "nixpkgs_2"
+      },
+      "locked": {
+        "lastModified": 1791381782,
+        "narHash": "sha256-Ba+M8A0kgh/UB6tl/0ccwupfl7FPYLwUnRduzbj3PSQ=",
+        "owner": "OpencodeSandbox",
+        "repo": "opencode-sandbox",
+        "rev": "4bba88be51bdd450b943476c76a3bd4d12a4d95c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "OpencodeSandbox",
+        "repo": "opencode-sandbox",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "kani-flake": "kani-flake",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "opencode-sandbox": "opencode-sandbox"
       }
     },
     "rust-overlay": {
@@ -83,6 +141,22 @@
         "owner": "oxalica",
         "repo": "rust-overlay",
         "type": "github"
+      }
+    },
+    "spectrum": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1786032750,
+        "narHash": "sha256-+Ba/kIn5BjvV7PN8bWOo7RoqgTY/Yv2M7qeMf3wS2Ag=",
+        "ref": "refs/heads/main",
+        "rev": "77d2389874bb092b8dbf05ecc5b1030372e80e98",
+        "revCount": 1417,
+        "type": "git",
+        "url": "https://spectrum-os.org/git/spectrum"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://spectrum-os.org/git/spectrum"
       }
     }
   },
