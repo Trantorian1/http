@@ -294,17 +294,12 @@ mod scheme {
 
                     // non-special scheme
                     _ => {
-                        if let Some(b'/') = cursor.first() {
-                            *cursor = &cursor[1..];
-                            return scheme::nonspecial::parse(scheme::nonspecial::Context {
-                                cursor,
-                                buffer,
-                                error_bitset,
-                                scheme,
-                            });
-                        }
-
-                        todo!()
+                        return scheme::nonspecial::parse(scheme::nonspecial::Context {
+                            cursor,
+                            buffer,
+                            error_bitset,
+                            scheme,
+                        });
                     },
                 }
             }
@@ -446,9 +441,6 @@ mod scheme {
         #[allow(clippy::wildcard_imports)]
         use super::*;
 
-        /// # [Path or authority state]
-        ///
-        /// [Path or authority state]: https://url.spec.whatwg.org/#path-or-authority-state
         #[inline]
         #[macro_derive::context]
         pub(crate) fn parse<'parsing, 'input, 'output>(
@@ -457,19 +449,42 @@ mod scheme {
             error_bitset: &'parsing mut ValidationErrorBitSet,
             scheme: segment::Scheme,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
-            if let Some(b'/') = cursor.first() {
-                *cursor = &cursor[1..];
+            const SPECIAL: bool = false;
 
-                const SPECIAL: bool = false;
-                scheme::after_scheme::parse::<SPECIAL>(scheme::after_scheme::Context {
-                    cursor,
-                    buffer,
-                    error_bitset,
-                    scheme,
-                    // No need for an option here: only special schemes can have a default port so
-                    // this is already encoded in the SPECIAL constant.
-                    default_scheme_port: 0,
-                })
+            if let Some(b'/') = cursor.first() {
+                // == Path or authority state ======================================================
+                //
+                // https://url.spec.whatwg.org/#path-or-authority-state
+                //
+                // =================================================================================
+                if let Some(b'/') = cursor.get(1) {
+                    *cursor = &cursor[2..];
+
+                    scheme::after_scheme::parse::<SPECIAL>(scheme::after_scheme::Context {
+                        cursor,
+                        buffer,
+                        error_bitset,
+                        scheme,
+                        // No need for an option here: only special schemes can have a default port
+                        // so this is already encoded in the SPECIAL constant.
+                        default_scheme_port: 0,
+                    })
+                } else {
+                    let next = buffer.len();
+
+                    host_and_port::after_host_and_port::parse::<SPECIAL>(
+                        host_and_port::after_host_and_port::Context {
+                            cursor,
+                            buffer,
+                            error_bitset,
+                            scheme,
+                            username: segment::Username(next..next),
+                            password: segment::Password(next..next),
+                            host: segment::Host(next..next),
+                            port: segment::Port(None),
+                        },
+                    )
+                }
             } else {
                 todo!()
             }
@@ -522,37 +537,18 @@ mod scheme {
             #[cfg(test)]
             let _host = str::from_utf8(&buffer[host.0.clone()]).unwrap_or_default();
 
-            let (path, query, fragment) = path::parse::<SPECIAL>(path::Context {
-                cursor,
-                buffer: &mut buffer,
-                error_bitset,
-                host: &host,
-            })?;
-
-            #[cfg(test)]
-            let _path = str::from_utf8(&buffer[path.0.clone()]).unwrap_or_default();
-            #[cfg(test)]
-            let _query = str::from_utf8(&buffer[query.0.clone()]).unwrap_or_default();
-            #[cfg(test)]
-            let _fragment = str::from_utf8(&buffer[fragment.0.clone()]).unwrap_or_default();
-
-            let backing = buffer.into_inner();
-
-            Ok((
-                Url {
-                    backing,
-
-                    scheme: &backing[scheme.0],
-                    username: &backing[username.0],
-                    password: &backing[password.0],
-                    host: &backing[host.0],
-                    port: port.0,
-                    path: &backing[path.0],
-                    query: &backing[query.0],
-                    fragment: &backing[fragment.0],
+            host_and_port::after_host_and_port::parse::<SPECIAL>(
+                host_and_port::after_host_and_port::Context {
+                    cursor,
+                    buffer,
+                    error_bitset,
+                    scheme,
+                    username,
+                    password,
+                    host,
+                    port,
                 },
-                error_bitset.iter(),
-            ))
+            )
         }
     }
 }
@@ -887,6 +883,56 @@ mod host_and_port {
 
         Ok((host, segment::Port(None)))
     }
+
+    pub(super) mod after_host_and_port {
+        #[allow(clippy::wildcard_imports)]
+        use super::*;
+
+        #[inline]
+        #[macro_derive::context]
+        pub(crate) fn parse<const SPECIAL: bool, 'parsing, 'input, 'output>(
+            cursor: &'parsing mut &'input [u8],
+            mut buffer: UrlBuffer<'output>,
+            error_bitset: &'parsing mut ValidationErrorBitSet,
+            scheme: segment::Scheme,
+            username: segment::Username,
+            password: segment::Password,
+            host: segment::Host,
+            port: segment::Port,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            let (path, query, fragment) = path::parse::<SPECIAL>(path::Context {
+                cursor,
+                buffer: &mut buffer,
+                error_bitset,
+                host: &host,
+            })?;
+
+            #[cfg(test)]
+            let _path = str::from_utf8(&buffer[path.0.clone()]).unwrap_or_default();
+            #[cfg(test)]
+            let _query = str::from_utf8(&buffer[query.0.clone()]).unwrap_or_default();
+            #[cfg(test)]
+            let _fragment = str::from_utf8(&buffer[fragment.0.clone()]).unwrap_or_default();
+
+            let backing = buffer.into_inner();
+
+            Ok((
+                Url {
+                    backing,
+
+                    scheme: &backing[scheme.0],
+                    username: &backing[username.0],
+                    password: &backing[password.0],
+                    host: &backing[host.0],
+                    port: port.0,
+                    path: &backing[path.0],
+                    query: &backing[query.0],
+                    fragment: &backing[fragment.0],
+                },
+                error_bitset.iter(),
+            ))
+        }
+    }
 }
 
 mod host {
@@ -1111,16 +1157,16 @@ mod path {
         // code point
         if SPECIAL || !host.0.is_empty() {
             path_stop = buffer.push(b'/')?;
-        }
 
-        // Skip first leading U+002F (/) or U+005C (\) code points so we don't end up appending `//`
-        // or `\/` to the buffer if the path is non-empty.
-        if let Some(c) = cursor.first() {
-            if *c == b'/' {
-                *cursor = &cursor[1..];
-            } else if *c == b'\\' && SPECIAL {
-                error_bitset.add(ValidationError::InvalidReverseSolidus);
-                *cursor = &cursor[1..];
+            // Skip first leading U+002F (/) or U+005C (\) code points so we don't end up appending
+            // `//` or `\/` to the buffer if the path is non-empty.
+            if let Some(c) = cursor.first() {
+                if *c == b'/' {
+                    *cursor = &cursor[1..];
+                } else if *c == b'\\' && SPECIAL {
+                    error_bitset.add(ValidationError::InvalidReverseSolidus);
+                    *cursor = &cursor[1..];
+                }
             }
         }
 
@@ -1801,7 +1847,7 @@ mod test {
     }
 
     #[test]
-    fn url_parse_full_nonspecial() {
+    fn url_parse_full_nonspecial_authority() {
         const URL: &str =
             "scheme://user:password@example.com:123/\\path\\to\\file?query\\nonspecial#fragment";
 
@@ -1831,6 +1877,36 @@ mod test {
         assert_eq!(
             format!("{url}"),
             "scheme://user:password@example.com:123/\\path\\to\\file?query\\nonspecial#fragment"
+        );
+    }
+
+    #[test]
+    fn url_parse_full_nonspecial_path() {
+        const URL: &str =
+            "scheme:/user:password@example.com:123/\\path\\to\\file?query\\nonspecial#fragment";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        // `\` is not a valid URL code point, even if it is not part of the PATH percent-encode set.
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidURLUnit)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"scheme");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"/user:password@example.com:123/\\path\\to\\file");
+        assert_utf8_eq!(url.query, b"query\\nonspecial");
+        assert_utf8_eq!(url.fragment, b"fragment");
+
+        assert_eq!(
+            format!("{url}"),
+            "scheme:/user:password@example.com:123/\\path\\to\\file?query\\nonspecial#fragment"
         );
     }
 
