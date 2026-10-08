@@ -133,6 +133,12 @@ macro_rules! ascii_tab_or_newline {
     };
 }
 
+macro_rules! forward {
+    ($cursor:ident by $n:expr) => {
+        *$cursor = &$cursor[$n..];
+    };
+}
+
 mod c0_control_or_space {
     #[allow(clippy::wildcard_imports)]
     use super::*;
@@ -158,12 +164,12 @@ mod c0_control_or_space {
             && matchers::c0_control_or_space(*c0_first)
         {
             error_bitset.add(ValidationError::InvalidURLUnit);
-            *cursor = &cursor[1..];
+            forward!(cursor by 1);
 
             while let Some(c0_continuation) = cursor.first()
                 && matchers::c0_control_or_space(*c0_continuation)
             {
-                *cursor = &cursor[1..];
+                forward!(cursor by 1);
             }
         }
 
@@ -207,7 +213,7 @@ mod scheme {
             && matchers::ascii_alpha(*first)
         {
             buffer.push(first.to_ascii_lowercase())?;
-            *cursor = &cursor[1..];
+            forward!(cursor by 1);
 
             while !cursor.is_empty() {
                 let c = cursor[0];
@@ -217,7 +223,7 @@ mod scheme {
                         error_bitset.add(ValidationError::InvalidURLUnit);
 
                         let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-                        *cursor = &cursor[skip..];
+                        forward!(cursor by skip);
                     },
 
                     // Only the first character in a scheme must be strictly `ascii_alpha`. Scheme
@@ -225,25 +231,25 @@ mod scheme {
                     // U+002E (.).
                     b'a'..=b'z' | b'0'..=b'9' | b'+' | b'-' | b'.' => {
                         buffer.push(c)?;
-                        *cursor = &cursor[1..];
+                        forward!(cursor by 1);
                     },
 
                     // Input is normalized, only lowercase characters are pushed to the final buffer
                     b'A'..=b'Z' => {
                         buffer.push(c.to_ascii_lowercase())?;
-                        *cursor = &cursor[1..];
+                        forward!(cursor by 1);
                     },
 
                     // End of scheme
                     b':' => {
                         buffer.push(b':')?;
-                        *cursor = &cursor[1..];
+                        forward!(cursor by 1);
                         break;
                     },
 
                     // Invalid character, scheme error.
                     _ => {
-                        *cursor = &cursor[1..];
+                        forward!(cursor by 1);
                         break;
                     },
                 }
@@ -376,11 +382,11 @@ mod scheme {
                         error_bitset.add(ValidationError::InvalidURLUnit);
 
                         let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-                        *cursor = &cursor[skip..];
+                        forward!(cursor by skip);
                     },
 
                     [b'/', ..] => {
-                        *cursor = &cursor[1..];
+                        forward!(cursor by 1);
                         sequential_solidus += 1;
 
                         if sequential_solidus >= 2 {
@@ -414,12 +420,12 @@ mod scheme {
                         error_bitset.add(ValidationError::InvalidURLUnit);
 
                         let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-                        *cursor = &cursor[skip..];
+                        forward!(cursor by skip);
                     },
 
                     b'/' | b'\\' => {
                         error_bitset.add(ValidationError::SpecialSchemeMissingFollowingSolidus);
-                        *cursor = &cursor[1..];
+                        forward!(cursor by 1);
                     },
 
                     _ => break,
@@ -445,7 +451,7 @@ mod scheme {
         #[macro_derive::context]
         pub(crate) fn parse<'parsing, 'input, 'output>(
             cursor: &'parsing mut &'input [u8],
-            buffer: UrlBuffer<'output>,
+            mut buffer: UrlBuffer<'output>,
             error_bitset: &'parsing mut ValidationErrorBitSet,
             scheme: segment::Scheme,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
@@ -458,7 +464,7 @@ mod scheme {
                 //
                 // =================================================================================
                 if let Some(b'/') = cursor.get(1) {
-                    *cursor = &cursor[2..];
+                    forward!(cursor by 2);
 
                     scheme::after_scheme::parse::<SPECIAL>(scheme::after_scheme::Context {
                         cursor,
@@ -486,7 +492,43 @@ mod scheme {
                     )
                 }
             } else {
-                todo!()
+                let next = buffer.len();
+
+                let username = segment::Username(next..next);
+                let password = segment::Password(next..next);
+                let host = segment::Host(next..next);
+                let port = segment::Port(None);
+
+                let (path, query, fragment) = path::opaque::parse(path::opaque::Context {
+                    cursor,
+                    buffer: &mut buffer,
+                    error_bitset,
+                })?;
+
+                #[cfg(test)]
+                let _path = str::from_utf8(&buffer[path.0.clone()]).unwrap_or_default();
+                #[cfg(test)]
+                let _query = str::from_utf8(&buffer[query.0.clone()]).unwrap_or_default();
+                #[cfg(test)]
+                let _fragment = str::from_utf8(&buffer[fragment.0.clone()]).unwrap_or_default();
+
+                let backing = buffer.into_inner();
+
+                Ok((
+                    Url {
+                        backing,
+
+                        scheme: &backing[scheme.0],
+                        username: &backing[username.0],
+                        password: &backing[password.0],
+                        host: &backing[host.0],
+                        port: port.0,
+                        path: &backing[path.0],
+                        query: &backing[query.0],
+                        fragment: &backing[fragment.0],
+                    },
+                    error_bitset.iter(),
+                ))
             }
         }
     }
@@ -603,7 +645,7 @@ mod userinfo {
             && matches!(c, ascii_tab_or_newline!())
         {
             let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-            *cursor = &cursor[skip..];
+            forward!(cursor by skip);
         }
 
         #[allow(suspicious_double_ref_op)]
@@ -632,7 +674,7 @@ mod userinfo {
                     error_bitset.add(ValidationError::InvalidURLUnit);
 
                     let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-                    *cursor = &cursor[skip..];
+                    forward!(cursor by skip);
                     char_count_authority += skip;
                 },
 
@@ -648,11 +690,11 @@ mod userinfo {
                 b'@' => {
                     error_bitset.add(ValidationError::InvalidCredentials);
                     at_sign = Some(char_count_authority);
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
                     char_count_authority += 1;
                 },
                 _ => {
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
                     char_count_authority += 1;
                 },
             }
@@ -691,7 +733,7 @@ mod userinfo {
         while char_count_userinfo > 0 {
             let c = cursor[0];
 
-            *cursor = &cursor[1..];
+            forward!(cursor by 1);
             char_count_userinfo -= 1;
 
             match c {
@@ -734,12 +776,12 @@ mod userinfo {
             // or newline so cursor is guaranteed to be non-empty.
             if matches!(cursor[0], ascii_tab_or_newline!()) {
                 let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-                *cursor = &cursor[skip..];
+                forward!(cursor by skip);
             }
 
             // We need to skip over the terminating userinfo U+0040 (@) delimiter again as we
             // have reset the cursor.
-            *cursor = &cursor[1..];
+            forward!(cursor by 1);
 
             buffer.push(b'@')?;
         }
@@ -784,7 +826,7 @@ mod host_and_port {
             && matches!(c, ascii_tab_or_newline!())
         {
             let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-            *cursor = &cursor[skip..];
+            forward!(cursor by skip);
         }
 
         #[allow(suspicious_double_ref_op)]
@@ -801,7 +843,7 @@ mod host_and_port {
                     error_bitset.add(ValidationError::InvalidURLUnit);
 
                     let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-                    *cursor = &cursor[skip..];
+                    forward!(cursor by skip);
                     char_count_hostname += skip;
                 },
 
@@ -825,7 +867,7 @@ mod host_and_port {
                     let _remaining_port = str::from_utf8(cursor).unwrap_or_default();
 
                     // We need to skip the port delimiter again as we reset the cursor.
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
 
                     let port = port::parse::<SPECIAL>(port::Context {
                         cursor,
@@ -849,18 +891,18 @@ mod host_and_port {
                 b'[' => {
                     inside_brackets = true;
                     char_count_hostname += 1;
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
                 },
 
                 b']' => {
                     inside_brackets = false;
                     char_count_hostname += 1;
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
                 },
 
                 _ => {
                     char_count_hostname += 1;
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
                 },
             }
         }
@@ -1005,7 +1047,7 @@ mod host {
                 host_stop += 1;
             }
         }
-        *cursor = &cursor[char_count_hostname..];
+        forward!(cursor by char_count_hostname);
 
         // TODO: IPV4 parsing
 
@@ -1073,7 +1115,7 @@ mod port {
             && matches!(c, ascii_tab_or_newline!())
         {
             let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-            *cursor = &cursor[skip..];
+            forward!(cursor by skip);
         }
 
         let mut port = 0u32;
@@ -1090,7 +1132,7 @@ mod port {
                     error_bitset.add(ValidationError::InvalidURLUnit);
 
                     let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-                    *cursor = &cursor[skip..];
+                    forward!(cursor by skip);
                     char_count_port += skip;
                 },
 
@@ -1101,17 +1143,17 @@ mod port {
                         return Err(Error::PortOutOfRange);
                     }
 
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
                     char_count_port += 1;
                 },
 
                 b'/' | b'?' | b'#' => {
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
                     break;
                 },
 
                 b'\\' if SPECIAL => {
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
                     break;
                 },
 
@@ -1162,10 +1204,10 @@ mod path {
             // `//` or `\/` to the buffer if the path is non-empty.
             if let Some(c) = cursor.first() {
                 if *c == b'/' {
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
                 } else if *c == b'\\' && SPECIAL {
                     error_bitset.add(ValidationError::InvalidReverseSolidus);
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
                 }
             }
         }
@@ -1178,23 +1220,23 @@ mod path {
                     error_bitset.add(ValidationError::InvalidURLUnit);
 
                     let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-                    *cursor = &cursor[skip..];
+                    forward!(cursor by skip);
                 },
 
                 b'/' => {
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
                     path_stop = buffer.push(c)?;
                 },
 
                 b'\\' if SPECIAL => {
                     error_bitset.add(ValidationError::InvalidReverseSolidus);
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
                     path_stop = buffer.push(c)?;
                 },
 
                 b'?' => {
                     // Skip U+003F (?) query segment delimiter
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
 
                     let path = segment::Path(path_start..path_stop);
 
@@ -1212,7 +1254,7 @@ mod path {
 
                 b'#' => {
                     // Skip U+0023 (#) fragment segment delimiter
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
 
                     let path = segment::Path(path_start..path_stop);
                     let query = segment::Query(path_stop..path_stop);
@@ -1254,6 +1296,158 @@ mod path {
 
         Ok((path, query, fragment))
     }
+
+    pub(super) mod opaque {
+        #[allow(clippy::wildcard_imports)]
+        use super::*;
+
+        /// # [Opaque path state]
+        ///
+        /// [Opaque path state]: https://url.spec.whatwg.org/#cannot-be-a-base-url-path-state
+        #[inline]
+        #[macro_derive::context]
+        pub(crate) fn parse<'parsing, 'input, 'output>(
+            cursor: &'parsing mut &'input [u8],
+            buffer: &'parsing mut UrlBuffer<'output>,
+            error_bitset: &'parsing mut ValidationErrorBitSet,
+        ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
+            const SPECIAL: bool = false;
+
+            fn handle_query<'parsing, 'input, 'output>(
+                cursor: &'parsing mut &'input [u8],
+                buffer: &'parsing mut UrlBuffer<'output>,
+                error_bitset: &'parsing mut ValidationErrorBitSet,
+                path: segment::Path,
+            ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
+                // Skip U+003F (?) query segment delimiter
+                forward!(cursor by 1);
+
+                #[cfg(test)]
+                let _remaining_query = str::from_utf8(cursor).unwrap_or_default();
+
+                let (query, fragment) = query::parse::<SPECIAL>(query::Context {
+                    cursor,
+                    buffer,
+                    error_bitset,
+                })?;
+
+                Ok((path, query, fragment))
+            }
+
+            fn handle_fragment<'parsing, 'input, 'output>(
+                cursor: &'parsing mut &'input [u8],
+                buffer: &'parsing mut UrlBuffer<'output>,
+                error_bitset: &'parsing mut ValidationErrorBitSet,
+                path: segment::Path,
+                query: segment::Query,
+            ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
+                // Skip U+0023 (#) fragment segment delimiter
+                forward!(cursor by 1);
+
+                #[cfg(test)]
+                let _remaining_fragment = str::from_utf8(cursor).unwrap_or_default();
+
+                let fragment = fragment::parse(fragment::Context {
+                    cursor,
+                    buffer,
+                    error_bitset,
+                })?;
+
+                return Ok((path, query, fragment));
+            }
+
+            let path_start = buffer.len();
+            let mut path_stop = path_start;
+
+            while !cursor.is_empty() {
+                let c = cursor[0];
+
+                match c {
+                    ascii_tab_or_newline!() => {
+                        error_bitset.add(ValidationError::InvalidURLUnit);
+
+                        let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
+                        forward!(cursor by skip);
+                    },
+
+                    b' ' => {
+                        error_bitset.add(ValidationError::InvalidURLUnit);
+
+                        forward!(cursor by 1);
+
+                        match cursor.first() {
+                            Some(b'?') => {
+                                path_stop = buffer.push_str(b"%20")?;
+
+                                return handle_query(
+                                    cursor,
+                                    buffer,
+                                    error_bitset,
+                                    segment::Path(path_start..path_stop),
+                                );
+                            },
+                            Some(b'#') => {
+                                path_stop = buffer.push_str(b"%20")?;
+
+                                return handle_fragment(
+                                    cursor,
+                                    buffer,
+                                    error_bitset,
+                                    segment::Path(path_start..path_stop),
+                                    segment::Query(path_stop..path_stop),
+                                );
+                            },
+                            _ => {
+                                path_stop = buffer.push(b' ')?;
+                            },
+                        }
+                    },
+
+                    b'?' => {
+                        return handle_query(
+                            cursor,
+                            buffer,
+                            error_bitset,
+                            segment::Path(path_start..path_stop),
+                        );
+                    },
+
+                    b'#' => {
+                        return handle_fragment(
+                            cursor,
+                            buffer,
+                            error_bitset,
+                            segment::Path(path_start..path_stop),
+                            segment::Query(path_stop..path_stop),
+                        );
+                    },
+
+                    b'%' => {
+                        path_stop = common::percent::delimiter(common::percent::Context {
+                            cursor,
+                            buffer,
+                            error_bitset,
+                        })?;
+                    },
+
+                    _ => {
+                        path_stop = common::url_cp::encode(common::url_cp::Context {
+                            cursor,
+                            buffer,
+                            error_bitset,
+                            encoding: percent::C0_CONTROL,
+                        })?;
+                    },
+                }
+            }
+
+            let path = segment::Path(path_start..path_stop);
+            let query = segment::Query(path_stop..path_stop);
+            let fragment = segment::Fragment(path_stop..path_stop);
+
+            Ok((path, query, fragment))
+        }
+    }
 }
 
 mod query {
@@ -1278,12 +1472,12 @@ mod query {
                     error_bitset.add(ValidationError::InvalidURLUnit);
 
                     let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-                    *cursor = &cursor[skip..];
+                    forward!(cursor by skip);
                 },
 
                 b'#' => {
                     // Skip U+0023 (#) fragment segment delimiter
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
 
                     let query = segment::Query(query_start..query_stop);
 
@@ -1351,7 +1545,7 @@ mod fragment {
                     error_bitset.add(ValidationError::InvalidURLUnit);
 
                     let skip = search::skip_ascii_tab_or_newline(&cursor[1..]) + 1;
-                    *cursor = &cursor[skip..];
+                    forward!(cursor by skip);
                 },
 
                 b'%' => {
@@ -1411,7 +1605,7 @@ mod common {
                 error_bitset.add(ValidationError::InvalidURLUnit);
             }
 
-            *cursor = &cursor[len..];
+            forward!(cursor by len);
             Ok(position)
         }
     }
@@ -1446,7 +1640,7 @@ mod common {
                 // as well act on it.
                 utf8::CodePointUrl::InvalidUtf8 { invalid: len } => {
                     let position = buffer.push_str(utf8::REPLACEMENT)?;
-                    *cursor = &cursor[len.get() as usize..];
+                    forward!(cursor by len.get() as usize);
 
                     return Ok(position);
                 },
@@ -1456,7 +1650,7 @@ mod common {
                 // the last valid code point.
                 utf8::CodePointUrl::Truncated => {
                     let position = buffer.push_str(utf8::REPLACEMENT)?;
-                    *cursor = &cursor[1..];
+                    forward!(cursor by 1);
 
                     return Ok(position);
                 },
@@ -1472,7 +1666,7 @@ mod common {
             #[cfg(test)]
             let _encoding_after = str::from_utf8(buffer.as_ref()).unwrap_or_default();
 
-            *cursor = &cursor[len.get() as usize..];
+            forward!(cursor by len.get() as usize);
 
             #[cfg(test)]
             let _remaining = str::from_utf8(*cursor).unwrap_or_default();
@@ -1907,6 +2101,37 @@ mod test {
         assert_eq!(
             format!("{url}"),
             "scheme:/user:password@example.com:123/\\path\\to\\file?query\\nonspecial#fragment"
+        );
+    }
+
+    #[test]
+    fn url_parse_full_nonspecial_opaque() {
+        const URL: &str =
+            "scheme:user : password@example.com:123/path/to/file ?query\\nonspecial#fragment";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        // ` ` is a valid code point but its use in opaque paths still raises an InvalidURLUnit
+        // error, even if it is not part of the PATH percent-encode set.
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidURLUnit)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme, b"scheme");
+        assert_utf8_eq!(url.username, b"");
+        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.host, b"");
+        assert_eq!(url.port, None);
+        assert_utf8_eq!(url.path, b"user : password@example.com:123/path/to/file%20");
+        assert_utf8_eq!(url.query, b"query\\nonspecial");
+        assert_utf8_eq!(url.fragment, b"fragment");
+
+        assert_eq!(
+            format!("{url}"),
+            "scheme:user : password@example.com:123/path/to/file%20?query\\nonspecial#fragment"
         );
     }
 
