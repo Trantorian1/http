@@ -15,3 +15,6 @@ core*
 
 # Secrets
 .env
+
+# Nix
+result
