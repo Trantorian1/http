@@ -369,6 +369,8 @@ mod scheme {
             scheme: segment::Scheme,
             default_scheme_port: u16,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            const SPECIAL: bool = true;
+
             // == Special authority slashes state ==================================================
             //
             // Ensure the scheme is followed by two U+002F (/).
@@ -432,7 +434,6 @@ mod scheme {
                 }
             }
 
-            const SPECIAL: bool = true;
             scheme::after_scheme::parse::<SPECIAL>(scheme::after_scheme::Context {
                 cursor,
                 buffer,
@@ -848,14 +849,12 @@ mod host_and_port {
                 },
 
                 b':' if !inside_brackets => {
-                    const PORT: bool = true;
-
                     *cursor = checkpoint;
 
                     #[cfg(test)]
                     let _remaining_host = str::from_utf8(cursor).unwrap_or_default();
 
-                    let host = host::parse::<SPECIAL, PORT>(host::Context {
+                    let host = host::parse::<SPECIAL, true>(host::Context {
                         cursor,
                         buffer,
                         username,
@@ -907,14 +906,12 @@ mod host_and_port {
             }
         }
 
-        const PORT: bool = false;
-
         *cursor = checkpoint;
 
         #[cfg(test)]
         let _remaining_host = str::from_utf8(cursor).unwrap_or_default();
 
-        let host = host::parse::<SPECIAL, PORT>(host::Context {
+        let host = host::parse::<SPECIAL, false>(host::Context {
             cursor,
             buffer,
 
@@ -1011,12 +1008,12 @@ mod host {
         // =========================================================================================
 
         if cursor.is_empty() {
-            if SPECIAL || PORT {
-                return Err(Error::HostMissing);
+            return if SPECIAL || PORT {
+                Err(Error::HostMissing)
             } else {
                 let next = buffer.len();
-                return Ok(segment::Host(next..next));
-            }
+                Ok(segment::Host(next..next))
+            };
         }
 
         if cursor[0] == b'[' {
@@ -1053,12 +1050,12 @@ mod host {
 
         let host = host_start..host_stop;
         if host.is_empty() {
-            if SPECIAL || PORT {
-                return Err(Error::HostMissing);
+            return if SPECIAL || PORT {
+                Err(Error::HostMissing)
             } else {
                 let next = buffer.len();
-                return Ok(segment::Host(next..next));
-            }
+                Ok(segment::Host(next..next))
+            };
         }
 
         Ok(segment::Host(host))
@@ -1313,9 +1310,9 @@ mod path {
         ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
             const SPECIAL: bool = false;
 
-            fn handle_query<'parsing, 'input, 'output>(
-                cursor: &'parsing mut &'input [u8],
-                buffer: &'parsing mut UrlBuffer<'output>,
+            fn handle_query<'parsing>(
+                cursor: &'parsing mut &[u8],
+                buffer: &'parsing mut UrlBuffer<'_>,
                 error_bitset: &'parsing mut ValidationErrorBitSet,
                 path: segment::Path,
             ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
@@ -1334,9 +1331,9 @@ mod path {
                 Ok((path, query, fragment))
             }
 
-            fn handle_fragment<'parsing, 'input, 'output>(
-                cursor: &'parsing mut &'input [u8],
-                buffer: &'parsing mut UrlBuffer<'output>,
+            fn handle_fragment<'parsing>(
+                cursor: &'parsing mut &[u8],
+                buffer: &'parsing mut UrlBuffer<'_>,
                 error_bitset: &'parsing mut ValidationErrorBitSet,
                 path: segment::Path,
                 query: segment::Query,
@@ -1353,7 +1350,7 @@ mod path {
                     error_bitset,
                 })?;
 
-                return Ok((path, query, fragment));
+                Ok((path, query, fragment))
             }
 
             let path_start = buffer.len();
@@ -1623,7 +1620,7 @@ mod common {
             encoding: crate::percent::EncodeSet,
         ) -> Result<usize, Error> {
             #[cfg(test)]
-            let _encoding_before = str::from_utf8(*cursor).unwrap_or_default();
+            let _encoding_before = str::from_utf8(cursor).unwrap_or_default();
 
             // Invalid utf-8 bytes are replaced with the U+FFFD (�) utf-8 replacement code point.
             let len = match utf8::url_code_point(cursor) {
@@ -1669,7 +1666,7 @@ mod common {
             forward!(cursor by len.get() as usize);
 
             #[cfg(test)]
-            let _remaining = str::from_utf8(*cursor).unwrap_or_default();
+            let _remaining = str::from_utf8(cursor).unwrap_or_default();
 
             Ok(position)
         }
@@ -1977,10 +1974,10 @@ pub mod utf8 {
         let is_url_code_point = match code_point {
             // ASCII code points
             0..=0x7F => (ASCII_URL_CODE_POINT >> code_point) & 1 == 1,
-            // Under U+00A0
-            0x80..=0x9F => false,
-            // 3-byte non-characters
-            0xFDD0..=0xFDEF => false,
+
+            // Under U+00A0 & 3-byte non-characters
+            0x80..=0x9F | 0xFDD0..=0xFDEF => false,
+
             // Other non-characters
             _ => code_point & 0xFFFE != 0xFFFE,
         };
@@ -2765,8 +2762,6 @@ mod test {
                 acc
             });
 
-        println!("{url_input:?}");
-
         let mut backing = [0; 128];
         let (url, mut validation_errors) = Url::new(url_input.as_bytes(), &mut backing).unwrap();
 
@@ -2787,7 +2782,7 @@ mod test {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "not implemented"]
     fn url_scheme_missing_following_solidus_file() {
         const URL: &str = "file:c:/my-secret-folder";
 
@@ -2802,7 +2797,7 @@ mod test {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "not implemented"]
     fn url_scheme_missing_following_solidus_special_non_file() {
         const URL: &str = "http:example.com";
 
@@ -2857,7 +2852,7 @@ mod test {
         let mut backing = [0; 128];
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
 
-        assert_eq!(err, Error::HostMissing)
+        assert_eq!(err, Error::HostMissing);
     }
 
     #[test]
@@ -2867,7 +2862,7 @@ mod test {
         let mut backing = [0; 128];
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
 
-        assert_eq!(err, Error::HostMissing)
+        assert_eq!(err, Error::HostMissing);
     }
 
     #[test]
@@ -2877,7 +2872,7 @@ mod test {
         let mut backing = [0; 128];
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
 
-        assert_eq!(err, Error::PortOutOfRange)
+        assert_eq!(err, Error::PortOutOfRange);
     }
 
     #[test]
@@ -2887,11 +2882,11 @@ mod test {
         let mut backing = [0; 128];
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
 
-        assert_eq!(err, Error::PortInvalid)
+        assert_eq!(err, Error::PortInvalid);
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic = "assertion `left != right` failed\n  left: []\n right: []"]
     fn url_err_empty_backing() {
         const URL: &str = "example.com";
 
@@ -2903,7 +2898,7 @@ mod test {
     fn utf8_url_code_point_matches_reference() {
         let mut backing = [0; 4];
 
-        for code_point in 0..0x10FFFF {
+        for code_point in 0..0x10_FFFF {
             let Some(c) = char::from_u32(code_point) else {
                 continue;
             };

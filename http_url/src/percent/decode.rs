@@ -35,14 +35,14 @@ impl<'data, I: Iterator<Item = &'data u8>> DecodeIter<'data, I> {
         self.len = 1;
 
         #[cfg(test)]
-        let _h = char::from_u32(self.backing[0] as u32).unwrap_or_default();
+        let _h = char::from_u32(u32::from(self.backing[0])).unwrap_or_default();
         let h = (self.backing[0] as char).to_digit(16)? as u8;
 
         self.backing[1] = *self.iter.next()?;
         self.len = 2;
 
         #[cfg(test)]
-        let _l = char::from_u32(self.backing[1] as u32).unwrap_or_default();
+        let _l = char::from_u32(u32::from(self.backing[1])).unwrap_or_default();
         let l = (self.backing[1] as char).to_digit(16)? as u8;
 
         self.len = 0;
@@ -86,7 +86,7 @@ mod test {
     #[test]
     fn decode_simple() {
         let message = b"Hello%20World";
-        let mut iter = decode(message.into_iter());
+        let mut iter = decode(message.iter());
 
         assert_byte_eq!(iter.next().unwrap(), b'H');
         assert_byte_eq!(iter.next().unwrap(), b'e');
@@ -106,7 +106,7 @@ mod test {
     #[test]
     fn decode_uppercase() {
         let message = b"username%3Apassword";
-        let mut iter = decode(message.into_iter());
+        let mut iter = decode(message.iter());
 
         assert_byte_eq!(iter.next().unwrap(), b'u');
         assert_byte_eq!(iter.next().unwrap(), b's');
@@ -132,7 +132,7 @@ mod test {
     #[test]
     fn decode_lowercase() {
         let message = b"username%3apassword";
-        let mut iter = decode(message.into_iter());
+        let mut iter = decode(message.iter());
 
         assert_byte_eq!(iter.next().unwrap(), b'u');
         assert_byte_eq!(iter.next().unwrap(), b's');
@@ -158,7 +158,7 @@ mod test {
     #[test]
     fn decode_invalid_encoding() {
         let message = b"Hello%0GWorld";
-        let mut iter = decode(message.into_iter());
+        let mut iter = decode(message.iter());
 
         assert_byte_eq!(iter.next().unwrap(), b'H');
         assert_byte_eq!(iter.next().unwrap(), b'e');

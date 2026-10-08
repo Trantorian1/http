@@ -16,7 +16,7 @@ pub fn encode_byte_to(c: u8, buffer: &mut [u8], set: EncodeSet) -> usize {
     let _bytes = str::from_utf8(buffer).unwrap_or_default();
 
     #[cfg(test)]
-    let _c = char::from_u32(c as u32).unwrap_or_default();
+    let _c = char::from_u32(u32::from(c)).unwrap_or_default();
 
     if set.should_percent_encode(c) {
         if buffer.len() < 3 {
