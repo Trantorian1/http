@@ -1,6 +1,7 @@
 {
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    nixlib.url = "github:nix-util/nixlib";
 
     kani-flake.url = "github:trantorian1/kani-flake";
     kani-flake.inputs.nixpkgs.follows = "nixpkgs";
@@ -8,19 +9,18 @@
     opencode-sandbox.url = "github:OpencodeSandbox/opencode-sandbox";
   };
 
-  outputs = {
-    self,
-    nixpkgs,
-    kani-flake,
-    opencode-sandbox,
-    ...
-  }: let
-    system = "x86_64-linux";
-    pkgs = nixpkgs.legacyPackages.${system};
-    kaniPackages = kani-flake.packages.${system};
+  outputs = {nixlib, ...} @ inputs: let
+    systems = ["x86_64-linux"];
+    util = nixlib.util {inherit systems inputs;};
   in {
-    packages.${system} = rec {
-      sandbox = opencode-sandbox.packages.${system}.sandbox.override {
+    packages = util.forEachSystem ({
+      pkgs,
+      opencode-sandbox,
+      kani-flake,
+      libpkgs,
+      ...
+    }: rec {
+      sandbox = opencode-sandbox.packages.sandbox.override {
         opencode-sandbox = {
           git.remote.url = "https://github.com/Trantorian1/http.git";
           git.shutdown.pushOnExit = false;
@@ -34,13 +34,12 @@
         };
       };
 
-      devenv = pkgs.buildEnv {
-        name = "devenv";
-        paths = with pkgs; [
+      devenv = libpkgs.mkEnv {
+        packages = with pkgs; [
           cargo-bolero
 
-          kaniPackages.kani
-          (kaniPackages.rust-bin.override {
+          kani-flake.packages.kani
+          (kani-flake.packages.rust-bin.override {
             extensions = [
               "rust-analyzer"
               "rust-src"
@@ -49,10 +48,16 @@
           })
         ];
       };
-    };
+    });
 
-    devShells.${system}.default = pkgs.mkShell {
-      buildInputs = [self.packages.${system}.devenv];
-    };
+    devShells = util.forEachSystem ({
+      self,
+      pkgs,
+      ...
+    }: {
+      default = pkgs.mkShell {
+        packages = [self.packages.devenv];
+      };
+    });
   };
 }
