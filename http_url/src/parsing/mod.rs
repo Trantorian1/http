@@ -72,6 +72,7 @@ mod matchers {
     ///
     /// [URL standard]: https://infra.spec.whatwg.org/#c0-control-or-space
     /// [C0 control]: https://infra.spec.whatwg.org/#c0-control
+    #[inline]
     pub(super) fn c0_control_or_space(c: u8) -> bool {
         c <= b' ' // U+0000 to U+0020
     }
@@ -83,6 +84,7 @@ mod matchers {
     /// [URL standard]: https://infra.spec.whatwg.org/#ascii-alpha
     /// [ASCII upper alpha]: https://infra.spec.whatwg.org/#ascii-upper-alpha
     /// [ASCII lower alpha]: https://infra.spec.whatwg.org/#ascii-lower-alpha
+    #[inline]
     pub(super) fn ascii_alpha(c: u8) -> bool {
         c.is_ascii_alphabetic()
     }
@@ -140,6 +142,7 @@ struct Parser<'input, 'output> {
 }
 
 impl<'input, 'output> Parser<'input, 'output> {
+    #[inline]
     fn new(bytes: &'input [u8], backing: &'output mut [u8]) -> Self {
         assert_ne!(backing, []);
 
@@ -150,6 +153,7 @@ impl<'input, 'output> Parser<'input, 'output> {
         }
     }
 
+    #[inline]
     fn parse<'base>(
         mut self,
         base: Url<'base>,
@@ -166,10 +170,11 @@ mod state_machine {
     #[allow(clippy::wildcard_imports)]
     use super::*;
 
-    impl<'input, 'output> Parser<'input, 'output> {
+    impl<'output> Parser<'_, 'output> {
         /// Input sanitization
         ///
         /// Removes leading and trailing C0 control or space code points.
+        #[inline]
         pub(super) fn state_c0_control_or_space(&mut self) {
             // Leading C0 control or space
             if let Some(c0_first) = self.cursor.first()
@@ -208,6 +213,7 @@ mod state_machine {
         /// state. This is the entry point for parsing further segments.
         ///
         /// [Scheme state]: https://url.spec.whatwg.org#scheme-start-state
+        #[inline]
         pub(super) fn state_scheme(mut self) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             if let Some(first) = self.cursor.first()
                 && matchers::ascii_alpha(*first)
@@ -300,6 +306,7 @@ mod state_machine {
             todo!()
         }
 
+        #[inline]
         pub(super) fn state_special_authority(
             mut self,
             scheme: segment::Scheme,
@@ -375,6 +382,7 @@ mod state_machine {
             self.common_after_scheme::<SPECIAL>(scheme, default_scheme_port)
         }
 
+        #[inline]
         pub(super) fn state_nonspecial(
             mut self,
             scheme: segment::Scheme,
@@ -404,7 +412,7 @@ mod state_machine {
                         segment::Username(next..next),
                         segment::Password(next..next),
                         segment::Host(next..next),
-                        segment::Port(None),
+                        &segment::Port(None),
                     )
                 }
             } else {
@@ -467,9 +475,10 @@ mod state_machine {
         ///
         /// [`InvalidCredentials`]: ValidationError::InvalidCredentials
         /// [`HostMissing`]: Error::HostMissing
-        pub(super) fn state_authority<'parsing, const SPECIAL: bool>(
+        #[inline]
+        pub(super) fn state_authority<const SPECIAL: bool>(
             &mut self,
-            scheme: &'parsing segment::Scheme,
+            scheme: &'_ segment::Scheme,
         ) -> Result<(segment::Username, segment::Password), Error> {
             // == authority state ======================================================================
             //
@@ -649,6 +658,7 @@ mod state_machine {
         ///
         /// [`host`]: Self::state_hostname
         /// [`port`]: port::parse
+        #[inline]
         pub(super) fn state_host<'parsing, const SPECIAL: bool>(
             &mut self,
             username: &'parsing segment::Username,
@@ -765,6 +775,7 @@ mod state_machine {
         ///
         /// [Hostname state]: https://url.spec.whatwg.org/#hostname-state
         /// [`HostMissing`]: Error::HostMissing
+        #[inline]
         pub(super) fn state_hostname<'parsing, const SPECIAL: bool, const PORT: bool>(
             &mut self,
             username: &'parsing segment::Username,
@@ -831,6 +842,7 @@ mod state_machine {
             Ok(segment::Host(host))
         }
 
+        #[inline]
         pub(super) fn state_port<const SPECIAL: bool>(
             &mut self,
             default_scheme_port: u16,
@@ -906,9 +918,10 @@ mod state_machine {
             }
         }
 
-        pub(super) fn state_path<'parsing, const SPECIAL: bool>(
+        #[inline]
+        pub(super) fn state_path<const SPECIAL: bool>(
             &mut self,
-            host: &'parsing segment::Host,
+            host: &'_ segment::Host,
         ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
             let path_start = self.buffer.len();
             let mut path_stop = path_start;
@@ -999,13 +1012,14 @@ mod state_machine {
             Ok((path, query, fragment))
         }
 
+        #[inline]
         pub(super) fn state_path_opaque(
             &mut self,
         ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
             const SPECIAL: bool = false;
 
-            fn handle_query<'input, 'output, 'parsing>(
-                parser: &'parsing mut Parser<'input, 'output>,
+            fn handle_query(
+                parser: &mut Parser<'_, '_>,
                 path: segment::Path,
             ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
                 // Skip U+003F (?) query segment delimiter
@@ -1019,8 +1033,8 @@ mod state_machine {
                 Ok((path, query, fragment))
             }
 
-            fn handle_fragment<'input, 'output, 'parsing>(
-                parser: &'parsing mut Parser<'input, 'output>,
+            fn handle_fragment(
+                parser: &mut Parser<'_, '_>,
                 path: segment::Path,
                 query: segment::Query,
             ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
@@ -1105,6 +1119,7 @@ mod state_machine {
             Ok((path, query, fragment))
         }
 
+        #[inline]
         pub(super) fn state_query<const SPECIAL: bool>(
             &mut self,
         ) -> Result<(segment::Query, segment::Fragment), Error> {
@@ -1157,6 +1172,7 @@ mod state_machine {
             Ok((query, fragment))
         }
 
+        #[inline]
         pub(super) fn state_fragment(&mut self) -> Result<segment::Fragment, Error> {
             let fragment_start = self.buffer.push(b'#')?;
             let mut fragment_stop = fragment_start;
@@ -1192,7 +1208,8 @@ mod common {
     #[allow(clippy::wildcard_imports)]
     use super::*;
 
-    impl<'input, 'output> Parser<'input, 'output> {
+    impl<'output> Parser<'_, 'output> {
+        #[inline]
         pub(super) fn common_after_scheme<const SPECIAL: bool>(
             mut self,
             scheme: segment::Scheme,
@@ -1218,16 +1235,17 @@ mod common {
             #[cfg(test)]
             let _host = utf8::from_bytes(&self.buffer[host.0.clone()]);
 
-            self.common_after_host::<SPECIAL>(scheme, username, password, host, port)
+            self.common_after_host::<SPECIAL>(scheme, username, password, host, &port)
         }
 
+        #[inline]
         pub(super) fn common_after_host<const SPECIAL: bool>(
             mut self,
             scheme: segment::Scheme,
             username: segment::Username,
             password: segment::Password,
             host: segment::Host,
-            port: segment::Port,
+            port: &segment::Port,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             let (path, query, fragment) = self.state_path::<SPECIAL>(&host)?;
 
@@ -1264,7 +1282,8 @@ mod encode {
     #[allow(clippy::wildcard_imports)]
     use super::*;
 
-    impl<'input, 'output> Parser<'input, 'output> {
+    impl Parser<'_, '_> {
+        #[inline]
         pub(super) fn encode_percent_delimiter(&mut self) -> Result<usize, Error> {
             // Invalid percent-encodings are still serialized and an error is logged.
             let mut position = self.buffer.push(b'%')?;
@@ -1289,6 +1308,7 @@ mod encode {
             Ok(position)
         }
 
+        #[inline]
         pub(super) fn encode_utf8(
             &mut self,
             encoding: crate::percent::EncodeSet,
@@ -1351,11 +1371,13 @@ mod util {
     #[allow(clippy::wildcard_imports)]
     use super::*;
 
-    impl<'input, 'output> Parser<'input, 'output> {
+    impl Parser<'_, '_> {
+        #[inline]
         pub(super) fn log_error(&mut self, error: ValidationError) {
             self.error_bitset.add(error);
         }
 
+        #[inline]
         pub(super) fn skip_ascii_tab_or_newline(&mut self) -> usize {
             self.cursor
                 .iter()
@@ -1464,6 +1486,7 @@ pub mod utf8 {
         Truncated,
     }
 
+    #[cfg(test)]
     pub(super) fn from_bytes(bytes: &[u8]) -> &str {
         str::from_utf8(bytes).unwrap_or_default()
     }
