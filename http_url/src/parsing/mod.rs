@@ -9,9 +9,10 @@ use macro_util::prelude::*;
 
 use super::Url;
 use super::percent;
+use super::segment;
 
 impl<'data> Url<'data> {
-    /// Tries to parse a stream of network bytes into a URL.
+    /// Tries to parse a stream of raw network bytes into a URL.
     ///
     /// # Panics
     ///
@@ -36,31 +37,31 @@ impl<'data> Url<'data> {
     ///
     /// assert_eq!(validation_errors.len(), 0);
     ///
-    /// assert_utf8_eq!(url.scheme, b"http");
-    /// assert_utf8_eq!(url.host, b"example.com");
-    /// assert_eq!(url.port, Some(123));
-    /// assert_utf8_eq!(url.path, b"/path/to/file");
-    /// assert_utf8_eq!(url.query, b"query");
-    /// assert_utf8_eq!(url.fragment, b"fragment");
+    /// assert_utf8_eq!(url.scheme(), b"http");
+    /// assert_utf8_eq!(url.host(), b"example.com");
+    /// assert_eq!(url.port(), Some(123));
+    /// assert_utf8_eq!(url.path(), b"/path/to/file");
+    /// assert_utf8_eq!(url.query(), b"query");
+    /// assert_utf8_eq!(url.fragment(), b"fragment");
     /// ```
     pub fn new(
         bytes: &[u8],
         backing: &'data mut [u8],
     ) -> Result<(Self, ValidationErrorIter), Error> {
-        Parser::new(bytes, backing).parse(Url::emtpy())
+        Parser::new(bytes, backing).parse(&Url::emtpy())
     }
 
     fn emtpy() -> Self {
         Self {
-            backing: &[],
-            scheme: &[],
-            username: &[],
-            password: &[],
-            host: &[],
-            port: None,
-            path: &[],
-            query: &[],
-            fragment: &[],
+            backing: Default::default(),
+            scheme: Default::default(),
+            username: Default::default(),
+            password: Default::default(),
+            host: Default::default(),
+            port: Default::default(),
+            path: Default::default(),
+            query: Default::default(),
+            fragment: Default::default(),
         }
     }
 }
@@ -88,32 +89,6 @@ mod matchers {
     pub(super) fn ascii_alpha(c: u8) -> bool {
         c.is_ascii_alphabetic()
     }
-}
-
-mod segment {
-    #[repr(transparent)]
-    pub(super) struct Scheme(pub std::ops::Range<usize>);
-
-    #[repr(transparent)]
-    pub(super) struct Username(pub std::ops::Range<usize>);
-
-    #[repr(transparent)]
-    pub(super) struct Password(pub std::ops::Range<usize>);
-
-    #[repr(transparent)]
-    pub(super) struct Host(pub std::ops::Range<usize>);
-
-    #[repr(transparent)]
-    pub(super) struct Port(pub Option<u16>);
-
-    #[repr(transparent)]
-    pub(super) struct Path(pub std::ops::Range<usize>);
-
-    #[repr(transparent)]
-    pub(super) struct Query(pub std::ops::Range<usize>);
-
-    #[repr(transparent)]
-    pub(super) struct Fragment(pub std::ops::Range<usize>);
 }
 
 macro_rules! ascii_tab_or_newline {
@@ -156,10 +131,10 @@ impl<'input, 'output> Parser<'input, 'output> {
     #[inline]
     fn parse<'base>(
         mut self,
-        base: Url<'base>,
+        base: &Url<'base>,
     ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
         self.state_c0_control_or_space();
-        self.state_scheme()
+        self.state_scheme(base)
     }
 }
 
@@ -214,7 +189,12 @@ mod state_machine {
         ///
         /// [Scheme state]: https://url.spec.whatwg.org#scheme-start-state
         #[inline]
-        pub(super) fn state_scheme(mut self) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        pub(super) fn state_scheme(
+            mut self,
+            base: &Url<'_>,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            let checkpoint = self.cursor;
+
             if let Some(first) = self.cursor.first()
                 && matchers::ascii_alpha(*first)
             {
@@ -272,19 +252,49 @@ mod state_machine {
                     #[cfg(test)]
                     let _remaining = utf8::from_bytes(self.cursor);
 
+                    // We specify each arm explicitly instead of using pattern capture to make it
+                    // easier for the compiler to inline each scheme comparison on the base URL.
                     match &self.buffer[scheme.0.clone()] {
                         b"file" => todo!("file state: https://url.spec.whatwg.org/#file-state"),
 
                         b"ftp" => {
-                            return self.state_special_authority(scheme, 21);
+                            return if base.scheme() == b"ftp" {
+                                self.state_special_relative_or_authority(base, scheme, 21)
+                            } else {
+                                self.state_special_authority_slashes(scheme, 21)
+                            };
                         },
 
-                        b"http" | b"ws" => {
-                            return self.state_special_authority(scheme, 80);
+                        b"http" => {
+                            return if base.scheme() == b"http" {
+                                self.state_special_relative_or_authority(base, scheme, 80)
+                            } else {
+                                self.state_special_authority_slashes(scheme, 80)
+                            };
                         },
 
-                        b"https" | b"wss" => {
-                            return self.state_special_authority(scheme, 443);
+                        b"ws" => {
+                            return if base.scheme() == b"ws" {
+                                self.state_special_relative_or_authority(base, scheme, 80)
+                            } else {
+                                self.state_special_authority_slashes(scheme, 80)
+                            };
+                        },
+
+                        b"https" => {
+                            return if base.scheme() == b"https" {
+                                self.state_special_relative_or_authority(base, scheme, 443)
+                            } else {
+                                self.state_special_authority_slashes(scheme, 443)
+                            };
+                        },
+
+                        b"wss" => {
+                            return if base.scheme() == b"wss" {
+                                self.state_special_relative_or_authority(base, scheme, 443)
+                            } else {
+                                self.state_special_authority_slashes(scheme, 443)
+                            };
                         },
 
                         // non-special scheme
@@ -295,68 +305,491 @@ mod state_machine {
                 }
             }
 
-            // == No scheme state ======================================================================
-            //
-            // Set buffer to the empty string and start over (from the first code point in input).
-            //
-            // =========================================================================================
-
             self.buffer.clear();
+            self.cursor = checkpoint;
 
-            todo!()
+            self.state_scheme_none(base)
         }
 
-        #[inline]
-        pub(super) fn state_special_authority(
+        /// # [No scheme state]
+        ///
+        /// [No scheme state]: https://url.spec.whatwg.org/#no-scheme-state
+        pub(super) fn state_scheme_none(
             mut self,
+            base: &Url<'_>,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            const SPECIAL: bool = false;
+
+            assert!(self.buffer.is_empty());
+
+            if !base.scheme.0.is_empty() {
+                if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+                    self.log_error(ValidationError::InvalidURLUnit);
+
+                    forward!(self.cursor, by 1);
+                    let skip = self.skip_ascii_tab_or_newline();
+                    forward!(self.cursor, by skip);
+                }
+
+                match self.cursor.first() {
+                    Some(b'#') if base.is_opaque() => {
+                        forward!(self.cursor, by 1);
+
+                        self.buffer.push_str(&base.backing[..base.query.0.end])?;
+
+                        let Url {
+                            scheme,
+                            username,
+                            password,
+                            host,
+                            port,
+                            path,
+                            query,
+                            ..
+                        } = base;
+
+                        #[cfg(test)]
+                        {
+                            let _username = utf8::from_bytes(&self.buffer[username.0.clone()]);
+                            let _password = utf8::from_bytes(&self.buffer[password.0.clone()]);
+                            let _host = utf8::from_bytes(&self.buffer[host.0.clone()]);
+                            let _path = utf8::from_bytes(&self.buffer[path.0.clone()]);
+                            let _query = utf8::from_bytes(&self.buffer[query.0.clone()]);
+                        }
+
+                        let fragment = self.state_fragment()?;
+
+                        #[cfg(test)]
+                        {
+                            let _fragment = utf8::from_bytes(&self.buffer[fragment.0.clone()]);
+                        }
+
+                        let backing = self.buffer.into_inner();
+                        let error_bitset = self.error_bitset;
+
+                        Ok((
+                            Url {
+                                backing,
+
+                                scheme: scheme.clone(),
+                                username: username.clone(),
+                                password: password.clone(),
+                                host: host.clone(),
+                                port: port.clone(),
+                                path: path.clone(),
+                                query: query.clone(),
+                                fragment,
+                            },
+                            error_bitset.iter(),
+                        ))
+                    },
+
+                    _ if base.is_opaque() => Err(Error::MissingSchemeNonRelativeUrl),
+
+                    _ if base.scheme() == b"file" => {
+                        todo!("file state: https://url.spec.whatwg.org/#file-state")
+                    },
+
+                    Some(b'/') => {
+                        forward!(self.cursor, by 1);
+
+                        let scheme = base.scheme.clone();
+
+                        return self.state_relative_slash::<SPECIAL>(base, scheme, 0);
+                    },
+
+                    _ => self.state_relative::<SPECIAL>(base),
+                }
+            } else {
+                Err(Error::MissingSchemeNonRelativeUrl)
+            }
+        }
+
+        /// # [Special relative or authority state]
+        ///
+        /// [Special relative or authority state]: https://url.spec.whatwg.org/#special-relative-or-authority-state
+        #[inline]
+        pub(super) fn state_special_relative_or_authority(
+            mut self,
+            base: &Url<'_>,
             scheme: segment::Scheme,
             default_scheme_port: u16,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             const SPECIAL: bool = true;
 
-            // == Special authority slashes state ==================================================
-            //
-            // Ensure the scheme is followed by two U+002F (/).
-            //
-            // =====================================================================================
+            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+                self.log_error(ValidationError::InvalidURLUnit);
 
-            let mut sequential_solidus = 0;
-            while !self.cursor.is_empty() {
-                match *self.cursor {
-                    [ascii_tab_or_newline!(), ..] => {
-                        self.log_error(ValidationError::InvalidURLUnit);
-
-                        forward!(self.cursor, by 1);
-                        let skip = self.skip_ascii_tab_or_newline();
-                        forward!(self.cursor, by skip);
-                    },
-
-                    [b'/', ..] => {
-                        forward!(self.cursor, by 1);
-                        sequential_solidus += 1;
-
-                        if sequential_solidus >= 2 {
-                            break;
-                        }
-                    },
-
-                    _ => {
-                        self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
-
-                        todo!("relative state: https://url.spec.whatwg.org/#relative-state")
-                    },
-                }
+                forward!(self.cursor, by 1);
+                let skip = self.skip_ascii_tab_or_newline();
+                forward!(self.cursor, by skip);
             }
 
-            // == Special authority ignore slashes state ===========================================
-            //
-            //  The specs aren't very clear on what happens in case an invalid combination of
-            //  slashes precedes the authority. However, based on the rust_url source code, it seems
-            //  the correct approach is to ignore ALL slashes following the scheme.
-            //
-            // https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L451-L457
-            //
-            // =====================================================================================
+            // ASCII tab or newline  already accounted for
+            match self.cursor.first() {
+                Some(b'/') => {
+                    forward!(self.cursor, by 1);
+
+                    self.state_relative_slash::<SPECIAL>(base, scheme, default_scheme_port)
+                },
+
+                Some(b'\\') => {
+                    forward!(self.cursor, by 1);
+
+                    self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                    self.log_error(ValidationError::InvalidReverseSolidus);
+
+                    self.state_relative_slash::<SPECIAL>(base, scheme, default_scheme_port)
+                },
+
+                _ => {
+                    self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+
+                    self.state_relative::<SPECIAL>(base)
+                },
+            }
+        }
+
+        /// # [Relative state]
+        ///
+        /// This isn't exactly the same state implementation as in the specs. This is because those
+        /// steps which are missing take place in previous states in order to cut down on branching,
+        /// so in practice the _overall_ implementation is equivalent.
+        ///
+        /// In particular, checking for U+005C (\) in case URL is special is done in
+        /// [`state_special_relative_or_authority`] which removes an extra branch indirection.
+        ///
+        /// Similarly, checking for U+002F (/) has been removed as it can be done more efficiently
+        /// at the call site in order to branch directly to `state_special_relative_or_authority`
+        /// without having to call this function.
+        ///
+        /// Setting URL's scheme's to `base`'s scheme is also removed. In the case of
+        /// `state_special_relative_or_authority` we don't need it, as that state only occurs if
+        /// URL's scheme is the same as `base`'s. Otherwise, it is set manually, such as in
+        /// [`state_scheme_none`].
+        ///
+        /// [Relative state]: https://url.spec.whatwg.org/#relative-state
+        /// [`state_special_relative_or_authority`]: Self::state_special_relative_or_authority
+        /// [`state_scheme_none`]: Self::state_scheme_none
+        pub(super) fn state_relative<const SPECIAL: bool>(
+            mut self,
+            base: &Url<'_>,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            match self.cursor.first() {
+                Some(b'?') => {
+                    // This is an optimization over the naive relative state fallback.
+                    //
+                    // Since the next segment to be parsed will be the query we only copy base
+                    // URL segments up to that point and immediately move to the query state.
+
+                    self.buffer.push_str(&base.backing[..base.path.0.start])?;
+
+                    let Url {
+                        scheme,
+                        username,
+                        password,
+                        host,
+                        port,
+                        path,
+                        ..
+                    } = base;
+
+                    #[cfg(test)]
+                    {
+                        let _username = utf8::from_bytes(&self.buffer[username.0.clone()]);
+                        let _password = utf8::from_bytes(&self.buffer[password.0.clone()]);
+                        let _host = utf8::from_bytes(&self.buffer[host.0.clone()]);
+                        let _path = utf8::from_bytes(&self.buffer[path.0.clone()]);
+                    }
+
+                    let (query, fragment) = self.state_query::<SPECIAL>()?;
+
+                    #[cfg(test)]
+                    {
+                        let _query = utf8::from_bytes(&self.buffer[query.0.clone()]);
+                        let _fragment = utf8::from_bytes(&self.buffer[fragment.0.clone()]);
+                    }
+
+                    let backing = self.buffer.into_inner();
+                    let error_bitset = self.error_bitset;
+
+                    return Ok((
+                        Url {
+                            backing,
+
+                            scheme: scheme.clone(),
+                            username: username.clone(),
+                            password: password.clone(),
+                            host: host.clone(),
+                            port: port.clone(),
+                            path: path.clone(),
+                            query,
+                            fragment,
+                        },
+                        error_bitset.iter(),
+                    ));
+                },
+                Some(b'#') => {
+                    // This is an optimization over the naive relative state fallback.
+                    //
+                    // Since the next segment to be parsed will be the fragment we only copy
+                    // base URL segments up to that point and immediately move to the framgnet
+                    // state.
+
+                    self.buffer.push_str(&base.backing[..base.query.0.end])?;
+
+                    let Url {
+                        scheme,
+                        username,
+                        password,
+                        host,
+                        port,
+                        path,
+                        query,
+                        ..
+                    } = base;
+
+                    #[cfg(test)]
+                    {
+                        let _username = utf8::from_bytes(&self.buffer[username.0.clone()]);
+                        let _password = utf8::from_bytes(&self.buffer[password.0.clone()]);
+                        let _host = utf8::from_bytes(&self.buffer[host.0.clone()]);
+                        let _path = utf8::from_bytes(&self.buffer[path.0.clone()]);
+                        let _query = utf8::from_bytes(&self.buffer[query.0.clone()]);
+                    }
+
+                    let fragment = self.state_fragment()?;
+
+                    #[cfg(test)]
+                    {
+                        let _fragment = utf8::from_bytes(&self.buffer[fragment.0.clone()]);
+                    }
+
+                    let backing = self.buffer.into_inner();
+                    let error_bitset = self.error_bitset;
+
+                    return Ok((
+                        Url {
+                            backing,
+
+                            scheme: scheme.clone(),
+                            username: username.clone(),
+                            password: password.clone(),
+                            host: host.clone(),
+                            port: port.clone(),
+                            path: path.clone(),
+                            query: query.clone(),
+                            fragment,
+                        },
+                        error_bitset.iter(),
+                    ));
+                },
+                Some(_) => {
+                    // Relative state fallback in case parsed network bytes don't start with a
+                    // slash.
+                    //
+                    // https://url.spec.whatwg.org/#relative-state
+
+                    todo!("relative state fallback: set url to base and shorten path")
+                },
+                None => {
+                    // This is an optimization over the naive relative state fallback.
+                    //
+                    // Since there are no more segments left to parse we just return the base
+                    // URL. Strange thing is the rust-url source code actually removes the
+                    // fragment in this case? TBH the specs themselves aren't very clear as to
+                    // what should happen in case we reach the EOF code point (it isn't
+                    // specified).
+                    //
+                    // https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L713-L714
+
+                    self.buffer
+                        .push_str(&base.backing[..base.fragment.0.start])?;
+
+                    let Url {
+                        scheme,
+                        username,
+                        password,
+                        host,
+                        port,
+                        path,
+                        query,
+                        ..
+                    } = base;
+
+                    // We follow rust-url on this one
+                    let fragment = segment::Fragment(query.0.end..query.0.end);
+
+                    #[cfg(test)]
+                    {
+                        let _username = utf8::from_bytes(&self.buffer[username.0.clone()]);
+                        let _password = utf8::from_bytes(&self.buffer[password.0.clone()]);
+                        let _host = utf8::from_bytes(&self.buffer[host.0.clone()]);
+                        let _path = utf8::from_bytes(&self.buffer[path.0.clone()]);
+                        let _query = utf8::from_bytes(&self.buffer[query.0.clone()]);
+                        let _fragment = utf8::from_bytes(&self.buffer[fragment.0.clone()]);
+                    }
+
+                    let backing = self.buffer.into_inner();
+                    let error_bitset = self.error_bitset;
+
+                    return Ok((
+                        Url {
+                            backing,
+
+                            scheme: scheme.clone(),
+                            username: username.clone(),
+                            password: password.clone(),
+                            host: host.clone(),
+                            port: port.clone(),
+                            path: path.clone(),
+                            query: query.clone(),
+                            fragment,
+                        },
+                        error_bitset.iter(),
+                    ));
+                },
+            }
+        }
+
+        /// # [Relative slash state]
+        ///
+        /// The specs want us to compare the current byte once more in the Relative State,
+        /// however the above checks in the Special Relative or Authority State guarantee that we
+        /// will always short-circuit to Relative Slash State immediately, since
+        ///
+        /// > "If c is U+002F (/), then set state to relative slash state.
+        /// > Otherwise, if url is special and c is U+005C (\), invalid-reverse-solidus
+        /// > validation error, set state to relative slash state."
+        ///
+        /// 'c' being the code point checked above in the Relative or Authority State. However
+        /// this part of the code executes IFF 'c' was U+002F (/) or U+005C (\) and we already
+        /// know the URL is special!
+        ///
+        /// [Relative slash state]: https://url.spec.whatwg.org/#relative-slash-state
+        pub(super) fn state_relative_slash<const SPECIAL: bool>(
+            mut self,
+            base: &Url<'_>,
+            scheme: segment::Scheme,
+            default_scheme_port: u16,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+                self.log_error(ValidationError::InvalidURLUnit);
+
+                forward!(self.cursor, by 1);
+                let skip = self.skip_ascii_tab_or_newline();
+                forward!(self.cursor, by skip);
+            }
+
+            // ASCII tab or newline  already accounted for
+            match self.cursor.first() {
+                Some(b'/') => {
+                    forward!(self.cursor, by 1);
+
+                    return self
+                        .state_special_authority_ignore_slashes(scheme, default_scheme_port);
+                },
+
+                Some(b'\\') => {
+                    forward!(self.cursor, by 1);
+
+                    self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                    self.log_error(ValidationError::InvalidReverseSolidus);
+
+                    return self
+                        .state_special_authority_ignore_slashes(scheme, default_scheme_port);
+                },
+
+                _ => {
+                    // Relative slash state fallback in case parsed network bytes starts with a
+                    // slash but no double slash.
+
+                    self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+
+                    self.buffer.clear();
+                    self.buffer.push_str(&base.backing[..base.path.0.start])?;
+
+                    return self.common_after_host::<SPECIAL>(
+                        scheme,
+                        base.username.clone(),
+                        base.password.clone(),
+                        base.host.clone(),
+                        base.port.clone(),
+                    );
+                },
+            }
+        }
+
+        /// # [Special authority slashes state]
+        ///
+        /// Ensure the scheme is followed by two U+002F (/).
+        ///
+        /// [Special authority slashes state]: https://url.spec.whatwg.org/#special-authority-slashes-state
+        #[inline]
+        pub(super) fn state_special_authority_slashes(
+            mut self,
+            scheme: segment::Scheme,
+            default_scheme_port: u16,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+                self.log_error(ValidationError::InvalidURLUnit);
+
+                forward!(self.cursor, by 1);
+                let skip = self.skip_ascii_tab_or_newline();
+                forward!(self.cursor, by skip);
+            };
+
+            // First slash
+            match self.cursor.first() {
+                Some(b'/') => {
+                    forward!(self.cursor, by 1);
+                },
+
+                _ => {
+                    self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+
+                    return self
+                        .state_special_authority_ignore_slashes(scheme, default_scheme_port);
+                },
+            }
+
+            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+                self.log_error(ValidationError::InvalidURLUnit);
+
+                forward!(self.cursor, by 1);
+                let skip = self.skip_ascii_tab_or_newline();
+                forward!(self.cursor, by skip);
+            };
+
+            // Second slash
+            match self.cursor.first() {
+                Some(b'/') => {
+                    forward!(self.cursor, by 1);
+                },
+
+                _ => {
+                    self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                },
+            }
+
+            return self.state_special_authority_ignore_slashes(scheme, default_scheme_port);
+        }
+
+        /// # [Special authority ignore slashes state]
+        ///
+        ///  The specs aren't very clear on what happens in case an invalid combination of
+        ///  slashes precedes the authority. However, based on the [rust_url source code], it seems
+        ///  the correct approach is to ignore ALL slashes following the scheme.
+        ///
+        /// [Special authority ignore slashes state]: https://url.spec.whatwg.org/#special-authority-ignore-slashes-state
+        /// [rust_url]: https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L451-L457
+        #[inline]
+        pub(super) fn state_special_authority_ignore_slashes(
+            mut self,
+            scheme: segment::Scheme,
+            default_scheme_port: u16,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            const SPECIAL: bool = true;
 
             while !self.cursor.is_empty() {
                 let c = self.cursor[0];
@@ -412,7 +845,7 @@ mod state_machine {
                         segment::Username(next..next),
                         segment::Password(next..next),
                         segment::Host(next..next),
-                        &segment::Port(None),
+                        segment::Port(None),
                     )
                 }
             } else {
@@ -445,14 +878,14 @@ mod state_machine {
                     Url {
                         backing,
 
-                        scheme: &backing[scheme.0],
-                        username: &backing[username.0],
-                        password: &backing[password.0],
-                        host: &backing[host.0],
-                        port: port.0,
-                        path: &backing[path.0],
-                        query: &backing[query.0],
-                        fragment: &backing[fragment.0],
+                        scheme,
+                        username,
+                        password,
+                        host,
+                        port,
+                        path,
+                        query,
+                        fragment,
                     },
                     self.error_bitset.iter(),
                 ))
@@ -849,9 +1282,7 @@ mod state_machine {
         ) -> Result<segment::Port, Error> {
             // ASCII tab or newline characters are skipped first so as not to cause the checkpoint to
             // parse them again.
-            if let Some(c) = self.cursor.first()
-                && matches!(c, ascii_tab_or_newline!())
-            {
+            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
                 forward!(self.cursor, by 1);
                 let skip = self.skip_ascii_tab_or_newline();
                 forward!(self.cursor, by skip);
@@ -1235,7 +1666,7 @@ mod common {
             #[cfg(test)]
             let _host = utf8::from_bytes(&self.buffer[host.0.clone()]);
 
-            self.common_after_host::<SPECIAL>(scheme, username, password, host, &port)
+            self.common_after_host::<SPECIAL>(scheme, username, password, host, port)
         }
 
         #[inline]
@@ -1245,7 +1676,7 @@ mod common {
             username: segment::Username,
             password: segment::Password,
             host: segment::Host,
-            port: &segment::Port,
+            port: segment::Port,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             let (path, query, fragment) = self.state_path::<SPECIAL>(&host)?;
 
@@ -1263,14 +1694,14 @@ mod common {
                 Url {
                     backing,
 
-                    scheme: &backing[scheme.0],
-                    username: &backing[username.0],
-                    password: &backing[password.0],
-                    host: &backing[host.0],
-                    port: port.0,
-                    path: &backing[path.0],
-                    query: &backing[query.0],
-                    fragment: &backing[fragment.0],
+                    scheme,
+                    username,
+                    password,
+                    host,
+                    port,
+                    path,
+                    query,
+                    fragment,
                 },
                 error_bitset.iter(),
             ))
@@ -1656,7 +2087,7 @@ pub mod utf8 {
         }
     }
 
-    /// Reference naive url code point implementation for use in tests.
+    /// Reference naive url code point implementation for use in formal proving.
     #[cfg(test)]
     pub(super) fn url_code_point_reference(bytes: &[u8]) -> CodePointUrl {
         let head = &bytes[..bytes.len().min(4)];
@@ -1731,14 +2162,14 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"user");
-        assert_utf8_eq!(url.password, b"password");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, Some(123));
-        assert_utf8_eq!(url.path, b"/path/to/file");
-        assert_utf8_eq!(url.query, b"query");
-        assert_utf8_eq!(url.fragment, b"fragment");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"user");
+        assert_utf8_eq!(url.password(), b"password");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), Some(123));
+        assert_utf8_eq!(url.path(), b"/path/to/file");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"fragment");
 
         assert_eq!(
             format!("{url}"),
@@ -1765,14 +2196,14 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"scheme");
-        assert_utf8_eq!(url.username, b"user");
-        assert_utf8_eq!(url.password, b"password");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, Some(123));
-        assert_utf8_eq!(url.path, b"/\\path\\to\\file");
-        assert_utf8_eq!(url.query, b"query\\nonspecial");
-        assert_utf8_eq!(url.fragment, b"fragment");
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"user");
+        assert_utf8_eq!(url.password(), b"password");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), Some(123));
+        assert_utf8_eq!(url.path(), b"/\\path\\to\\file");
+        assert_utf8_eq!(url.query(), b"query\\nonspecial");
+        assert_utf8_eq!(url.fragment(), b"fragment");
 
         assert_eq!(
             format!("{url}"),
@@ -1795,14 +2226,17 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"scheme");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/user:password@example.com:123/\\path\\to\\file");
-        assert_utf8_eq!(url.query, b"query\\nonspecial");
-        assert_utf8_eq!(url.fragment, b"fragment");
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(
+            url.path(),
+            b"/user:password@example.com:123/\\path\\to\\file"
+        );
+        assert_utf8_eq!(url.query(), b"query\\nonspecial");
+        assert_utf8_eq!(url.fragment(), b"fragment");
 
         assert_eq!(
             format!("{url}"),
@@ -1826,14 +2260,17 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"scheme");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"user : password@example.com:123/path/to/file%20");
-        assert_utf8_eq!(url.query, b"query\\nonspecial");
-        assert_utf8_eq!(url.fragment, b"fragment");
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(
+            url.path(),
+            b"user : password@example.com:123/path/to/file%20"
+        );
+        assert_utf8_eq!(url.query(), b"query\\nonspecial");
+        assert_utf8_eq!(url.fragment(), b"fragment");
 
         assert_eq!(
             format!("{url}"),
@@ -1854,9 +2291,9 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"user");
-        assert_utf8_eq!(url.password, b"password");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"user");
+        assert_utf8_eq!(url.password(), b"password");
 
         assert_eq!(format!("{url}"), "http://user:password@example.com/");
     }
@@ -1874,9 +2311,9 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"scheme");
-        assert_utf8_eq!(url.username, b"%5Cuser");
-        assert_utf8_eq!(url.password, b"%5Cpassword%5C");
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"%5Cuser");
+        assert_utf8_eq!(url.password(), b"%5Cpassword%5C");
 
         assert_eq!(
             format!("{url}"),
@@ -1897,9 +2334,9 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"user");
-        assert_utf8_eq!(url.password, b"");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"user");
+        assert_utf8_eq!(url.password(), b"");
 
         assert_eq!(format!("{url}"), "http://user@example.com/");
     }
@@ -1917,9 +2354,9 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"password");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"password");
 
         assert_eq!(format!("{url}"), "http://:password@example.com/");
     }
@@ -1937,9 +2374,9 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"user");
-        assert_utf8_eq!(url.password, b"password%40");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"user");
+        assert_utf8_eq!(url.password(), b"password%40");
 
         assert_eq!(format!("{url}"), "http://user:password%40@example.com/");
     }
@@ -1953,10 +2390,10 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
 
         assert_eq!(format!("{url}"), "http://example.com/");
     }
@@ -1970,10 +2407,10 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"scheme");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
 
         assert_eq!(format!("{url}"), "scheme://example.com/");
     }
@@ -1988,10 +2425,10 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"scheme");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"");
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"");
 
         assert_eq!(format!("{url}"), "scheme://");
     }
@@ -2005,14 +2442,14 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
 
         assert_eq!(format!("{url}"), "http://example.com:123/");
 
-        assert_eq!(url.port, Some(123));
+        assert_eq!(url.port(), Some(123));
     }
 
     #[test]
@@ -2024,14 +2461,14 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"scheme");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
 
         assert_eq!(format!("{url}"), "scheme://example.com:123/");
 
-        assert_eq!(url.port, Some(123));
+        assert_eq!(url.port(), Some(123));
     }
 
     #[test]
@@ -2043,12 +2480,12 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"ftp");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme(), b"ftp");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
 
-        assert_eq!(url.port, None);
+        assert_eq!(url.port(), None);
 
         assert_eq!(format!("{url}"), "ftp://example.com/");
     }
@@ -2062,12 +2499,12 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
 
-        assert_eq!(url.port, None);
+        assert_eq!(url.port(), None);
 
         assert_eq!(format!("{url}"), "http://example.com/");
     }
@@ -2081,12 +2518,12 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"ws");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme(), b"ws");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
 
-        assert_eq!(url.port, None);
+        assert_eq!(url.port(), None);
 
         assert_eq!(format!("{url}"), "ws://example.com/");
     }
@@ -2100,12 +2537,12 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"https");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme(), b"https");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
 
-        assert_eq!(url.port, None);
+        assert_eq!(url.port(), None);
 
         assert_eq!(format!("{url}"), "https://example.com/");
     }
@@ -2119,12 +2556,12 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"wss");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme(), b"wss");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
 
-        assert_eq!(url.port, None);
+        assert_eq!(url.port(), None);
 
         assert_eq!(format!("{url}"), "wss://example.com/");
     }
@@ -2138,12 +2575,12 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
 
-        assert_eq!(url.port, None);
+        assert_eq!(url.port(), None);
 
         assert_eq!(format!("{url}"), "http://example.com/");
     }
@@ -2157,12 +2594,12 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/cat/pictures");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/cat/pictures");
 
         assert_eq!(format!("{url}"), "http://example.com/cat/pictures");
     }
@@ -2180,12 +2617,12 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"//\\////\\\\\\///////");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"//\\////\\\\\\///////");
 
         assert_eq!(format!("{url}"), "http://example.com//\\////\\\\\\///////");
     }
@@ -2204,12 +2641,12 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"scheme");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/\\cat\\pictures\\");
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/\\cat\\pictures\\");
 
         assert_eq!(format!("{url}"), "scheme://example.com/\\cat\\pictures\\");
     }
@@ -2223,13 +2660,13 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/");
-        assert_utf8_eq!(url.query, b"name=cat.txt");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/");
+        assert_utf8_eq!(url.query(), b"name=cat.txt");
 
         assert_eq!(format!("{url}"), "http://example.com/?name=cat.txt");
     }
@@ -2248,13 +2685,13 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"scheme");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/");
-        assert_utf8_eq!(url.query, b"\\name=\\cat.txt");
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/");
+        assert_utf8_eq!(url.query(), b"\\name=\\cat.txt");
 
         assert_eq!(format!("{url}"), "scheme://example.com/?\\name=\\cat.txt");
     }
@@ -2268,14 +2705,14 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/");
-        assert_utf8_eq!(url.query, b"");
-        assert_utf8_eq!(url.fragment, b"about");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/");
+        assert_utf8_eq!(url.query(), b"");
+        assert_utf8_eq!(url.fragment(), b"about");
 
         assert_eq!(format!("{url}"), "http://example.com/#about");
     }
@@ -2289,12 +2726,12 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/pictures/of%20my%20cat/");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/pictures/of%20my%20cat/");
 
         assert_eq!(
             format!("{url}"),
@@ -2315,12 +2752,12 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/pictures/of%%20my%%20cat/");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/pictures/of%%20my%%20cat/");
 
         assert_eq!(
             format!("{url}"),
@@ -2341,12 +2778,12 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/pictures/of%Azmy%Zacat/");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/pictures/of%Azmy%Zacat/");
 
         assert_eq!(
             format!("{url}"),
@@ -2367,12 +2804,12 @@ mod test {
         );
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/pictures/of%20my%20cat/");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/pictures/of%20my%20cat/");
 
         assert_eq!(
             format!("{url}"),
@@ -2393,12 +2830,12 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/pi%EF%BF%BDc%EF%BF%BDtu%EF%BF%BDres");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/pi%EF%BF%BDc%EF%BF%BDtu%EF%BF%BDres");
 
         assert_eq!(
             format!("{url}"),
@@ -2419,12 +2856,12 @@ mod test {
 
         assert_eq!(validation_errors.next(), None);
 
-        assert_utf8_eq!(url.scheme, b"http");
-        assert_utf8_eq!(url.username, b"");
-        assert_utf8_eq!(url.password, b"");
-        assert_utf8_eq!(url.host, b"example.com");
-        assert_eq!(url.port, None);
-        assert_utf8_eq!(url.path, b"/pictures%EF%BF%BD");
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/pictures%EF%BF%BD");
 
         assert_eq!(format!("{url}"), "http://example.com/pictures%EF%BF%BD");
     }
