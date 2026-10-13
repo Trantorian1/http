@@ -34,6 +34,27 @@ pub enum Error {
     /// "https://example.org:70000"
     /// ```
     PortOutOfRange,
+
+    // TODO: these should be replaced with Rust examples
+    //
+    /// The input is missing a scheme, because it does not begin with an ASCII alpha, and either
+    /// no base URL was provided or the base URL cannot be used as a base URL because it has an
+    /// opaque path.
+    ///
+    /// # Example
+    ///
+    /// Input’s scheme is missing and no base URL is given:
+    ///
+    /// ```text
+    /// "💩";
+    /// ```
+    ///
+    /// Input’s scheme is missing, but the base URL has an opaque path.
+    ///
+    /// ```text
+    /// const url = new URL("💩", "mailto:user@example.org");
+    /// ```
+    MissingSchemeNonRelativeUrl,
 }
 
 /// A validation error indicates a mismatch between input and valid input. User agents, especially
