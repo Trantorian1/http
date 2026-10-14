@@ -32,11 +32,7 @@ impl<'data> UrlBuffer<'data> {
         }
     }
 
-    pub(super) fn push_encode_byte(
-        &mut self,
-        c: u8,
-        set: percent::EncodeSet,
-    ) -> Result<usize, Error> {
+    pub(super) fn push_encode(&mut self, c: u8, set: percent::EncodeSet) -> Result<usize, Error> {
         let n = percent::encode_byte_to(c, &mut self.backing[self.next..], set);
         if n == 0 {
             Err(Error::OOM)
