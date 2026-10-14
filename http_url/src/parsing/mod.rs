@@ -2,6 +2,7 @@
 
 mod buffer;
 mod error;
+mod path;
 
 use buffer::UrlBuffer;
 pub use error::*;
@@ -10,6 +11,7 @@ use macro_util::prelude::*;
 use super::Url;
 use super::percent;
 use super::segment;
+use crate::macros::*;
 
 impl<'data> Url<'data> {
     /// Tries to parse a stream of raw network bytes into a URL.
@@ -51,6 +53,14 @@ impl<'data> Url<'data> {
         Parser::new(bytes, backing).parse(&Url::emtpy())
     }
 
+    pub fn join(
+        &self,
+        bytes: &[u8],
+        backing: &'data mut [u8],
+    ) -> Result<(Self, ValidationErrorIter), Error> {
+        Parser::new(bytes, backing).parse(self)
+    }
+
     fn emtpy() -> Self {
         Self {
             backing: Default::default(),
@@ -89,25 +99,6 @@ mod matchers {
     pub(super) fn ascii_alpha(c: u8) -> bool {
         c.is_ascii_alphabetic()
     }
-}
-
-macro_rules! ascii_tab_or_newline {
-    () => {
-        b'\t' | b'\n' | b'\r'
-    };
-}
-
-macro_rules! forward {
-    ($cursor:expr, by $n:expr) => {
-        $cursor = &$cursor[$n..];
-    };
-}
-
-macro_rules! shrink {
-    ($cursor:expr, by $n:expr) => {{
-        let len = $cursor.len();
-        $cursor = &$cursor[..len - $n];
-    }};
 }
 
 struct Parser<'input, 'output> {
@@ -2978,7 +2969,7 @@ mod test {
         let mut backing = [0; 1];
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
 
-        assert_eq!(err, Error::Overflow);
+        assert_eq!(err, Error::OOM);
     }
 
     #[test]
