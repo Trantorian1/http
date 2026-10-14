@@ -18,7 +18,7 @@ impl<'data> UrlBuffer<'data> {
             self.next += 1;
             Ok(self.next)
         } else {
-            Err(Error::Overflow)
+            Err(Error::OOM)
         }
     }
 
@@ -28,7 +28,7 @@ impl<'data> UrlBuffer<'data> {
             self.next += bytes.len();
             Ok(self.next)
         } else {
-            Err(Error::Overflow)
+            Err(Error::OOM)
         }
     }
 
@@ -39,7 +39,7 @@ impl<'data> UrlBuffer<'data> {
     ) -> Result<usize, Error> {
         let n = percent::encode_byte_to(c, &mut self.backing[self.next..], set);
         if n == 0 {
-            Err(Error::Overflow)
+            Err(Error::OOM)
         } else {
             self.next += n;
             Ok(self.next)

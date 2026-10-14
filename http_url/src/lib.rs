@@ -60,6 +60,34 @@ pub(crate) mod segment {
     pub(super) struct Fragment(pub std::ops::Range<usize>);
 }
 
+pub(crate) mod macros {
+    pub(crate) use crate::ascii_tab_or_newline;
+    pub(crate) use crate::forward;
+    pub(crate) use crate::shrink;
+
+    #[macro_export]
+    macro_rules! ascii_tab_or_newline {
+        () => {
+            b'\t' | b'\n' | b'\r'
+        };
+    }
+
+    #[macro_export]
+    macro_rules! forward {
+        ($cursor:expr, by $n:expr) => {
+            $cursor = &$cursor[$n..];
+        };
+    }
+
+    #[macro_export]
+    macro_rules! shrink {
+        ($cursor:expr, by $n:expr) => {{
+            let len = $cursor.len();
+            $cursor = &$cursor[..len - $n];
+        }};
+    }
+}
+
 /// **U**niform **R**esource **L**ocators.
 ///
 /// See [RFC3986] for more information.

@@ -4,7 +4,7 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     /// Parsing a URL does not fit into the given buffer.
-    Overflow,
+    OOM,
 
     /// The input has a special scheme, but does not contain a host.
     ///
