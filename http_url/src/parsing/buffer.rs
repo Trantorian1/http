@@ -12,33 +12,33 @@ impl<'data> UrlBuffer<'data> {
         Self { backing, next: 0 }
     }
 
-    pub(super) fn push_byte(&mut self, c: u8) -> Result<usize, Error> {
+    pub(super) fn push_byte(&mut self, c: u8) -> Result<(), Error> {
         if self.next < self.backing.len() {
             self.backing[self.next] = c;
             self.next += 1;
-            Ok(self.next)
+            Ok(())
         } else {
             Err(Error::OOM)
         }
     }
 
-    pub(super) fn push_str(&mut self, bytes: &[u8]) -> Result<usize, Error> {
+    pub(super) fn push_str(&mut self, bytes: &[u8]) -> Result<(), Error> {
         if self.next + bytes.len() <= self.backing.len() {
             self.backing[self.next..self.next + bytes.len()].copy_from_slice(bytes);
             self.next += bytes.len();
-            Ok(self.next)
+            Ok(())
         } else {
             Err(Error::OOM)
         }
     }
 
-    pub(super) fn push_encode(&mut self, c: u8, set: percent::EncodeSet) -> Result<usize, Error> {
+    pub(super) fn push_encode(&mut self, c: u8, set: percent::EncodeSet) -> Result<(), Error> {
         let n = percent::encode_byte_to(c, &mut self.backing[self.next..], set);
         if n == 0 {
             Err(Error::OOM)
         } else {
             self.next += n;
-            Ok(self.next)
+            Ok(())
         }
     }
 
