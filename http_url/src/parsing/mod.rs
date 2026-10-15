@@ -1,4 +1,4 @@
-//! [`Url`] parsing utilities.
+//! [`Url`] parsing utilitiessupport relative paths or path shortening.
 
 mod buffer;
 mod error;
@@ -775,24 +775,26 @@ mod state_machine {
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             const SPECIAL: bool = true;
 
-            while !self.cursor.is_empty() {
-                let c = self.cursor[0];
-
-                match c {
-                    ascii_tab_or_newline!() => {
+            loop {
+                match self.cursor.first() {
+                    Some(ascii_tab_or_newline!()) => {
                         self.skip_ascii_tab_or_newline();
                     },
 
-                    b'/' | b'\\' => {
+                    Some(b'/' | b'\\') => {
                         self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
                         forward!(self.cursor, by 1);
                     },
 
-                    _ => break,
+                    _ => {
+                        return self.common_after_scheme::<SPECIAL>(
+                            scheme,
+                            default_scheme_port,
+                            buffer,
+                        );
+                    },
                 }
             }
-
-            self.common_after_scheme::<SPECIAL>(scheme, default_scheme_port, buffer)
         }
 
         #[inline]
@@ -893,7 +895,6 @@ mod state_machine {
         #[inline]
         pub(super) fn state_authority<const SPECIAL: bool>(
             &mut self,
-            scheme: &'_ segment::Scheme,
             buffer: &mut UrlBuffer<'output>,
         ) -> Result<(segment::Username, segment::Password), Error> {
             // == authority state ======================================================================
@@ -992,10 +993,8 @@ mod state_machine {
             };
 
             // Scheme end, skipping `://`
-            let userinfo_start = scheme.0.end + 3;
+            let userinfo_start = buffer.len();
 
-            // TODO: remove this in favor of using Buffer::len
-            let mut userinfo_stop = userinfo_start;
             let mut password_token = None;
 
             // Here is where we actually parse the userinfo.
@@ -1021,17 +1020,20 @@ mod state_machine {
                                 //
                                 // https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L907-L914
                                 if char_count_userinfo > 0 {
-                                    password_token = Some(buffer.push_byte(b':')? - 1);
+                                    password_token = Some(buffer.len());
+                                    buffer.push_byte(b':')?;
                                 }
                             },
                         }
                     },
 
                     _ => {
-                        userinfo_stop = buffer.push_encode(c, percent::USERINFO)?;
+                        buffer.push_encode(c, percent::USERINFO)?;
                     },
                 }
             }
+
+            let userinfo_stop = buffer.len();
 
             let (username, password) = match password_token {
                 Some(n) => (userinfo_start..n, n + 1..userinfo_stop),
@@ -1225,20 +1227,20 @@ mod state_machine {
 
             // char_count_hostname includes ASCII tab and newlines, so we can't use that outright to
             // determine the size of the host.
-            let mut host_stop = host_start;
             let domain = percent::decode(self.cursor.iter());
 
             for c in domain.take(char_count_hostname) {
                 if !matches!(c, ascii_tab_or_newline!()) {
                     buffer.push_byte(c)?;
-                    host_stop += 1;
                 }
             }
             forward!(self.cursor, by char_count_hostname);
 
             // TODO: IPV4 parsing
 
+            let host_stop = buffer.len();
             let host = host_start..host_stop;
+
             if host.is_empty() {
                 return if SPECIAL || PORT {
                     Err(Error::HostMissing)
@@ -1289,12 +1291,15 @@ mod state_machine {
                         char_count_port += 1;
                     },
 
+                    // TODO: optimize branching
                     b'/' | b'?' | b'#' => {
                         forward!(self.cursor, by 1);
                         break;
                     },
 
                     b'\\' if SPECIAL => {
+                        self.log_error(ValidationError::InvalidReverseSolidus);
+
                         forward!(self.cursor, by 1);
                         break;
                     },
@@ -1513,24 +1518,23 @@ mod state_machine {
             }
 
             let path_start = buffer.len();
-            let mut path_stop = path_start;
 
-            while !self.cursor.is_empty() {
-                let c = self.cursor[0];
-
-                match c {
-                    ascii_tab_or_newline!() => {
+            loop {
+                match self.cursor.first() {
+                    Some(ascii_tab_or_newline!()) => {
                         self.skip_ascii_tab_or_newline();
                     },
 
-                    b' ' => {
+                    Some(b' ') => {
                         self.log_error(ValidationError::InvalidURLUnit);
 
                         forward!(self.cursor, by 1);
 
                         match self.cursor.first() {
                             Some(b'?') => {
-                                path_stop = buffer.push_str(b"%20")?;
+                                buffer.push_str(b"%20")?;
+
+                                let path_stop = buffer.len();
 
                                 return handle_query(
                                     self,
@@ -1539,7 +1543,9 @@ mod state_machine {
                                 );
                             },
                             Some(b'#') => {
-                                path_stop = buffer.push_str(b"%20")?;
+                                buffer.push_str(b"%20")?;
+
+                                let path_stop = buffer.len();
 
                                 return handle_fragment(
                                     self,
@@ -1549,16 +1555,20 @@ mod state_machine {
                                 );
                             },
                             _ => {
-                                path_stop = buffer.push_byte(b' ')?;
+                                buffer.push_byte(b' ')?;
                             },
                         }
                     },
 
-                    b'?' => {
+                    Some(b'?') => {
+                        let path_stop = buffer.len();
+
                         return handle_query(self, buffer, segment::Path(path_start..path_stop));
                     },
 
-                    b'#' => {
+                    Some(b'#') => {
+                        let path_stop = buffer.len();
+
                         return handle_fragment(
                             self,
                             buffer,
@@ -1567,22 +1577,26 @@ mod state_machine {
                         );
                     },
 
-                    b'%' => {
-                        path_stop = buffer.push_byte(b'%')?;
+                    Some(b'%') => {
+                        buffer.push_byte(b'%')?;
                         self.check_percent_encoding();
                     },
 
-                    _ => {
-                        path_stop = self.encode_utf8_buffer(buffer, percent::C0_CONTROL)?;
+                    Some(_c) => {
+                        self.encode_utf8_buffer(buffer, percent::C0_CONTROL)?;
+                    },
+
+                    None => {
+                        let path_stop = buffer.len();
+
+                        let path = segment::Path(path_start..path_stop);
+                        let query = segment::Query(path_stop..path_stop);
+                        let fragment = segment::Fragment(path_stop..path_stop);
+
+                        return Ok((path, query, fragment));
                     },
                 }
             }
-
-            let path = segment::Path(path_start..path_stop);
-            let query = segment::Query(path_stop..path_stop);
-            let fragment = segment::Fragment(path_stop..path_stop);
-
-            Ok((path, query, fragment))
         }
 
         #[inline]
@@ -1590,20 +1604,20 @@ mod state_machine {
             &mut self,
             buffer: &mut UrlBuffer<'output>,
         ) -> Result<(segment::Query, segment::Fragment), Error> {
-            let query_start = buffer.push_byte(b'?')?;
-            let mut query_stop = query_start;
+            buffer.push_byte(b'?')?;
+            let query_start = buffer.len();
 
-            while !self.cursor.is_empty() {
-                let c = self.cursor[0];
-
-                match c {
-                    ascii_tab_or_newline!() => {
+            loop {
+                match self.cursor.first() {
+                    Some(ascii_tab_or_newline!()) => {
                         self.skip_ascii_tab_or_newline();
                     },
 
-                    b'#' => {
+                    Some(b'#') => {
                         // Skip U+0023 (#) fragment segment delimiter
                         forward!(self.cursor, by 1);
+
+                        let query_stop = buffer.len();
 
                         let query = segment::Query(query_start..query_stop);
 
@@ -1615,26 +1629,31 @@ mod state_machine {
                         return Ok((query, fragment));
                     },
 
-                    b'%' => {
-                        query_stop = buffer.push_byte(b'%')?;
+                    Some(b'%') => {
+                        buffer.push_byte(b'%')?;
                         self.check_percent_encoding();
                     },
 
-                    _ => {
+                    Some(_c) => {
                         let encoding = if SPECIAL {
                             percent::QUERY_SPECIAL
                         } else {
                             percent::QUERY
                         };
-                        query_stop = self.encode_utf8_buffer(buffer, encoding)?;
+
+                        self.encode_utf8_buffer(buffer, encoding)?;
+                    },
+
+                    None => {
+                        let query_stop = buffer.len();
+
+                        let query = segment::Query(query_start..query_stop);
+                        let fragment = segment::Fragment(query_stop..query_stop);
+
+                        return Ok((query, fragment));
                     },
                 }
             }
-
-            let query = segment::Query(query_start..query_stop);
-            let fragment = segment::Fragment(query_stop..query_stop);
-
-            Ok((query, fragment))
         }
 
         #[inline]
@@ -1642,29 +1661,32 @@ mod state_machine {
             &mut self,
             buffer: &mut UrlBuffer<'output>,
         ) -> Result<segment::Fragment, Error> {
-            let fragment_start = buffer.push_byte(b'#')?;
-            let mut fragment_stop = fragment_start;
+            buffer.push_byte(b'#')?;
 
-            while !self.cursor.is_empty() {
-                let c = self.cursor[0];
+            let fragment_start = buffer.len();
 
-                match c {
-                    ascii_tab_or_newline!() => {
+            loop {
+                match self.cursor.first() {
+                    Some(ascii_tab_or_newline!()) => {
                         self.skip_ascii_tab_or_newline();
                     },
 
-                    b'%' => {
-                        fragment_stop = buffer.push_byte(b'%')?;
+                    Some(b'%') => {
+                        buffer.push_byte(b'%')?;
                         self.check_percent_encoding();
                     },
 
-                    _ => {
-                        fragment_stop = self.encode_utf8_buffer(buffer, percent::FRAGMENT)?;
+                    Some(_c) => {
+                        self.encode_utf8_buffer(buffer, percent::FRAGMENT)?;
+                    },
+
+                    None => {
+                        let fragment_stop = buffer.len();
+
+                        return Ok(segment::Fragment(fragment_start..fragment_stop));
                     },
                 }
             }
-
-            Ok(segment::Fragment(fragment_start..fragment_stop))
         }
     }
 }
@@ -1686,7 +1708,7 @@ mod common {
             #[cfg(test)]
             let _remaining_userinfo = utf8::from_bytes(self.cursor);
 
-            let (username, password) = self.state_authority::<SPECIAL>(&scheme, &mut buffer)?;
+            let (username, password) = self.state_authority::<SPECIAL>(&mut buffer)?;
 
             #[cfg(test)]
             let _username = utf8::from_bytes(&buffer[username.0.clone()]);
@@ -1791,17 +1813,15 @@ mod encode {
             &mut self,
             buffer: &mut UrlBuffer<'_>,
             encoding: crate::percent::EncodeSet,
-        ) -> Result<usize, Error> {
-            let mut position = buffer.len();
-
+        ) -> Result<(), Error> {
             match self.code_point() {
                 // NOTE: `code_point` is non-empty so position will always be overridden.
                 Some(code_point) => {
                     for c in code_point {
-                        position = buffer.push_encode(*c, encoding)?;
+                        buffer.push_encode(*c, encoding)?;
                     }
 
-                    Ok(position)
+                    Ok(())
                 },
 
                 // Invalid utf-8 bytes are replaced with the U+FFFD (�) utf-8 replacement code point.
