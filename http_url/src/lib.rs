@@ -27,6 +27,9 @@ pub mod prelude {
 }
 
 pub(crate) mod segment {
+    #[allow(clippy::wildcard_imports)]
+    use super::*;
+
     #[repr(transparent)]
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
     pub(super) struct Scheme(pub std::ops::Range<usize>);
@@ -58,6 +61,39 @@ pub(crate) mod segment {
     #[repr(transparent)]
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
     pub(super) struct Fragment(pub std::ops::Range<usize>);
+
+    impl Port {
+        pub(super) fn empty() -> Port {
+            Port::default()
+        }
+    }
+
+    impl Path {
+        pub(super) fn empty(buffer: &mut buffer::UrlBuffer<'_>) -> Result<Path, Error> {
+            let path_start = buffer.len();
+
+            // Path is never empty;
+            buffer.push_byte(b'/')?;
+
+            let path_stop = buffer.len();
+
+            Ok(Path(path_start..path_stop))
+        }
+    }
+
+    impl Query {
+        pub(super) fn empty(buffer: &buffer::UrlBuffer<'_>) -> Query {
+            let n = buffer.len();
+            Query(n..n)
+        }
+    }
+
+    impl Fragment {
+        pub(super) fn empty(buffer: &buffer::UrlBuffer<'_>) -> Fragment {
+            let n = buffer.len();
+            Fragment(n..n)
+        }
+    }
 }
 
 pub(crate) mod macros {

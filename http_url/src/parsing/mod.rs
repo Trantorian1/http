@@ -1,6 +1,6 @@
 //! [`Url`] parsing utilitiessupport relative paths or path shortening.
 
-mod buffer;
+pub(crate) mod buffer;
 mod error;
 mod path;
 
@@ -821,6 +821,8 @@ mod state_machine {
                         0, buffer,
                     )
                 } else {
+                    forward!(self.cursor, by 1);
+
                     let next = buffer.len();
 
                     self.common_after_host::<SPECIAL>(
@@ -1076,7 +1078,16 @@ mod state_machine {
             password: &'parsing segment::Password,
             default_scheme_port: u16,
             buffer: &mut UrlBuffer<'output>,
-        ) -> Result<(segment::Host, segment::Port), Error> {
+        ) -> Result<
+            (
+                segment::Host,
+                segment::Port,
+                segment::Path,
+                segment::Query,
+                segment::Fragment,
+            ),
+            Error,
+        > {
             // == hostname state =======================================================================
             //
             // https://url.spec.whatwg.org/#hostname-state
@@ -1096,19 +1107,14 @@ mod state_machine {
             let mut inside_brackets = false;
             let mut char_count_hostname = 0;
 
-            while !self.cursor.is_empty() {
-                let c = self.cursor[0];
-
-                match c {
-                    ascii_tab_or_newline!() => {
+            loop {
+                match self.cursor.first() {
+                    Some(ascii_tab_or_newline!()) => {
                         char_count_hostname += self.skip_ascii_tab_or_newline() + 1;
                     },
 
-                    b':' if !inside_brackets => {
+                    Some(b':') if !inside_brackets => {
                         self.cursor = checkpoint;
-
-                        #[cfg(test)]
-                        let _remaining_host = utf8::from_bytes(self.cursor);
 
                         let host = self.state_hostname::<SPECIAL, true>(
                             username,
@@ -1117,58 +1123,136 @@ mod state_machine {
                             buffer,
                         )?;
 
-                        #[cfg(test)]
-                        let _remaining_port = utf8::from_bytes(self.cursor);
-
                         // We need to skip the port delimiter again as we reset the cursor.
                         forward!(self.cursor, by 1);
 
-                        let port = self.state_port::<SPECIAL>(default_scheme_port, buffer)?;
+                        let (port, path, query, fragment) =
+                            self.state_port::<SPECIAL>(default_scheme_port, buffer)?;
 
-                        return Ok((host, port));
+                        return Ok((host, port, path, query, fragment));
                     },
 
-                    // TODO: optimize branching
-                    b'/' | b'?' | b'#' => {
-                        break;
+                    Some(b'/') => {
+                        self.cursor = checkpoint;
+
+                        let host = self.state_hostname::<SPECIAL, true>(
+                            username,
+                            password,
+                            char_count_hostname,
+                            buffer,
+                        )?;
+
+                        // Skip U+002F (/) path segment delimiter
+                        forward!(self.cursor, by 1);
+
+                        let port = segment::Port::empty();
+
+                        let (path, query, fragment) = self.state_path::<SPECIAL>(buffer)?;
+
+                        return Ok((host, port, path, query, fragment));
                     },
 
-                    b'\\' if SPECIAL => {
-                        break;
+                    Some(b'\\') if SPECIAL => {
+                        self.cursor = checkpoint;
+
+                        self.log_error(ValidationError::InvalidReverseSolidus);
+
+                        let host = self.state_hostname::<SPECIAL, true>(
+                            username,
+                            password,
+                            char_count_hostname,
+                            buffer,
+                        )?;
+
+                        // Skip U+005C (\) path segment delimiter
+                        forward!(self.cursor, by 1);
+
+                        let port = segment::Port::empty();
+
+                        let (path, query, fragment) = self.state_path::<SPECIAL>(buffer)?;
+
+                        return Ok((host, port, path, query, fragment));
                     },
 
-                    b'[' => {
+                    Some(b'?') => {
+                        self.cursor = checkpoint;
+
+                        let host = self.state_hostname::<SPECIAL, true>(
+                            username,
+                            password,
+                            char_count_hostname,
+                            buffer,
+                        )?;
+
+                        // Skip U+003F (?) query segment delimiter
+                        forward!(self.cursor, by 1);
+
+                        let port = segment::Port::empty();
+                        let path = segment::Path::empty(buffer)?;
+
+                        let (query, fragment) = self.state_query::<SPECIAL>(buffer)?;
+
+                        return Ok((host, port, path, query, fragment));
+                    },
+
+                    Some(b'#') => {
+                        self.cursor = checkpoint;
+
+                        let host = self.state_hostname::<SPECIAL, true>(
+                            username,
+                            password,
+                            char_count_hostname,
+                            buffer,
+                        )?;
+
+                        // Skip U+003F (#) fragment segment delimiter
+                        forward!(self.cursor, by 1);
+
+                        let port = segment::Port::empty();
+                        let path = segment::Path::empty(buffer)?;
+                        let query = segment::Query::empty(buffer);
+
+                        let fragment = self.state_fragment(buffer)?;
+
+                        return Ok((host, port, path, query, fragment));
+                    },
+
+                    Some(b'[') => {
                         inside_brackets = true;
                         char_count_hostname += 1;
                         forward!(self.cursor, by 1);
                     },
 
-                    b']' => {
+                    Some(b']') => {
                         inside_brackets = false;
                         char_count_hostname += 1;
                         forward!(self.cursor, by 1);
                     },
 
-                    _ => {
+                    Some(_c) => {
                         char_count_hostname += 1;
                         forward!(self.cursor, by 1);
                     },
+
+                    None => {
+                        self.cursor = checkpoint;
+
+                        let host = self.state_hostname::<SPECIAL, false>(
+                            username,
+                            password,
+                            char_count_hostname,
+                            buffer,
+                        )?;
+
+                        let port = segment::Port::empty();
+                        let path = segment::Path::empty(buffer)?;
+                        let query = segment::Query::empty(buffer);
+                        let fragment = segment::Fragment::empty(buffer);
+
+                        return Ok((host, port, path, query, fragment));
+                    },
                 }
             }
-
-            self.cursor = checkpoint;
-
-            #[cfg(test)]
-            let _remaining_host = utf8::from_bytes(self.cursor);
-
-            let host = self.state_hostname::<SPECIAL, false>(
-                username,
-                password,
-                char_count_hostname,
-                buffer,
-            )?;
-
-            Ok((host, segment::Port(None)))
         }
 
         /// # [Hostname state]
@@ -1258,7 +1342,37 @@ mod state_machine {
             &mut self,
             default_scheme_port: u16,
             buffer: &mut UrlBuffer<'output>,
-        ) -> Result<segment::Port, Error> {
+        ) -> Result<
+            (
+                segment::Port,
+                segment::Path,
+                segment::Query,
+                segment::Fragment,
+            ),
+            Error,
+        > {
+            fn port_end<const SPECIAL: bool>(
+                port: u32,
+                default_scheme_port: u16,
+                char_count_port: usize,
+                checkpoint: &[u8],
+                buffer: &mut UrlBuffer<'_>,
+            ) -> Result<segment::Port, Error> {
+                if SPECIAL && (port == u32::from(default_scheme_port) || char_count_port == 0) {
+                    Ok(segment::Port(None))
+                } else {
+                    buffer.push_byte(b':')?;
+
+                    for c in &checkpoint[..char_count_port] {
+                        if !matches!(c, ascii_tab_or_newline!()) {
+                            buffer.push_byte(*c)?;
+                        }
+                    }
+
+                    Ok(segment::Port(Some(port as u16)))
+                }
+            }
+
             // ASCII tab or newline characters are skipped first so as not to cause the checkpoint to
             // parse them again.
             if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
@@ -1270,18 +1384,14 @@ mod state_machine {
 
             let checkpoint = self.cursor;
 
-            while !self.cursor.is_empty() {
-                let c = self.cursor[0];
-
-                match c {
-                    ascii_tab_or_newline!() => {
-                        self.log_error(ValidationError::InvalidURLUnit);
-
+            loop {
+                match self.cursor.first() {
+                    Some(ascii_tab_or_newline!()) => {
                         char_count_port += self.skip_ascii_tab_or_newline() + 1;
                     },
 
-                    b'0'..=b'9' => {
-                        port = port * 10 + u32::from(c) - u32::from(b'0');
+                    Some(n @ b'0'..=b'9') => {
+                        port = port * 10 + u32::from(*n) - u32::from(b'0');
 
                         if port > u32::from(u16::MAX) {
                             return Err(Error::PortOutOfRange);
@@ -1291,38 +1401,101 @@ mod state_machine {
                         char_count_port += 1;
                     },
 
-                    // TODO: optimize branching
-                    b'/' | b'?' | b'#' => {
+                    Some(b'/') => {
+                        // Skip U+002F (/) path segment delimiter
                         forward!(self.cursor, by 1);
-                        break;
+
+                        let port = port_end::<SPECIAL>(
+                            port,
+                            default_scheme_port,
+                            char_count_port,
+                            checkpoint,
+                            buffer,
+                        )?;
+
+                        let (path, query, fragment) = self.state_path::<SPECIAL>(buffer)?;
+
+                        return Ok((port, path, query, fragment));
                     },
 
-                    b'\\' if SPECIAL => {
+                    Some(b'\\') if SPECIAL => {
                         self.log_error(ValidationError::InvalidReverseSolidus);
 
+                        // Skip U+005C (\) path segment delimiter
                         forward!(self.cursor, by 1);
-                        break;
+
+                        let port = port_end::<SPECIAL>(
+                            port,
+                            default_scheme_port,
+                            char_count_port,
+                            checkpoint,
+                            buffer,
+                        )?;
+
+                        let (path, query, fragment) = self.state_path::<SPECIAL>(buffer)?;
+
+                        return Ok((port, path, query, fragment));
                     },
 
-                    _ => {
+                    Some(b'?') => {
+                        // Skip U+003F (?) query segment delimiter
+                        forward!(self.cursor, by 1);
+
+                        let port = port_end::<SPECIAL>(
+                            port,
+                            default_scheme_port,
+                            char_count_port,
+                            checkpoint,
+                            buffer,
+                        )?;
+
+                        let path = segment::Path::empty(buffer)?;
+
+                        let (query, fragment) = self.state_query::<SPECIAL>(buffer)?;
+
+                        return Ok((port, path, query, fragment));
+                    },
+
+                    Some(b'#') => {
+                        // Skip U+003F (#) fragment segment delimiter
+                        forward!(self.cursor, by 1);
+
+                        let port = port_end::<SPECIAL>(
+                            port,
+                            default_scheme_port,
+                            char_count_port,
+                            checkpoint,
+                            buffer,
+                        )?;
+
+                        let path = segment::Path::empty(buffer)?;
+                        let query = segment::Query::empty(buffer);
+
+                        let fragment = self.state_fragment(buffer)?;
+
+                        return Ok((port, path, query, fragment));
+                    },
+
+                    Some(_c) => {
                         return Err(Error::PortInvalid);
                     },
+
+                    None => {
+                        let port = port_end::<SPECIAL>(
+                            port,
+                            default_scheme_port,
+                            char_count_port,
+                            checkpoint,
+                            buffer,
+                        )?;
+
+                        let path = segment::Path::empty(buffer)?;
+                        let query = segment::Query::empty(buffer);
+                        let fragment = segment::Fragment::empty(buffer);
+
+                        return Ok((port, path, query, fragment));
+                    },
                 }
-            }
-
-            // Only special schemes have a default port
-            if SPECIAL && (port as u16 == default_scheme_port || char_count_port == 0) {
-                Ok(segment::Port(None))
-            } else {
-                buffer.push_byte(b':')?;
-
-                for c in &checkpoint[..char_count_port] {
-                    if !matches!(c, ascii_tab_or_newline!()) {
-                        buffer.push_byte(*c)?;
-                    }
-                }
-
-                Ok(segment::Port(Some(port as u16)))
             }
         }
 
@@ -1366,17 +1539,6 @@ mod state_machine {
 
             let path_start = buffer.len();
             let mut path_stack = path::PathStack::new(buffer.leftover())?;
-
-            // Skip first leading U+002F (/) or U+005C (\) code points so we don't end up appending
-            // `//` or `\/` to the buffer if the path is non-empty.
-            if let Some(c) = self.cursor.first() {
-                if *c == b'/' {
-                    forward!(self.cursor, by 1);
-                } else if *c == b'\\' && SPECIAL {
-                    self.log_error(ValidationError::InvalidReverseSolidus);
-                    forward!(self.cursor, by 1);
-                }
-            }
 
             loop {
                 match self.cursor.first() {
@@ -1705,25 +1867,29 @@ mod common {
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             buffer.push_str(b"//")?;
 
-            #[cfg(test)]
-            let _remaining_userinfo = utf8::from_bytes(self.cursor);
-
             let (username, password) = self.state_authority::<SPECIAL>(&mut buffer)?;
 
-            #[cfg(test)]
-            let _username = utf8::from_bytes(&buffer[username.0.clone()]);
-            #[cfg(test)]
-            let _password = utf8::from_bytes(&buffer[password.0.clone()]);
-            #[cfg(test)]
-            let _remaining_host = utf8::from_bytes(self.cursor);
-
-            let (host, port) =
+            let (host, port, path, query, fragment) =
                 self.state_host::<SPECIAL>(&username, &password, default_scheme_port, &mut buffer)?;
 
-            #[cfg(test)]
-            let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+            let backing = buffer.into_inner();
+            let error_bitset = self.error_bitset;
 
-            self.common_after_host::<SPECIAL>(scheme, username, password, host, port, buffer)
+            Ok((
+                Url {
+                    backing,
+
+                    scheme,
+                    username,
+                    password,
+                    host,
+                    port,
+                    path,
+                    query,
+                    fragment,
+                },
+                error_bitset.iter(),
+            ))
         }
 
         #[inline]
@@ -1737,13 +1903,6 @@ mod common {
             mut buffer: UrlBuffer<'output>,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             let (path, query, fragment) = self.state_path::<SPECIAL>(&mut buffer)?;
-
-            #[cfg(test)]
-            let _path = utf8::from_bytes(&buffer[path.0.clone()]);
-            #[cfg(test)]
-            let _query = utf8::from_bytes(&buffer[query.0.clone()]);
-            #[cfg(test)]
-            let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
             let backing = buffer.into_inner();
             let error_bitset = self.error_bitset;
@@ -2749,7 +2908,7 @@ mod test {
 
     #[test]
     fn url_parse_path_special_strange_solidus() {
-        const URL: &str = "http://example.com//\\////\\\\\\///////";
+        const URL: &str = "http://example.com\\/\\////\\\\\\///////";
 
         let mut backing = [0; 512];
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
