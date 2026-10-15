@@ -12,7 +12,7 @@ impl<'data> UrlBuffer<'data> {
         Self { backing, next: 0 }
     }
 
-    pub(super) fn push(&mut self, c: u8) -> Result<usize, Error> {
+    pub(super) fn push_byte(&mut self, c: u8) -> Result<usize, Error> {
         if self.next < self.backing.len() {
             self.backing[self.next] = c;
             self.next += 1;
@@ -40,6 +40,14 @@ impl<'data> UrlBuffer<'data> {
             self.next += n;
             Ok(self.next)
         }
+    }
+
+    pub(super) unsafe fn force_forwards(&mut self, n: usize) {
+        self.next += n;
+    }
+
+    pub(super) fn leftover(&mut self) -> &mut [u8] {
+        &mut self.backing[self.next..]
     }
 
     pub(super) fn clear(&mut self) {

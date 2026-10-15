@@ -61,6 +61,7 @@ pub(crate) mod segment {
 }
 
 pub(crate) mod macros {
+    pub(crate) use crate::ascii_hexdigit;
     pub(crate) use crate::ascii_tab_or_newline;
     pub(crate) use crate::forward;
     pub(crate) use crate::shrink;
@@ -69,6 +70,13 @@ pub(crate) mod macros {
     macro_rules! ascii_tab_or_newline {
         () => {
             b'\t' | b'\n' | b'\r'
+        };
+    }
+
+    #[macro_export]
+    macro_rules! ascii_hexdigit {
+        () => {
+            b'0'..=b'9' | b'A'..=b'F' | b'a'..=b'f'
         };
     }
 

@@ -1,9 +1,9 @@
 use macro_util::prelude::*;
 
-use super::Error;
-use crate::macros::*;
+use crate::Error;
+use crate::percent;
 
-pub(crate) struct PathStack<'parsing> {
+pub(super) struct PathStack<'parsing> {
     // write-then-update
     head: *mut u8,
 
@@ -17,18 +17,19 @@ pub(crate) struct PathStack<'parsing> {
 }
 
 impl<'parsing> PathStack<'parsing> {
-    pub(crate) fn new(backing: &'parsing mut [u8]) -> Result<Self, Error> {
+    pub(super) fn new(backing: &'parsing mut [u8]) -> Result<Self, Error> {
         if backing.is_empty() {
             return Err(Error::OOM);
         }
 
         let std::ops::Range { start, end } = backing.as_mut_ptr_range();
 
-        // SAFETY: todo
+        // SAFETY: `backing` is checked above to be non-empty.
         let head = unsafe { start.add(1) };
 
         let align = std::mem::align_of::<usize>();
 
+        // Alignment failure returns `usize::MAX`
         let offset_add = match end.align_offset(align) {
             usize::MAX => return Err(Error::OOM),
             n => n,
@@ -47,6 +48,9 @@ impl<'parsing> PathStack<'parsing> {
             return Err(Error::OOM);
         }
 
+        // SAFETY: `backing` is checked above to be non-empty, so `size` must point to initialized
+        // memory. We take this invariant one step further and only commit to changes if there is
+        // also enough space for at least one segment size.
         unsafe { *start = b'/' };
 
         // SAFETY: `tail` is guaranteed to point to initialized memory.
@@ -60,57 +64,112 @@ impl<'parsing> PathStack<'parsing> {
         })
     }
 
-    fn segment_push(&mut self, c: u8) -> Result<(), Error> {
-        let head_prev = self.head;
+    pub(super) fn segment_push_byte(&mut self, c: u8) -> Result<(), Error> {
+        assert!(self.head.addr() < self.tail.addr());
 
-        // SAFETY: todo
-        unsafe { self.head = self.head.add(1) };
+        // SAFETY: we check below to make sure `head_new` does not index into uninitialized memory.
+        let head_new = unsafe { self.head.add(1) };
 
-        // We cannot write at an address that would have been the tail
-        if self.head.addr() > self.tail.addr() {
+        // We must not overwrite the tail!
+        if head_new.addr() >= self.tail.addr() {
             return Err(Error::OOM);
         }
 
-        // SAFETY: todo
-        unsafe { *head_prev = c };
+        // SAFETY: `head` is bounded by `tail` and the start of the backing slice and cannot point
+        // into uninitialized memory.
+        unsafe { *self.head = c };
 
-        // SAFETY: `tail` is <= than then end of the backing memory segment and greater than `head`,
-        // which is itself >= to the end of the backing memory segment, and is therefore guaranteed
-        // to point to initialized memory.
+        self.head = head_new;
+
+        // SAFETY: `tail` is bounded by `head` and the end of the backing slice and cannot point
+        // into uninitialized memory.
         unsafe { *self.tail += 1 };
 
         Ok(())
     }
 
-    fn segment_peek(&self) -> &[u8] {
-        // SAFETY: todo
+    pub(super) fn segment_push_str(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        assert!(self.head.addr() < self.tail.addr());
+
+        // SAFETY: we check below to make sure `head_new` does not index into uninitialized memory.
+        let head_new = unsafe { self.head.add(bytes.len()) };
+
+        // We must not overwrite the tail!
+        if head_new.addr() >= self.tail.addr() {
+            return Err(Error::OOM);
+        }
+
+        // SAFETY: `head + bytes.len()` is bounded by `tail` and the start of the backing slice and
+        // cannot point into uninitialized memory.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.head, bytes.len()) };
+
+        self.head = head_new;
+
+        // SAFETY: `tail` is bounded by `head` and the end of the backing slice and cannot point
+        // into uninitialized memory.
+        unsafe { *self.tail += bytes.len() };
+
+        Ok(())
+    }
+
+    pub(super) fn segment_push_encode(
+        &mut self,
+        c: u8,
+        set: percent::EncodeSet,
+    ) -> Result<(), Error> {
+        assert!(self.head.addr() < self.tail.addr());
+
+        if set.should_percent_encode(c) {
+            self.segment_push_str(percent::encode_ascii_byte(c))
+        } else {
+            self.segment_push_byte(c)
+        }
+    }
+
+    pub(super) fn segment_peek(&self) -> &[u8] {
+        assert!(self.head.addr() < self.tail.addr());
+
+        // SAFETY: `tail` is bounded by `head` and the end of the backing slice and cannot point
+        // into uninitialized memory.
         let size = unsafe { *self.tail };
 
-        // SAFETY: todo
+        // SAFETY: a segment's size is kept in sync as new bytes are appended to it. This means we
+        // cannot subtract more than the number of bytes already appended to the `head`, therefore
+        // this cannot index into uninitialized memory.
         let start = unsafe { self.head.sub(size) };
 
-        // SAFETY: todo
+        // SAFETY: a segment's size is kept in sync as new bytes are appended to it.
         unsafe { std::slice::from_raw_parts(start, size) }
     }
 
-    fn segment_pop(&mut self) {
-        if self.size == 0 {
+    pub(super) fn segment_pop(&mut self) {
+        assert!(self.head.addr() < self.tail.addr());
+
+        // SAFETY: `tail` is bounded by `head` and the end of the backing slice and cannot point
+        // into uninitialized memory.
+        let size = unsafe { *self.tail };
+
+        if size == 0 {
             return;
         }
 
-        // SAFETY: todo
-        let size = unsafe { *self.tail };
+        // SAFETY: a segment's size is kept in sync as new bytes are appended to it. This means we
+        // cannot subtract more than the number of bytes already appended to the `head`, therefore
+        // this cannot index into uninitialized memory.
+        unsafe { self.head = self.head.sub(size) };
+
+        // SAFETY: `tail` is already guaranteed above to point into initialized memory
+        unsafe { *self.tail = 0 };
 
         // SAFETY: todo
-        self.head = unsafe { self.head.sub(size) };
-
-        // SAFETY: todo
-        self.tail = unsafe { self.tail.add(1) };
+        unsafe { self.tail = self.tail.add(1) };
 
         self.size -= 1;
     }
 
-    fn segment_next(&mut self) -> Result<(), Error> {
+    pub(super) fn segment_next(&mut self) -> Result<(), Error> {
+        assert!(self.head.addr() < self.tail.addr());
+
         // SAFETY: we check below to make sure `tail` points into initialized memory.
         unsafe { self.tail = self.tail.sub(1) };
 
@@ -123,22 +182,37 @@ impl<'parsing> PathStack<'parsing> {
         Ok(())
     }
 
-    fn as_segment_sizes(&self) -> &[usize] {
-        // SAFETY: todo
+    pub(super) fn as_segment_sizes(&self) -> &[usize] {
+        assert!(self.head.addr() < self.tail.addr());
+
+        // SAFETY: the number of segments is kept in sync with the tail
         unsafe { std::slice::from_raw_parts(self.tail, self.size) }
     }
 
-    fn as_segment_paths(&self) -> &[u8] {
+    pub(super) fn as_segment_paths(&self) -> &[u8] {
+        assert!(self.head.addr() < self.tail.addr());
+
+        let size = self.len();
+
+        // SAFETY: a segment's size is kept in sync as new bytes are appended to it. This means we
+        // cannot subtract more than the number of bytes already appended to the `head`, therefore
+        // this cannot index into uninitialized memory. The extra ``+1` accounts for the added `/`
+        // at the start of the path.
+        let start = unsafe { self.head.sub(size) };
+
+        // SAFETY: the number of segments is kept in sync with the head
+        unsafe { std::slice::from_raw_parts(start, size) }
+    }
+
+    pub(super) fn len(&self) -> usize {
+        assert!(self.head.addr() < self.tail.addr());
+
         let mut size = 0;
         for n in self.as_segment_sizes() {
             size += n;
         }
 
-        // SAFETY: gnrjkgbkrbnrkj
-        let start = unsafe { self.head.sub(size + 1) };
-
-        // SAFETY: todo
-        unsafe { std::slice::from_raw_parts(start, size + 1) }
+        size + 1
     }
 }
 
@@ -153,23 +227,21 @@ mod test {
         let mut path_stack = PathStack::new(&mut backing).unwrap();
 
         for c in b"Documents/" {
-            path_stack.segment_push(*c).unwrap();
+            path_stack.segment_push_byte(*c).unwrap();
         }
 
         assert_utf8_eq!(path_stack.segment_peek(), b"Documents/");
 
         path_stack.segment_next().unwrap();
 
-        for c in b"code/" {
-            path_stack.segment_push(*c).unwrap();
-        }
+        path_stack.segment_push_str(b"code/").unwrap();
 
         assert_utf8_eq!(path_stack.segment_peek(), b"code/");
 
         path_stack.segment_next().unwrap();
 
         for c in b"main.rs" {
-            path_stack.segment_push(*c).unwrap();
+            path_stack.segment_push_byte(*c).unwrap();
         }
 
         assert_utf8_eq!(path_stack.segment_peek(), b"main.rs");
@@ -202,5 +274,24 @@ mod test {
         assert_utf8_eq!(path_stack.segment_peek(), b"");
         assert_utf8_eq!(path_stack.as_segment_paths(), b"/");
         assert_eq!(path_stack.as_segment_sizes(), &[0]);
+        assert!(path_stack.head.addr() <= path_stack.tail.addr());
+    }
+
+    #[test]
+    fn path_stack_push_encode() {
+        let mut backing = [0; 32];
+        let mut path_stack = PathStack::new(&mut backing).unwrap();
+
+        path_stack
+            .segment_push_encode(b' ', percent::FRAGMENT)
+            .unwrap();
+
+        assert_utf8_eq!(path_stack.segment_peek(), b"%20");
+
+        path_stack
+            .segment_push_encode(b'a', percent::FRAGMENT)
+            .unwrap();
+
+        assert_utf8_eq!(path_stack.segment_peek(), b"%20a");
     }
 }

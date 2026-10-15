@@ -187,7 +187,7 @@ mod state_machine {
             if let Some(first) = self.cursor.first()
                 && matchers::ascii_alpha(*first)
             {
-                buffer.push(first.to_ascii_lowercase())?;
+                buffer.push_byte(first.to_ascii_lowercase())?;
                 forward!(self.cursor, by 1);
 
                 while !self.cursor.is_empty() {
@@ -195,30 +195,26 @@ mod state_machine {
 
                     match c {
                         ascii_tab_or_newline!() => {
-                            self.log_error(ValidationError::InvalidURLUnit);
-
-                            forward!(self.cursor, by 1);
-                            let skip = self.skip_ascii_tab_or_newline();
-                            forward!(self.cursor, by skip);
+                            self.skip_ascii_tab_or_newline();
                         },
 
                         // Only the first character in a scheme must be strictly `ascii_alpha`. Scheme
                         // characters after that may be ASCII alphanumeric, U+002B (+), U+002D (-), or
                         // U+002E (.).
                         b'a'..=b'z' | b'0'..=b'9' | b'+' | b'-' | b'.' => {
-                            buffer.push(c)?;
+                            buffer.push_byte(c)?;
                             forward!(self.cursor, by 1);
                         },
 
                         // Input is normalized, only lowercase characters are pushed to the final buffer
                         b'A'..=b'Z' => {
-                            buffer.push(c.to_ascii_lowercase())?;
+                            buffer.push_byte(c.to_ascii_lowercase())?;
                             forward!(self.cursor, by 1);
                         },
 
                         // End of scheme
                         b':' => {
-                            buffer.push(b':')?;
+                            buffer.push_byte(b':')?;
                             forward!(self.cursor, by 1);
                             break;
                         },
@@ -314,11 +310,7 @@ mod state_machine {
 
             if !base.scheme.0.is_empty() {
                 if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
-                    self.log_error(ValidationError::InvalidURLUnit);
-
-                    forward!(self.cursor, by 1);
-                    let skip = self.skip_ascii_tab_or_newline();
-                    forward!(self.cursor, by skip);
+                    self.skip_ascii_tab_or_newline();
                 }
 
                 match self.cursor.first() {
@@ -409,11 +401,7 @@ mod state_machine {
             const SPECIAL: bool = true;
 
             if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
-                self.log_error(ValidationError::InvalidURLUnit);
-
-                forward!(self.cursor, by 1);
-                let skip = self.skip_ascii_tab_or_newline();
-                forward!(self.cursor, by skip);
+                self.skip_ascii_tab_or_newline();
             }
 
             // ASCII tab or newline  already accounted for
@@ -666,11 +654,7 @@ mod state_machine {
             mut buffer: UrlBuffer<'output>,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
-                self.log_error(ValidationError::InvalidURLUnit);
-
-                forward!(self.cursor, by 1);
-                let skip = self.skip_ascii_tab_or_newline();
-                forward!(self.cursor, by skip);
+                self.skip_ascii_tab_or_newline();
             }
 
             // ASCII tab or newline  already accounted for
@@ -732,11 +716,7 @@ mod state_machine {
             buffer: UrlBuffer<'output>,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
-                self.log_error(ValidationError::InvalidURLUnit);
-
-                forward!(self.cursor, by 1);
-                let skip = self.skip_ascii_tab_or_newline();
-                forward!(self.cursor, by skip);
+                self.skip_ascii_tab_or_newline();
             };
 
             // First slash
@@ -757,11 +737,7 @@ mod state_machine {
             }
 
             if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
-                self.log_error(ValidationError::InvalidURLUnit);
-
-                forward!(self.cursor, by 1);
-                let skip = self.skip_ascii_tab_or_newline();
-                forward!(self.cursor, by skip);
+                self.skip_ascii_tab_or_newline();
             };
 
             // Second slash
@@ -804,11 +780,7 @@ mod state_machine {
 
                 match c {
                     ascii_tab_or_newline!() => {
-                        self.log_error(ValidationError::InvalidURLUnit);
-
-                        forward!(self.cursor, by 1);
-                        let skip = self.skip_ascii_tab_or_newline();
-                        forward!(self.cursor, by skip);
+                        self.skip_ascii_tab_or_newline();
                     },
 
                     b'/' | b'\\' => {
@@ -945,9 +917,7 @@ mod state_machine {
             if let Some(c) = self.cursor.first()
                 && matches!(c, ascii_tab_or_newline!())
             {
-                forward!(self.cursor, by 1);
-                let skip = self.skip_ascii_tab_or_newline();
-                forward!(self.cursor, by skip);
+                self.skip_ascii_tab_or_newline();
             }
 
             let checkpoint = self.cursor;
@@ -972,12 +942,7 @@ mod state_machine {
 
                 match c {
                     ascii_tab_or_newline!() => {
-                        self.log_error(ValidationError::InvalidURLUnit);
-
-                        forward!(self.cursor, by 1);
-                        let skip = self.skip_ascii_tab_or_newline();
-                        forward!(self.cursor, by skip);
-                        char_count_authority += skip + 1;
+                        char_count_authority += self.skip_ascii_tab_or_newline() + 1;
                     },
 
                     // EOF code point is implied in the below check
@@ -1056,7 +1021,7 @@ mod state_machine {
                                 //
                                 // https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L907-L914
                                 if char_count_userinfo > 0 {
-                                    password_token = Some(buffer.push(b':')? - 1);
+                                    password_token = Some(buffer.push_byte(b':')? - 1);
                                 }
                             },
                         }
@@ -1079,16 +1044,14 @@ mod state_machine {
                 // SAFETY: this is either the terminating userinfo U+0040 (@) delimiter or an ascii tab
                 // or newline so cursor is guaranteed to be non-empty.
                 if matches!(self.cursor[0], ascii_tab_or_newline!()) {
-                    forward!(self.cursor, by 1);
-                    let skip = self.skip_ascii_tab_or_newline();
-                    forward!(self.cursor, by skip);
+                    self.skip_ascii_tab_or_newline();
                 }
 
                 // We need to skip over the terminating userinfo U+0040 (@) delimiter again as we
                 // have reset the cursor.
                 forward!(self.cursor, by 1);
 
-                buffer.push(b'@')?;
+                buffer.push_byte(b'@')?;
             }
 
             Ok((segment::Username(username), segment::Password(password)))
@@ -1123,9 +1086,7 @@ mod state_machine {
             if let Some(c) = self.cursor.first()
                 && matches!(c, ascii_tab_or_newline!())
             {
-                forward!(self.cursor, by 1);
-                let skip = self.skip_ascii_tab_or_newline();
-                forward!(self.cursor, by skip);
+                self.skip_ascii_tab_or_newline();
             }
 
             let checkpoint = self.cursor;
@@ -1138,12 +1099,7 @@ mod state_machine {
 
                 match c {
                     ascii_tab_or_newline!() => {
-                        self.log_error(ValidationError::InvalidURLUnit);
-
-                        forward!(self.cursor, by 1);
-                        let skip = self.skip_ascii_tab_or_newline();
-                        forward!(self.cursor, by skip);
-                        char_count_hostname += skip + 1;
+                        char_count_hostname += self.skip_ascii_tab_or_newline() + 1;
                     },
 
                     b':' if !inside_brackets => {
@@ -1274,7 +1230,7 @@ mod state_machine {
 
             for c in domain.take(char_count_hostname) {
                 if !matches!(c, ascii_tab_or_newline!()) {
-                    buffer.push(c)?;
+                    buffer.push_byte(c)?;
                     host_stop += 1;
                 }
             }
@@ -1304,9 +1260,7 @@ mod state_machine {
             // ASCII tab or newline characters are skipped first so as not to cause the checkpoint to
             // parse them again.
             if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
-                forward!(self.cursor, by 1);
-                let skip = self.skip_ascii_tab_or_newline();
-                forward!(self.cursor, by skip);
+                self.skip_ascii_tab_or_newline();
             }
 
             let mut port = 0u32;
@@ -1321,10 +1275,7 @@ mod state_machine {
                     ascii_tab_or_newline!() => {
                         self.log_error(ValidationError::InvalidURLUnit);
 
-                        forward!(self.cursor, by 1);
-                        let skip = self.skip_ascii_tab_or_newline();
-                        forward!(self.cursor, by skip);
-                        char_count_port += skip + 1;
+                        char_count_port += self.skip_ascii_tab_or_newline() + 1;
                     },
 
                     b'0'..=b'9' => {
@@ -1358,11 +1309,11 @@ mod state_machine {
             if SPECIAL && (port as u16 == default_scheme_port || char_count_port == 0) {
                 Ok(segment::Port(None))
             } else {
-                buffer.push(b':')?;
+                buffer.push_byte(b':')?;
 
                 for c in &checkpoint[..char_count_port] {
                     if !matches!(c, ascii_tab_or_newline!()) {
-                        buffer.push(*c)?;
+                        buffer.push_byte(*c)?;
                     }
                 }
 
@@ -1373,55 +1324,90 @@ mod state_machine {
         #[inline]
         pub(super) fn state_path<const SPECIAL: bool>(
             &mut self,
-            host: &'_ segment::Host,
             buffer: &mut UrlBuffer<'output>,
         ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
+            fn segment_end(path_stack: &mut path::PathStack) -> Result<(), Error> {
+                #[cfg(test)]
+                let _segment = utf8::from_bytes(path_stack.segment_peek());
+
+                // double and single-dot URL path segments can be any combination of raw utf8 and
+                // percent-encoded, which complicates the detection logic a bit.
+                match path_stack.segment_peek() {
+                    [b'.', b'.', b'/']
+                    | [b'%', b'2', b'e', b'%', b'2', b'e', b'/']
+                    | [b'%', b'2', b'e', b'%', b'2', b'E', b'/']
+                    | [b'%', b'2', b'E', b'%', b'2', b'e', b'/']
+                    | [b'%', b'2', b'E', b'%', b'2', b'E', b'/']
+                    | [b'%', b'2', b'e', b'.', b'/']
+                    | [b'%', b'2', b'E', b'.', b'/']
+                    | [b'.', b'%', b'2', b'e', b'/']
+                    | [b'.', b'%', b'2', b'E', b'/'] => {
+                        // Remove the current path segment (../)
+                        path_stack.segment_pop();
+
+                        // Remove the previous path segment
+                        path_stack.segment_pop();
+                    },
+
+                    [b'.', ..] | [b'%', b'2', b'e', ..] | [b'%', b'2', b'E', ..] => {
+                        // Remove the current path segment (./)
+                        path_stack.segment_pop();
+                    },
+                    _ => (),
+                }
+
+                path_stack.segment_next()
+            }
+
             let path_start = buffer.len();
-            let mut path_stop = path_start;
+            let mut path_stack = path::PathStack::new(buffer.leftover())?;
 
-            // A special scheme path is never empty, it always contains at least the leading U+002F (/)
-            // code point
-            if SPECIAL || !host.0.is_empty() {
-                path_stop = buffer.push(b'/')?;
-
-                // Skip first leading U+002F (/) or U+005C (\) code points so we don't end up appending
-                // `//` or `\/` to the buffer if the path is non-empty.
-                if let Some(c) = self.cursor.first() {
-                    if *c == b'/' {
-                        forward!(self.cursor, by 1);
-                    } else if *c == b'\\' && SPECIAL {
-                        self.log_error(ValidationError::InvalidReverseSolidus);
-                        forward!(self.cursor, by 1);
-                    }
+            // Skip first leading U+002F (/) or U+005C (\) code points so we don't end up appending
+            // `//` or `\/` to the buffer if the path is non-empty.
+            if let Some(c) = self.cursor.first() {
+                if *c == b'/' {
+                    forward!(self.cursor, by 1);
+                } else if *c == b'\\' && SPECIAL {
+                    self.log_error(ValidationError::InvalidReverseSolidus);
+                    forward!(self.cursor, by 1);
                 }
             }
 
-            while !self.cursor.is_empty() {
-                let c = self.cursor[0];
-
-                match c {
-                    ascii_tab_or_newline!() => {
-                        self.log_error(ValidationError::InvalidURLUnit);
-
-                        forward!(self.cursor, by 1);
-                        let skip = self.skip_ascii_tab_or_newline();
-                        forward!(self.cursor, by skip);
+            loop {
+                match self.cursor.first() {
+                    Some(ascii_tab_or_newline!()) => {
+                        self.skip_ascii_tab_or_newline();
                     },
 
-                    b'/' => {
+                    Some(b'/') => {
                         forward!(self.cursor, by 1);
-                        path_stop = buffer.push(c)?;
+
+                        path_stack.segment_push_byte(b'/')?;
+
+                        segment_end(&mut path_stack)?;
                     },
 
-                    b'\\' if SPECIAL => {
+                    Some(b'\\') if SPECIAL => {
                         self.log_error(ValidationError::InvalidReverseSolidus);
                         forward!(self.cursor, by 1);
-                        path_stop = buffer.push(c)?;
+
+                        path_stack.segment_push_byte(b'/')?;
+
+                        segment_end(&mut path_stack)?;
                     },
 
-                    b'?' => {
+                    Some(b'?') => {
                         // Skip U+003F (?) query segment delimiter
                         forward!(self.cursor, by 1);
+
+                        segment_end(&mut path_stack)?;
+
+                        let len = path_stack.len();
+
+                        // SAFETY: path_stack performs at least the same bounds check as buffer.
+                        unsafe { buffer.force_forwards(len) };
+
+                        let path_stop = buffer.len();
 
                         let path = segment::Path(path_start..path_stop);
 
@@ -1433,9 +1419,18 @@ mod state_machine {
                         return Ok((path, query, fragment));
                     },
 
-                    b'#' => {
+                    Some(b'#') => {
                         // Skip U+0023 (#) fragment segment delimiter
                         forward!(self.cursor, by 1);
+
+                        segment_end(&mut path_stack)?;
+
+                        let len = path_stack.len();
+
+                        // SAFETY: path_stack performs at least the same bounds check as buffer.
+                        unsafe { buffer.force_forwards(len) };
+
+                        let path_stop = buffer.len();
 
                         let path = segment::Path(path_start..path_stop);
                         let query = segment::Query(path_stop..path_stop);
@@ -1448,21 +1443,33 @@ mod state_machine {
                         return Ok((path, query, fragment));
                     },
 
-                    b'%' => {
-                        path_stop = self.encode_percent_delimiter(buffer)?;
+                    Some(b'%') => {
+                        path_stack.segment_push_byte(b'%')?;
+                        self.check_percent_encoding();
                     },
 
-                    _ => {
-                        path_stop = self.encode_utf8(buffer, percent::PATH)?;
+                    Some(_c) => {
+                        self.encode_utf8_stack(&mut path_stack, percent::PATH)?;
+                    },
+
+                    None => {
+                        segment_end(&mut path_stack)?;
+
+                        let len = path_stack.len();
+
+                        // SAFETY: path_stack performs at least the same bounds check as buffer.
+                        unsafe { buffer.force_forwards(len) };
+
+                        let path_stop = buffer.len();
+
+                        let path = segment::Path(path_start..path_stop);
+                        let query = segment::Query(path_stop..path_stop);
+                        let fragment = segment::Fragment(path_stop..path_stop);
+
+                        return Ok((path, query, fragment));
                     },
                 }
             }
-
-            let path = segment::Path(path_start..path_stop);
-            let query = segment::Query(path_stop..path_stop);
-            let fragment = segment::Fragment(path_stop..path_stop);
-
-            Ok((path, query, fragment))
         }
 
         #[inline]
@@ -1513,11 +1520,7 @@ mod state_machine {
 
                 match c {
                     ascii_tab_or_newline!() => {
-                        self.log_error(ValidationError::InvalidURLUnit);
-
-                        forward!(self.cursor, by 1);
-                        let skip = self.skip_ascii_tab_or_newline();
-                        forward!(self.cursor, by skip);
+                        self.skip_ascii_tab_or_newline();
                     },
 
                     b' ' => {
@@ -1546,7 +1549,7 @@ mod state_machine {
                                 );
                             },
                             _ => {
-                                path_stop = buffer.push(b' ')?;
+                                path_stop = buffer.push_byte(b' ')?;
                             },
                         }
                     },
@@ -1565,11 +1568,12 @@ mod state_machine {
                     },
 
                     b'%' => {
-                        path_stop = self.encode_percent_delimiter(buffer)?;
+                        path_stop = buffer.push_byte(b'%')?;
+                        self.check_percent_encoding();
                     },
 
                     _ => {
-                        path_stop = self.encode_utf8(buffer, percent::C0_CONTROL)?;
+                        path_stop = self.encode_utf8_buffer(buffer, percent::C0_CONTROL)?;
                     },
                 }
             }
@@ -1586,7 +1590,7 @@ mod state_machine {
             &mut self,
             buffer: &mut UrlBuffer<'output>,
         ) -> Result<(segment::Query, segment::Fragment), Error> {
-            let query_start = buffer.push(b'?')?;
+            let query_start = buffer.push_byte(b'?')?;
             let mut query_stop = query_start;
 
             while !self.cursor.is_empty() {
@@ -1594,11 +1598,7 @@ mod state_machine {
 
                 match c {
                     ascii_tab_or_newline!() => {
-                        self.log_error(ValidationError::InvalidURLUnit);
-
-                        forward!(self.cursor, by 1);
-                        let skip = self.skip_ascii_tab_or_newline();
-                        forward!(self.cursor, by skip);
+                        self.skip_ascii_tab_or_newline();
                     },
 
                     b'#' => {
@@ -1616,7 +1616,8 @@ mod state_machine {
                     },
 
                     b'%' => {
-                        query_stop = self.encode_percent_delimiter(buffer)?;
+                        query_stop = buffer.push_byte(b'%')?;
+                        self.check_percent_encoding();
                     },
 
                     _ => {
@@ -1625,7 +1626,7 @@ mod state_machine {
                         } else {
                             percent::QUERY
                         };
-                        query_stop = self.encode_utf8(buffer, encoding)?;
+                        query_stop = self.encode_utf8_buffer(buffer, encoding)?;
                     },
                 }
             }
@@ -1641,7 +1642,7 @@ mod state_machine {
             &mut self,
             buffer: &mut UrlBuffer<'output>,
         ) -> Result<segment::Fragment, Error> {
-            let fragment_start = buffer.push(b'#')?;
+            let fragment_start = buffer.push_byte(b'#')?;
             let mut fragment_stop = fragment_start;
 
             while !self.cursor.is_empty() {
@@ -1649,19 +1650,16 @@ mod state_machine {
 
                 match c {
                     ascii_tab_or_newline!() => {
-                        self.log_error(ValidationError::InvalidURLUnit);
-
-                        forward!(self.cursor, by 1);
-                        let skip = self.skip_ascii_tab_or_newline();
-                        forward!(self.cursor, by skip);
+                        self.skip_ascii_tab_or_newline();
                     },
 
                     b'%' => {
-                        fragment_stop = self.encode_percent_delimiter(buffer)?;
+                        fragment_stop = buffer.push_byte(b'%')?;
+                        self.check_percent_encoding();
                     },
 
                     _ => {
-                        fragment_stop = self.encode_utf8(buffer, percent::FRAGMENT)?;
+                        fragment_stop = self.encode_utf8_buffer(buffer, percent::FRAGMENT)?;
                     },
                 }
             }
@@ -1716,7 +1714,7 @@ mod common {
             port: segment::Port,
             mut buffer: UrlBuffer<'output>,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
-            let (path, query, fragment) = self.state_path::<SPECIAL>(&host, &mut buffer)?;
+            let (path, query, fragment) = self.state_path::<SPECIAL>(&mut buffer)?;
 
             #[cfg(test)]
             let _path = utf8::from_bytes(&buffer[path.0.clone()]);
@@ -1753,49 +1751,99 @@ mod encode {
 
     impl Parser<'_> {
         #[inline]
-        pub(super) fn encode_percent_delimiter(
-            &mut self,
-            buffer: &mut UrlBuffer<'_>,
-        ) -> Result<usize, Error> {
-            // Invalid percent-encodings are still serialized and an error is logged.
-            let mut position = buffer.push(b'%')?;
+        pub(super) fn check_percent_encoding(&mut self) {
+            assert_eq!(self.cursor.first(), Some(&b'%'));
 
-            let mut len = 1;
+            forward!(self.cursor, by 1);
 
-            if let Some(b0) = self.cursor.get(1)
-                && let Some(b1) = self.cursor.get(2)
-            {
-                if !b0.is_ascii_hexdigit() || !b1.is_ascii_hexdigit() {
+            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+                self.skip_ascii_tab_or_newline();
+            }
+
+            let checkpoint = self.cursor;
+
+            match self.cursor.first() {
+                Some(ascii_hexdigit!()) => {},
+                Some(_) => {
                     self.log_error(ValidationError::InvalidURLUnit);
-                } else {
-                    buffer.push(*b0)?;
-                    position = buffer.push(*b1)?;
-                    len = 3;
-                }
-            } else {
+                },
+                None => {
+                    self.log_error(ValidationError::InvalidURLUnit);
+                    return;
+                },
+            }
+
+            forward!(self.cursor, by 1);
+
+            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+                self.skip_ascii_tab_or_newline();
+            }
+
+            if !matches!(self.cursor.first(), Some(ascii_hexdigit!())) {
                 self.log_error(ValidationError::InvalidURLUnit);
             }
 
-            forward!(self.cursor, by len);
-            Ok(position)
+            self.cursor = checkpoint;
         }
 
         #[inline]
-        pub(super) fn encode_utf8(
+        pub(super) fn encode_utf8_buffer(
             &mut self,
             buffer: &mut UrlBuffer<'_>,
             encoding: crate::percent::EncodeSet,
         ) -> Result<usize, Error> {
-            #[cfg(test)]
-            let _encoding_before = utf8::from_bytes(self.cursor);
+            let mut position = buffer.len();
 
-            // Invalid utf-8 bytes are replaced with the U+FFFD (�) utf-8 replacement code point.
-            let len = match utf8::url_code_point(self.cursor) {
-                utf8::CodePointUrl::Valid { len } => len,
+            match self.code_point() {
+                // NOTE: `code_point` is non-empty so position will always be overridden.
+                Some(code_point) => {
+                    for c in code_point {
+                        position = buffer.push_encode(*c, encoding)?;
+                    }
+
+                    Ok(position)
+                },
+
+                // Invalid utf-8 bytes are replaced with the U+FFFD (�) utf-8 replacement code point.
+                None => buffer.push_str(utf8::REPLACEMENT),
+            }
+        }
+
+        // TODO: unify this into a single method through a shared interface
+        #[inline]
+        pub(super) fn encode_utf8_stack(
+            &mut self,
+            path_stack: &mut path::PathStack<'_>,
+            encoding: crate::percent::EncodeSet,
+        ) -> Result<(), Error> {
+            match self.code_point() {
+                Some(code_point) => {
+                    for c in code_point {
+                        path_stack.segment_push_encode(*c, encoding)?;
+                    }
+
+                    Ok(())
+                },
+
+                // Invalid utf-8 bytes are replaced with the U+FFFD (�) utf-8 replacement code point.
+                None => path_stack.segment_push_str(utf8::REPLACEMENT),
+            }
+        }
+
+        pub(super) fn code_point(&mut self) -> Option<&[u8]> {
+            match utf8::url_code_point(self.cursor) {
+                utf8::CodePointUrl::Valid { len } => {
+                    let checkpoint = self.cursor;
+                    forward!(self.cursor, by len.get() as usize);
+                    Some(&checkpoint[..len.get() as usize])
+                },
 
                 utf8::CodePointUrl::Invalid { len } => {
                     self.log_error(ValidationError::InvalidURLUnit);
-                    len
+
+                    let checkpoint = self.cursor;
+                    forward!(self.cursor, by len.get() as usize);
+                    Some(&checkpoint[..len.get() as usize])
                 },
 
                 // Invalid utf-8 bytes are skipped. We don't check for utf-8 encoding in other url
@@ -1803,39 +1851,18 @@ mod encode {
                 // deal with multi-byte url code points, this information comes as free so we might
                 // as well act on it.
                 utf8::CodePointUrl::InvalidUtf8 { invalid: len } => {
-                    let position = buffer.push_str(utf8::REPLACEMENT)?;
                     forward!(self.cursor, by len.get() as usize);
-
-                    return Ok(position);
+                    None
                 },
 
                 // A truncated code point indicates we have reached the end of the cursor before the
                 // end of the code point. This information too is ignored, and we instead stop at
                 // the last valid code point.
                 utf8::CodePointUrl::Truncated => {
-                    let position = buffer.push_str(utf8::REPLACEMENT)?;
                     forward!(self.cursor, by 1);
-
-                    return Ok(position);
+                    None
                 },
-            };
-
-            // NOTE: len is nonzero so position will always be overridden
-            let mut position = 0;
-
-            for c in &self.cursor[..len.get() as usize] {
-                position = buffer.push_encode(*c, encoding)?;
             }
-
-            #[cfg(test)]
-            let _encoding_after = utf8::from_bytes(buffer.as_ref());
-
-            forward!(self.cursor, by len.get() as usize);
-
-            #[cfg(test)]
-            let _remaining = utf8::from_bytes(self.cursor);
-
-            Ok(position)
         }
     }
 }
@@ -1852,10 +1879,19 @@ mod util {
 
         #[inline]
         pub(super) fn skip_ascii_tab_or_newline(&mut self) -> usize {
-            self.cursor
+            self.log_error(ValidationError::InvalidURLUnit);
+
+            forward!(self.cursor, by 1);
+
+            let skip = self
+                .cursor
                 .iter()
                 .position(|c| !matches!(c, b'\t' | b'\r' | b'\n'))
-                .unwrap_or(self.cursor.len())
+                .unwrap_or(self.cursor.len());
+
+            forward!(self.cursor, by skip);
+
+            skip
         }
     }
 }
@@ -2471,8 +2507,9 @@ mod test {
         assert_utf8_eq!(url.username(), b"");
         assert_utf8_eq!(url.password(), b"");
         assert_utf8_eq!(url.host(), b"");
+        assert_utf8_eq!(url.path(), b"/");
 
-        assert_eq!(format!("{url}"), "scheme://");
+        assert_eq!(format!("{url}"), "scheme:///");
     }
 
     #[test]
@@ -2628,8 +2665,8 @@ mod test {
     }
 
     #[test]
-    fn url_parse_path_special() {
-        const URL: &str = "http://example.com/cat/pictures";
+    fn url_parse_path_special_absolute() {
+        const URL: &str = "http://example.com/Documents/code/rust/http/examples/client.rs";
 
         let mut backing = [0; 128];
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
@@ -2641,18 +2678,63 @@ mod test {
         assert_utf8_eq!(url.password(), b"");
         assert_utf8_eq!(url.host(), b"example.com");
         assert_eq!(url.port(), None);
-        assert_utf8_eq!(url.path(), b"/cat/pictures");
+        assert_utf8_eq!(url.path(), b"/Documents/code/rust/http/examples/client.rs");
 
-        assert_eq!(format!("{url}"), "http://example.com/cat/pictures");
+        assert_eq!(
+            format!("{url}"),
+            "http://example.com/Documents/code/rust/http/examples/client.rs"
+        );
+    }
+
+    #[test]
+    fn url_parse_path_special_relative() {
+        const URL: &str = "http://example.com/.././Documents/code/python/./../rust/http/src/../examples/server/../client.rs";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/Documents/code/rust/http/examples/client.rs");
+
+        assert_eq!(
+            format!("{url}"),
+            "http://example.com/Documents/code/rust/http/examples/client.rs"
+        );
+    }
+
+    #[test]
+    fn url_parse_path_special_emtpy_segments() {
+        const URL: &str = "http://example.com//..//..//../";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/");
+
+        assert_eq!(format!("{url}"), "http://example.com/");
     }
 
     #[test]
     fn url_parse_path_special_strange_solidus() {
         const URL: &str = "http://example.com//\\////\\\\\\///////";
 
-        let mut backing = [0; 128];
+        let mut backing = [0; 512];
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
+        // `\` is not a valid URL code point, even if it is not part of the PATH percent-encode set.
         assert_eq!(
             validation_errors.next(),
             Some(ValidationError::InvalidReverseSolidus)
@@ -2664,9 +2746,9 @@ mod test {
         assert_utf8_eq!(url.password(), b"");
         assert_utf8_eq!(url.host(), b"example.com");
         assert_eq!(url.port(), None);
-        assert_utf8_eq!(url.path(), b"//\\////\\\\\\///////");
+        assert_utf8_eq!(url.path(), b"/////////////////");
 
-        assert_eq!(format!("{url}"), "http://example.com//\\////\\\\\\///////");
+        assert_eq!(format!("{url}"), "http://example.com/////////////////");
     }
 
     #[test]
@@ -2691,6 +2773,55 @@ mod test {
         assert_utf8_eq!(url.path(), b"/\\cat\\pictures\\");
 
         assert_eq!(format!("{url}"), "scheme://example.com/\\cat\\pictures\\");
+    }
+
+    #[test]
+    fn url_parse_path_opaque_absolute() {
+        const URL: &str = "scheme:Documents/code/rust/http/examples/client.rs";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"Documents/code/rust/http/examples/client.rs");
+
+        assert_eq!(
+            format!("{url}"),
+            "scheme:Documents/code/rust/http/examples/client.rs"
+        );
+    }
+
+    #[test]
+    fn url_parse_path_opaque_relative() {
+        const URL: &str =
+            "scheme:.././Documents/code/python/./../rust/http/src/../examples/server/../client.rs";
+
+        let mut backing = [0; 128];
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        // Opaque path URLs do not support relative paths or path shortening
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(
+            url.path(),
+            b".././Documents/code/python/./../rust/http/src/../examples/server/../client.rs"
+        );
+
+        assert_eq!(
+            format!("{url}"),
+            "scheme:.././Documents/code/python/./../rust/http/src/../examples/server/../client.rs"
+        );
     }
 
     #[test]
