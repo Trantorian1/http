@@ -41,6 +41,10 @@ unreachable_pub = "warn"
 pedantic = { level = "warn", priority = -1 }
 # cargo = { level = "warn", priority = -1 }
 
+# I know what the fuck I'm doing thank you
+too_many_lines = "allow"
+cast_ptr_alignment = "allow"
+
 shadow_same = "forbid"
 shadow_reuse = "forbid"
 shadow_unrelated = "forbid"

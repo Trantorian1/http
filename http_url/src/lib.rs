@@ -102,6 +102,7 @@ pub(crate) mod macros {
     pub(crate) use crate::forward;
     pub(crate) use crate::shrink;
 
+    #[doc(hidden)]
     #[macro_export]
     macro_rules! ascii_tab_or_newline {
         () => {
@@ -109,6 +110,7 @@ pub(crate) mod macros {
         };
     }
 
+    #[doc(hidden)]
     #[macro_export]
     macro_rules! ascii_hexdigit {
         () => {
@@ -116,6 +118,7 @@ pub(crate) mod macros {
         };
     }
 
+    #[doc(hidden)]
     #[macro_export]
     macro_rules! forward {
         ($cursor:expr, by $n:expr) => {
@@ -123,6 +126,7 @@ pub(crate) mod macros {
         };
     }
 
+    #[doc(hidden)]
     #[macro_export]
     macro_rules! shrink {
         ($cursor:expr, by $n:expr) => {{
@@ -163,6 +167,7 @@ impl<'data> Url<'data> {
     ///
     /// assert_eq!(url.scheme(), b"http");
     /// ```
+    #[must_use]
     pub fn scheme(&self) -> &'data [u8] {
         &self.backing[self.scheme.0.clone()]
     }
@@ -194,6 +199,7 @@ impl<'data> Url<'data> {
     /// will not fail parsing outright.
     ///
     /// [`InvalidCredentials`]: ValidationError::InvalidCredentials
+    #[must_use]
     pub fn username(&self) -> &'data [u8] {
         &self.backing[self.username.0.clone()]
     }
@@ -226,6 +232,7 @@ impl<'data> Url<'data> {
     /// will not fail parsing outright.
     ///
     /// [`InvalidCredentials`]: ValidationError::InvalidCredentials
+    #[must_use]
     pub fn password(&self) -> &'data [u8] {
         &self.backing[self.password.0.clone()]
     }
@@ -248,6 +255,7 @@ impl<'data> Url<'data> {
     /// [IP address]: https://url.spec.whatwg.org/#ip-address
     /// [opaque host]: https://url.spec.whatwg.org/#opaque-host
     /// [empty host]: https://url.spec.whatwg.org/#empty-host
+    #[must_use]
     pub fn host(&self) -> &'data [u8] {
         &self.backing[self.host.0.clone()]
     }
@@ -266,10 +274,11 @@ impl<'data> Url<'data> {
     ///
     /// # Warning
     ///
-    /// Port will be set to [`Null`] if it matches the [default port] for that [`scheme`].
+    /// Port will be set to [`None`] if it matches the [default port] for that [`scheme`].
     ///
     /// [default port]: https://url.spec.whatwg.org/#default-port
     /// [`scheme`]: Self::scheme
+    #[must_use]
     pub fn port(&self) -> Option<u16> {
         self.port.0
     }
@@ -288,6 +297,7 @@ impl<'data> Url<'data> {
     /// ```
     ///
     /// [URL path segment]: https://url.spec.whatwg.org/#url-path-segment
+    #[must_use]
     pub fn path(&self) -> &'data [u8] {
         &self.backing[self.path.0.clone()]
     }
@@ -309,6 +319,7 @@ impl<'data> Url<'data> {
     /// URL query parsing does **not** enforce [application/x-www-form-urlencoded] conformity.
     ///
     /// [application/x-www-form-urlencoded]: https://url.spec.whatwg.org/#application/x-www-form-urlencoded
+    #[must_use]
     pub fn query(&self) -> &'data [u8] {
         &self.backing[self.query.0.clone()]
     }
@@ -326,6 +337,7 @@ impl<'data> Url<'data> {
     ///
     /// assert_eq!(url.fragment(), b"about");
     /// ```
+    #[must_use]
     pub fn fragment(&self) -> &'data [u8] {
         &self.backing[self.fragment.0.clone()]
     }
@@ -347,6 +359,7 @@ impl<'data> Url<'data> {
     /// ```
     ///
     /// [special scheme]: https://url.spec.whatwg.org/#special-scheme
+    #[must_use]
     pub fn is_opaque(&self) -> bool {
         !matches!(self.backing.get(self.scheme.0.end + 1), Some(b'/'))
     }

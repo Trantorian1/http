@@ -189,6 +189,7 @@ impl<'parsing> PathStack<'parsing> {
         unsafe { std::slice::from_raw_parts(self.tail, self.size) }
     }
 
+    #[allow(unused)]
     pub(super) fn as_segment_paths(&self) -> &[u8] {
         assert!(self.head.addr() < self.tail.addr());
 

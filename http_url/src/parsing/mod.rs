@@ -29,7 +29,6 @@ impl<'data> Url<'data> {
     ///
     /// ```rust
     /// # use http_url::Url;
-    /// # use macro_util::*;
     /// let mut backing = [0; 128];
     /// let (url, validation_errors) = Url::new(
     ///     b"http://example.com:123/path/to/file?query#fragment",
@@ -39,12 +38,12 @@ impl<'data> Url<'data> {
     ///
     /// assert_eq!(validation_errors.len(), 0);
     ///
-    /// assert_utf8_eq!(url.scheme(), b"http");
-    /// assert_utf8_eq!(url.host(), b"example.com");
+    /// assert_eq!(url.scheme(), b"http");
+    /// assert_eq!(url.host(), b"example.com");
     /// assert_eq!(url.port(), Some(123));
-    /// assert_utf8_eq!(url.path(), b"/path/to/file");
-    /// assert_utf8_eq!(url.query(), b"query");
-    /// assert_utf8_eq!(url.fragment(), b"fragment");
+    /// assert_eq!(url.path(), b"/path/to/file");
+    /// assert_eq!(url.query(), b"query");
+    /// assert_eq!(url.fragment(), b"fragment");
     /// ```
     pub fn new(
         bytes: &[u8],
@@ -53,6 +52,26 @@ impl<'data> Url<'data> {
         Parser::new(bytes).parse(&Url::emtpy(), UrlBuffer::new(backing))
     }
 
+    /// Parses a byte stream as a URL, with this URL as the base.
+    ///
+    /// # Errors
+    ///
+    /// Returns a hard [`Error`] in case of failed parsing. Other errors which attest to a malformed
+    /// input but are recoverable are reported as [`ValidationError`]s.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use http_url::Url;
+    /// # use macro_util::*;
+    /// let mut backing_base = [0; 128];
+    /// let (base, _) = Url::new(b"http://example.com/path/to/file.txt", &mut backing_base).unwrap();
+    ///
+    /// let mut backing_url = [0; 128];
+    /// let (url, _) = base.join(b"notes.txt", &mut backing_url).unwrap();
+    ///
+    /// assert_eq!(url.to_string(), "http://example.com/path/to/notes.txt");
+    /// ```
     pub fn join(
         &self,
         bytes: &[u8],
@@ -64,14 +83,14 @@ impl<'data> Url<'data> {
     fn emtpy() -> Self {
         Self {
             backing: Default::default(),
-            scheme: Default::default(),
-            username: Default::default(),
-            password: Default::default(),
-            host: Default::default(),
-            port: Default::default(),
-            path: Default::default(),
-            query: Default::default(),
-            fragment: Default::default(),
+            scheme: segment::Scheme::default(),
+            username: segment::Username::default(),
+            password: segment::Password::default(),
+            host: segment::Host::default(),
+            port: segment::Port::default(),
+            path: segment::Path::default(),
+            query: segment::Query::default(),
+            fragment: segment::Fragment::default(),
         }
     }
 }
@@ -116,9 +135,9 @@ impl<'input> Parser<'input> {
     }
 
     #[inline]
-    fn parse<'base, 'output>(
+    fn parse<'output>(
         mut self,
-        base: &Url<'base>,
+        base: &Url<'_>,
         buffer: UrlBuffer<'output>,
     ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
         self.state_c0_control_or_space();
@@ -308,8 +327,10 @@ mod state_machine {
 
             assert!(buffer.is_empty());
 
-            if !base.scheme.0.is_empty() {
-                if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+            if base.scheme.0.is_empty() {
+                Err(Error::MissingSchemeNonRelativeUrl)
+            } else {
+                if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                     self.skip_ascii_tab_or_newline();
                 }
 
@@ -377,13 +398,11 @@ mod state_machine {
 
                         let scheme = base.scheme.clone();
 
-                        return self.state_relative_slash::<SPECIAL>(base, scheme, 0, buffer);
+                        self.state_relative_slash::<SPECIAL>(base, scheme, 0, buffer)
                     },
 
                     _ => self.state_relative::<SPECIAL>(base, buffer),
                 }
-            } else {
-                Err(Error::MissingSchemeNonRelativeUrl)
             }
         }
 
@@ -400,7 +419,7 @@ mod state_machine {
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             const SPECIAL: bool = true;
 
-            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                 self.skip_ascii_tab_or_newline();
             }
 
@@ -501,7 +520,7 @@ mod state_machine {
                     let backing = buffer.into_inner();
                     let error_bitset = self.error_bitset;
 
-                    return Ok((
+                    Ok((
                         Url {
                             backing,
 
@@ -515,7 +534,7 @@ mod state_machine {
                             fragment,
                         },
                         error_bitset.iter(),
-                    ));
+                    ))
                 },
                 Some(b'#') => {
                     // This is an optimization over the naive relative state fallback.
@@ -559,7 +578,7 @@ mod state_machine {
                     let backing = buffer.into_inner();
                     let error_bitset = self.error_bitset;
 
-                    return Ok((
+                    Ok((
                         Url {
                             backing,
 
@@ -573,7 +592,7 @@ mod state_machine {
                             fragment,
                         },
                         error_bitset.iter(),
-                    ));
+                    ))
                 },
                 Some(c) => {
                     // U+002F (/) checks are performed in parent functions
@@ -592,19 +611,16 @@ mod state_machine {
                         password,
                         host,
                         port,
-                        path,
                         ..
                     } = base;
 
-                    let path_base = &base.backing[path.0.clone()];
-
                     let (path, query, fragment) =
-                        self.state_path::<SPECIAL>(&mut buffer, path_base)?;
+                        self.state_path::<SPECIAL>(&mut buffer, base.path())?;
 
                     let backing = buffer.into_inner();
                     let error_bitset = self.error_bitset;
 
-                    return Ok((
+                    Ok((
                         Url {
                             backing,
 
@@ -618,7 +634,7 @@ mod state_machine {
                             fragment,
                         },
                         error_bitset.iter(),
-                    ));
+                    ))
                 },
                 None => {
                     // This is an optimization over the naive relative state fallback.
@@ -660,7 +676,7 @@ mod state_machine {
                     let backing = buffer.into_inner();
                     let error_bitset = self.error_bitset;
 
-                    return Ok((
+                    Ok((
                         Url {
                             backing,
 
@@ -674,7 +690,7 @@ mod state_machine {
                             fragment,
                         },
                         error_bitset.iter(),
-                    ));
+                    ))
                 },
             }
         }
@@ -701,7 +717,7 @@ mod state_machine {
             default_scheme_port: u16,
             mut buffer: UrlBuffer<'output>,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
-            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                 self.skip_ascii_tab_or_newline();
             }
 
@@ -710,11 +726,7 @@ mod state_machine {
                 Some(b'/') => {
                     forward!(self.cursor, by 1);
 
-                    return self.state_special_authority_ignore_slashes(
-                        scheme,
-                        default_scheme_port,
-                        buffer,
-                    );
+                    self.state_special_authority_ignore_slashes(scheme, default_scheme_port, buffer)
                 },
 
                 Some(b'\\') => {
@@ -723,11 +735,7 @@ mod state_machine {
                     self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
                     self.log_error(ValidationError::InvalidReverseSolidus);
 
-                    return self.state_special_authority_ignore_slashes(
-                        scheme,
-                        default_scheme_port,
-                        buffer,
-                    );
+                    self.state_special_authority_ignore_slashes(scheme, default_scheme_port, buffer)
                 },
 
                 _ => {
@@ -739,14 +747,14 @@ mod state_machine {
                     buffer.clear();
                     buffer.push_str(&base.backing[..base.path.0.start])?;
 
-                    return self.common_after_host::<SPECIAL>(
+                    self.common_after_host::<SPECIAL>(
                         scheme,
                         base.username.clone(),
                         base.password.clone(),
                         base.host.clone(),
                         base.port.clone(),
                         buffer,
-                    );
+                    )
                 },
             }
         }
@@ -763,47 +771,35 @@ mod state_machine {
             default_scheme_port: u16,
             buffer: UrlBuffer<'output>,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
-            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                 self.skip_ascii_tab_or_newline();
-            };
+            }
 
             // First slash
-            match self.cursor.first() {
-                Some(b'/') => {
-                    forward!(self.cursor, by 1);
-                },
+            if let Some(b'/') = self.cursor.first() {
+                forward!(self.cursor, by 1);
+            } else {
+                self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
 
-                _ => {
-                    self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
-
-                    return self.state_special_authority_ignore_slashes(
-                        scheme,
-                        default_scheme_port,
-                        buffer,
-                    );
-                },
+                return self.state_special_authority_ignore_slashes(
+                    scheme,
+                    default_scheme_port,
+                    buffer,
+                );
             }
 
-            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                 self.skip_ascii_tab_or_newline();
-            };
+            }
 
             // Second slash
-            match self.cursor.first() {
-                Some(b'/') => {
-                    forward!(self.cursor, by 1);
-                },
-
-                _ => {
-                    self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
-                },
+            if let Some(b'/') = self.cursor.first() {
+                forward!(self.cursor, by 1);
+            } else {
+                self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
             }
 
-            return self.state_special_authority_ignore_slashes(
-                scheme,
-                default_scheme_port,
-                buffer,
-            );
+            self.state_special_authority_ignore_slashes(scheme, default_scheme_port, buffer)
         }
 
         /// # [Special authority ignore slashes state]
@@ -813,7 +809,7 @@ mod state_machine {
         ///  the correct approach is to ignore ALL slashes following the scheme.
         ///
         /// [Special authority ignore slashes state]: https://url.spec.whatwg.org/#special-authority-ignore-slashes-state
-        /// [rust_url]: https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L451-L457
+        /// [rust_url source code]: https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L451-L457
         #[inline]
         pub(super) fn state_special_authority_ignore_slashes(
             mut self,
@@ -965,9 +961,7 @@ mod state_machine {
 
             // ASCII tab or newline characters are skipped first so as not to cause the checkpoint to
             // parse them again.
-            if let Some(c) = self.cursor.first()
-                && matches!(c, ascii_tab_or_newline!())
-            {
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                 self.skip_ascii_tab_or_newline();
             }
 
@@ -1095,7 +1089,7 @@ mod state_machine {
             if !username.is_empty() || !password.is_empty() {
                 // SAFETY: this is either the terminating userinfo U+0040 (@) delimiter or an ascii tab
                 // or newline so cursor is guaranteed to be non-empty.
-                if matches!(self.cursor[0], ascii_tab_or_newline!()) {
+                if let ascii_tab_or_newline!() = self.cursor[0] {
                     self.skip_ascii_tab_or_newline();
                 }
 
@@ -1144,9 +1138,7 @@ mod state_machine {
 
             // ASCII tab or newline characters are skipped first so as not to cause the checkpoint to
             // parse them again.
-            if let Some(c) = self.cursor.first()
-                && matches!(c, ascii_tab_or_newline!())
-            {
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                 self.skip_ascii_tab_or_newline();
             }
 
@@ -1423,11 +1415,11 @@ mod state_machine {
 
             // ASCII tab or newline characters are skipped first so as not to cause the checkpoint to
             // parse them again.
-            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                 self.skip_ascii_tab_or_newline();
             }
 
-            let mut port = 0u32;
+            let mut port_val = 0u32;
             let mut char_count_port = 0;
 
             let checkpoint = self.cursor;
@@ -1439,9 +1431,9 @@ mod state_machine {
                     },
 
                     Some(n @ b'0'..=b'9') => {
-                        port = port * 10 + u32::from(*n) - u32::from(b'0');
+                        port_val = port_val * 10 + u32::from(*n) - u32::from(b'0');
 
-                        if port > u32::from(u16::MAX) {
+                        if port_val > u32::from(u16::MAX) {
                             return Err(Error::PortOutOfRange);
                         }
 
@@ -1454,7 +1446,7 @@ mod state_machine {
                         forward!(self.cursor, by 1);
 
                         let port = port_end::<SPECIAL>(
-                            port,
+                            port_val,
                             default_scheme_port,
                             char_count_port,
                             checkpoint,
@@ -1473,7 +1465,7 @@ mod state_machine {
                         forward!(self.cursor, by 1);
 
                         let port = port_end::<SPECIAL>(
-                            port,
+                            port_val,
                             default_scheme_port,
                             char_count_port,
                             checkpoint,
@@ -1490,7 +1482,7 @@ mod state_machine {
                         forward!(self.cursor, by 1);
 
                         let port = port_end::<SPECIAL>(
-                            port,
+                            port_val,
                             default_scheme_port,
                             char_count_port,
                             checkpoint,
@@ -1509,7 +1501,7 @@ mod state_machine {
                         forward!(self.cursor, by 1);
 
                         let port = port_end::<SPECIAL>(
-                            port,
+                            port_val,
                             default_scheme_port,
                             char_count_port,
                             checkpoint,
@@ -1530,7 +1522,7 @@ mod state_machine {
 
                     None => {
                         let port = port_end::<SPECIAL>(
-                            port,
+                            port_val,
                             default_scheme_port,
                             char_count_port,
                             checkpoint,
@@ -1560,6 +1552,7 @@ mod state_machine {
                 // double and single-dot URL path segments can be any combination of raw utf8 and
                 // percent-encoded, which complicates the detection logic a bit.
                 match path_stack.segment_peek() {
+                    #[allow(clippy::unnested_or_patterns)]
                     [b'.', b'.', b'/']
                     | [b'%', b'2', b'e', b'%', b'2', b'e', b'/']
                     | [b'%', b'2', b'e', b'%', b'2', b'E', b'/']
@@ -1576,6 +1569,7 @@ mod state_machine {
                         path_stack.segment_pop();
                     },
 
+                    #[allow(clippy::unnested_or_patterns)]
                     [b'.', ..] | [b'%', b'2', b'e', ..] | [b'%', b'2', b'E', ..] => {
                         // Remove the current path segment (./)
                         path_stack.segment_pop();
@@ -1602,7 +1596,7 @@ mod state_machine {
 
                 let mut prev = 0;
                 for n in memchr::memchr_iter(b'/', path_base) {
-                    path_stack.segment_push_str(&path_base[prev..n + 1])?;
+                    path_stack.segment_push_str(&path_base[prev..=n])?;
                     prev = n + 1;
                 }
             }
@@ -2004,7 +1998,7 @@ mod encode {
 
             forward!(self.cursor, by 1);
 
-            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                 self.skip_ascii_tab_or_newline();
             }
 
@@ -2023,7 +2017,7 @@ mod encode {
 
             forward!(self.cursor, by 1);
 
-            if matches!(self.cursor.first(), Some(ascii_tab_or_newline!())) {
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                 self.skip_ascii_tab_or_newline();
             }
 
@@ -2038,7 +2032,7 @@ mod encode {
         pub(super) fn encode_utf8_buffer(
             &mut self,
             buffer: &mut UrlBuffer<'_>,
-            encoding: crate::percent::EncodeSet,
+            encoding: percent::EncodeSet,
         ) -> Result<(), Error> {
             match self.code_point() {
                 // NOTE: `code_point` is non-empty so position will always be overridden.
@@ -2055,12 +2049,11 @@ mod encode {
             }
         }
 
-        // TODO: unify this into a single method through a shared interface
         #[inline]
         pub(super) fn encode_utf8_stack(
             &mut self,
             path_stack: &mut path::PathStack<'_>,
-            encoding: crate::percent::EncodeSet,
+            encoding: percent::EncodeSet,
         ) -> Result<(), Error> {
             match self.code_point() {
                 Some(code_point) => {
@@ -2156,7 +2149,28 @@ pub mod utf8 {
         let mut c = 0;
 
         while c <= 0x80 {
-            if matches!(c, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b'-' | b'.' | b'/' | b':' | b';' | b'=' | b'?' | b'@' | b'_' | b'~')
+            if let b'a'..=b'z'
+            | b'A'..=b'Z'
+            | b'0'..=b'9'
+            | b'!'
+            | b'$'
+            | b'&'
+            | b'\''
+            | b'('
+            | b')'
+            | b'*'
+            | b'+'
+            | b','
+            | b'-'
+            | b'.'
+            | b'/'
+            | b':'
+            | b';'
+            | b'='
+            | b'?'
+            | b'@'
+            | b'_'
+            | b'~' = c
             {
                 mask |= 1 << c;
             }
@@ -2476,13 +2490,12 @@ mod test {
     #[test]
     fn url_join_on_path_full() {
         const BASE: &str = "http://example.com?base-query#base-fragment";
+        const URL: &str = "path/to/file?query#fragment";
 
         let mut backing_base = [0; 128];
         let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
         assert_eq!(err_base.next(), None);
-
-        const URL: &str = "path/to/file?query#fragment";
 
         let mut backing_url = [0; 128];
         let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
@@ -2507,13 +2520,12 @@ mod test {
     #[test]
     fn url_join_on_path_extend() {
         const BASE: &str = "http://example.com/path/to/file?base-query#base-fragment";
+        const URL: &str = "folder/journal?query#fragment";
 
         let mut backing_base = [0; 128];
         let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
         assert_eq!(err_base.next(), None);
-
-        const URL: &str = "folder/journal?query#fragment";
 
         let mut backing_url = [0; 128];
         let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
@@ -2538,13 +2550,12 @@ mod test {
     #[test]
     fn url_join_on_query() {
         const BASE: &str = "http://example.com/path/to/file?base-query#base-fragment";
+        const URL: &str = "?query#fragment";
 
         let mut backing_base = [0; 128];
         let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
         assert_eq!(err_base.next(), None);
-
-        const URL: &str = "?query#fragment";
 
         let mut backing_url = [0; 128];
         let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
@@ -2569,13 +2580,12 @@ mod test {
     #[test]
     fn url_join_on_fragment() {
         const BASE: &str = "http://example.com/path/to/file?query#base-fragment";
+        const URL: &str = "#fragment";
 
         let mut backing_base = [0; 128];
         let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
         assert_eq!(err_base.next(), None);
-
-        const URL: &str = "#fragment";
 
         let mut backing_url = [0; 128];
         let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
