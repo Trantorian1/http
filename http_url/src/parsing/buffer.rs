@@ -1,60 +1,70 @@
 use super::Error;
 use super::percent;
 
-pub(super) struct UrlBuffer<'data> {
+pub(crate) struct UrlBuffer<'data> {
     backing: &'data mut [u8],
     next: usize,
 }
 
 impl<'data> UrlBuffer<'data> {
-    pub(super) fn new(backing: &'data mut [u8]) -> Self {
+    pub(crate) fn new(backing: &'data mut [u8]) -> Self {
         assert_ne!(backing, []);
         Self { backing, next: 0 }
     }
 
-    pub(super) fn push(&mut self, c: u8) -> Result<usize, Error> {
+    pub(crate) fn push_byte(&mut self, c: u8) -> Result<(), Error> {
         if self.next < self.backing.len() {
             self.backing[self.next] = c;
             self.next += 1;
-            Ok(self.next)
+            Ok(())
         } else {
-            Err(Error::Overflow)
+            Err(Error::OOM)
         }
     }
 
-    pub(super) fn push_str(&mut self, bytes: &[u8]) -> Result<usize, Error> {
+    pub(crate) fn push_str(&mut self, bytes: &[u8]) -> Result<(), Error> {
         if self.next + bytes.len() <= self.backing.len() {
             self.backing[self.next..self.next + bytes.len()].copy_from_slice(bytes);
             self.next += bytes.len();
-            Ok(self.next)
+            Ok(())
         } else {
-            Err(Error::Overflow)
+            Err(Error::OOM)
         }
     }
 
-    pub(super) fn push_encode_byte(
-        &mut self,
-        c: u8,
-        set: percent::EncodeSet,
-    ) -> Result<usize, Error> {
+    pub(crate) fn push_encode(&mut self, c: u8, set: percent::EncodeSet) -> Result<(), Error> {
         let n = percent::encode_byte_to(c, &mut self.backing[self.next..], set);
         if n == 0 {
-            Err(Error::Overflow)
+            Err(Error::OOM)
         } else {
             self.next += n;
-            Ok(self.next)
+            Ok(())
         }
     }
 
-    pub(super) fn clear(&mut self) {
+    /// Manually advances the next write location in the backing buffer with no bounds checks.
+    ///
+    /// # Panics
+    ///
+    /// `n` must be less than or equal to the remaining space  in the backing buffer otherwise this
+    /// can cause other methods to panic.
+    pub(crate) unsafe fn force_forwards(&mut self, n: usize) {
+        self.next += n;
+    }
+
+    pub(crate) fn leftover(&mut self) -> &mut [u8] {
+        &mut self.backing[self.next..]
+    }
+
+    pub(crate) fn clear(&mut self) {
         self.next = 0;
     }
 
-    pub(super) fn into_inner(self) -> &'data [u8] {
+    pub(crate) fn into_inner(self) -> &'data [u8] {
         &self.backing[..self.next]
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.next
     }
 }

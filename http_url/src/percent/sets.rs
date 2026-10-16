@@ -2,8 +2,8 @@ type Chunk = u32;
 const ASCII_RANGE: usize = 0x80;
 const BITS_PER_CHUNK: usize = 8 * std::mem::size_of::<Chunk>();
 
-/// The C0 control percent-encode set is a [`PercentEncodeSet`] consisting of C0 controls and
-/// all code points greater than U+007E (~).
+/// The C0 control percent-encode set is a [`EncodeSet`] consisting of C0 controls and all code
+/// points greater than U+007E (~).
 pub const C0_CONTROL: EncodeSet = EncodeSet::new()
     // C0 controls
     .add(0x0)
@@ -42,8 +42,8 @@ pub const C0_CONTROL: EncodeSet = EncodeSet::new()
     .add(0x7F);
 
 #[allow(clippy::doc_markdown)]
-/// The fragment [`PercentEncodeSet`] is a percent-encode set consisting of the C0 control
-/// percent-encode set and U+0020 SPACE, U+0022 ("), U+003C (<), U+003E (>), and U+0060 (`).
+/// The fragment [`EncodeSet`] is a percent-encode set consisting of the C0 control percent-encode
+/// set and U+0020 SPACE, U+0022 ("), U+003C (<), U+003E (>), and U+0060 (`).
 pub const FRAGMENT: EncodeSet = C0_CONTROL
     // U+0020
     .add(b' ')
@@ -56,8 +56,8 @@ pub const FRAGMENT: EncodeSet = C0_CONTROL
     //  U+0060
     .add(b'`');
 
-/// The query [`PercentEncodeSet`] is a percent-encode set consisting of the C0 control percent-
-/// encode set and U+0020 SPACE, U+0022 ("), U+0023 (#), U+003C (<), and U+003E (>).
+/// The query [`EncodeSet`] is a percent-encode set consisting of the C0 control percent- encode set
+/// and U+0020 SPACE, U+0022 ("), U+0023 (#), U+003C (<), and U+003E (>).
 pub const QUERY: EncodeSet = C0_CONTROL
     // U+0020
     .add(b' ')
@@ -70,15 +70,15 @@ pub const QUERY: EncodeSet = C0_CONTROL
     // U+003E
     .add(b'>');
 
-/// The special-query [`PercentEncodeSet`] is a percent-encode set consisting of the query
-/// percent-encode set and U+0027 (').
+/// The special-query [`EncodeSet`] is a percent-encode set consisting of the query percent-encode
+/// set and U+0027 (').
 pub const QUERY_SPECIAL: EncodeSet = QUERY
     // U+0027
     .add(b'\'');
 
 #[allow(clippy::doc_markdown)]
-/// The path percent-encode set is a [`PercentEncodeSet`] consisting of the query percent-encode
-/// set and U+003F (?), U+005E (^), U+0060 (`), U+007B ({), and U+007D (}).
+/// The path percent-encode set is a [`EncodeSet`] consisting of the query percent-encode set and
+/// U+003F (?), U+005E (^), U+0060 (`), U+007B ({), and U+007D (}).
 pub const PATH: EncodeSet = QUERY
     // U+003F
     .add(b'?')
@@ -91,9 +91,9 @@ pub const PATH: EncodeSet = QUERY
     // U+007D
     .add(b'}');
 
-/// The userinfo [`PercentEncodeSet`] is a percent-encode set consisting of the path
-/// percent-encode set and U+002F (/), U+003A (:), U+003B (;), U+003D (=), U+0040 (@),
-/// U+005B ([) to U+005D (]), inclusive, and U+007C (|).
+/// The userinfo [`EncodeSet`] is a percent-encode set consisting of the path percent-encode set and
+/// U+002F (/), U+003A (:), U+003B (;), U+003D (=), U+0040 (@), U+005B ([) to U+005D (]), inclusive,
+/// and U+007C (|).
 pub const USERINFO: EncodeSet = PATH
     // U+002F
     .add(b'/')
@@ -114,8 +114,8 @@ pub const USERINFO: EncodeSet = PATH
     // U+007C
     .add(b'|');
 
-/// The component [`PercentEncodeSet`] is a percent-encode set consisting of the userinfo
-/// percent-encode set and U+0024 ($) to U+0026 (&), inclusive, U+002B (+), and U+002C (,).
+/// The component [`EncodeSet`] is a percent-encode set consisting of the userinfo percent-encode
+/// set and U+0024 ($) to U+0026 (&), inclusive, U+002B (+), and U+002C (,).
 pub const COMPONENT: EncodeSet = USERINFO
     // U+0024
     .add(b'$')
@@ -194,7 +194,7 @@ impl std::fmt::Debug for EncodeSet {
             for j in 0..BITS_PER_CHUNK {
                 if chunk & 1 << j > 0 {
                     let c = j + i * BITS_PER_CHUNK;
-                    // SAFETY: PercentEncodeSet may only contain ASCII digits, which is valid utf-8
+                    // SAFETY: EncodeSet may only contain ASCII digits, which is valid utf-8
                     format.entry(&unsafe { char::from_u32_unchecked(c as u32) });
                 }
             }
