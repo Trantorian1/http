@@ -455,6 +455,11 @@ mod state_machine {
             base: &Url<'_>,
             mut buffer: UrlBuffer<'output>,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            assert!(!matches!(
+                self.cursor.first(),
+                Some(ascii_tab_or_newline!())
+            ));
+
             match self.cursor.first() {
                 Some(b'?') => {
                     // This is an optimization over the naive relative state fallback.
@@ -462,7 +467,10 @@ mod state_machine {
                     // Since the next segment to be parsed will be the query we only copy base
                     // URL segments up to that point and immediately move to the query state.
 
-                    buffer.push_str(&base.backing[..base.path.0.start])?;
+                    // Skip U+003F (?) query segment delimiter
+                    forward!(self.cursor, by 1);
+
+                    buffer.push_str(&base.backing[..base.path.0.end])?;
 
                     let Url {
                         scheme,
@@ -513,8 +521,11 @@ mod state_machine {
                     // This is an optimization over the naive relative state fallback.
                     //
                     // Since the next segment to be parsed will be the fragment we only copy
-                    // base URL segments up to that point and immediately move to the framgnet
+                    // base URL segments up to that point and immediately move to the fragment
                     // state.
+
+                    // Skip U+003F (#) fragment segment delimiter
+                    forward!(self.cursor, by 1);
 
                     buffer.push_str(&base.backing[..base.query.0.end])?;
 
@@ -564,13 +575,50 @@ mod state_machine {
                         error_bitset.iter(),
                     ));
                 },
-                Some(_) => {
+                Some(c) => {
+                    // U+002F (/) checks are performed in parent functions
+                    assert_ne!(c, &b'/');
+
                     // Relative state fallback in case parsed network bytes don't start with a
                     // slash.
                     //
                     // https://url.spec.whatwg.org/#relative-state
 
-                    todo!("relative state fallback: set url to base and shorten path")
+                    buffer.push_str(&base.backing[..base.path.0.start])?;
+
+                    let Url {
+                        scheme,
+                        username,
+                        password,
+                        host,
+                        port,
+                        path,
+                        ..
+                    } = base;
+
+                    let path_base = &base.backing[path.0.clone()];
+
+                    let (path, query, fragment) =
+                        self.state_path::<SPECIAL>(&mut buffer, path_base)?;
+
+                    let backing = buffer.into_inner();
+                    let error_bitset = self.error_bitset;
+
+                    return Ok((
+                        Url {
+                            backing,
+
+                            scheme: scheme.clone(),
+                            username: username.clone(),
+                            password: password.clone(),
+                            host: host.clone(),
+                            port: port.clone(),
+                            path: path.clone(),
+                            query: query.clone(),
+                            fragment,
+                        },
+                        error_bitset.iter(),
+                    ));
                 },
                 None => {
                     // This is an optimization over the naive relative state fallback.
@@ -1147,7 +1195,7 @@ mod state_machine {
 
                         let port = segment::Port::empty();
 
-                        let (path, query, fragment) = self.state_path::<SPECIAL>(buffer)?;
+                        let (path, query, fragment) = self.state_path::<SPECIAL>(buffer, &[])?;
 
                         return Ok((host, port, path, query, fragment));
                     },
@@ -1169,7 +1217,7 @@ mod state_machine {
 
                         let port = segment::Port::empty();
 
-                        let (path, query, fragment) = self.state_path::<SPECIAL>(buffer)?;
+                        let (path, query, fragment) = self.state_path::<SPECIAL>(buffer, &[])?;
 
                         return Ok((host, port, path, query, fragment));
                     },
@@ -1413,7 +1461,7 @@ mod state_machine {
                             buffer,
                         )?;
 
-                        let (path, query, fragment) = self.state_path::<SPECIAL>(buffer)?;
+                        let (path, query, fragment) = self.state_path::<SPECIAL>(buffer, &[])?;
 
                         return Ok((port, path, query, fragment));
                     },
@@ -1432,7 +1480,7 @@ mod state_machine {
                             buffer,
                         )?;
 
-                        let (path, query, fragment) = self.state_path::<SPECIAL>(buffer)?;
+                        let (path, query, fragment) = self.state_path::<SPECIAL>(buffer, &[])?;
 
                         return Ok((port, path, query, fragment));
                     },
@@ -1503,6 +1551,7 @@ mod state_machine {
         pub(super) fn state_path<const SPECIAL: bool>(
             &mut self,
             buffer: &mut UrlBuffer<'output>,
+            mut path_base: &[u8],
         ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
             fn segment_end(path_stack: &mut path::PathStack) -> Result<(), Error> {
                 #[cfg(test)]
@@ -1539,6 +1588,24 @@ mod state_machine {
 
             let path_start = buffer.len();
             let mut path_stack = path::PathStack::new(buffer.leftover())?;
+
+            if !path_base.is_empty() {
+                assert_eq!(path_base.first(), Some(&b'/'));
+
+                // Don't want to copy the base path's leading '/' as PathStack already adds one by
+                // default.
+
+                forward!(path_base, by 1);
+
+                // We copy the base path up to the last folder, which has the same affect as
+                // shortening.
+
+                let mut prev = 0;
+                for n in memchr::memchr_iter(b'/', path_base) {
+                    path_stack.segment_push_str(&path_base[prev..n + 1])?;
+                    prev = n + 1;
+                }
+            }
 
             loop {
                 match self.cursor.first() {
@@ -1902,7 +1969,7 @@ mod common {
             port: segment::Port,
             mut buffer: UrlBuffer<'output>,
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
-            let (path, query, fragment) = self.state_path::<SPECIAL>(&mut buffer)?;
+            let (path, query, fragment) = self.state_path::<SPECIAL>(&mut buffer, &[])?;
 
             let backing = buffer.into_inner();
             let error_bitset = self.error_bitset;
@@ -2405,6 +2472,130 @@ pub mod utf8 {
 mod test {
     #[allow(clippy::wildcard_imports)]
     use super::*;
+
+    #[test]
+    fn url_join_on_path_full() {
+        const BASE: &str = "http://example.com?base-query#base-fragment";
+
+        let mut backing_base = [0; 128];
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        const URL: &str = "path/to/file?query#fragment";
+
+        let mut backing_url = [0; 128];
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/path/to/file");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"fragment");
+
+        assert_eq!(
+            format!("{url}"),
+            "http://example.com/path/to/file?query#fragment"
+        );
+    }
+
+    #[test]
+    fn url_join_on_path_extend() {
+        const BASE: &str = "http://example.com/path/to/file?base-query#base-fragment";
+
+        let mut backing_base = [0; 128];
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        const URL: &str = "folder/journal?query#fragment";
+
+        let mut backing_url = [0; 128];
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/path/to/folder/journal");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"fragment");
+
+        assert_eq!(
+            format!("{url}"),
+            "http://example.com/path/to/folder/journal?query#fragment"
+        );
+    }
+
+    #[test]
+    fn url_join_on_query() {
+        const BASE: &str = "http://example.com/path/to/file?base-query#base-fragment";
+
+        let mut backing_base = [0; 128];
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        const URL: &str = "?query#fragment";
+
+        let mut backing_url = [0; 128];
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/path/to/file");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"fragment");
+
+        assert_eq!(
+            format!("{url}"),
+            "http://example.com/path/to/file?query#fragment"
+        );
+    }
+
+    #[test]
+    fn url_join_on_fragment() {
+        const BASE: &str = "http://example.com/path/to/file?query#base-fragment";
+
+        let mut backing_base = [0; 128];
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        const URL: &str = "#fragment";
+
+        let mut backing_url = [0; 128];
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/path/to/file");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"fragment");
+
+        assert_eq!(
+            format!("{url}"),
+            "http://example.com/path/to/file?query#fragment"
+        );
+    }
 
     #[test]
     fn url_parse_full_special() {
