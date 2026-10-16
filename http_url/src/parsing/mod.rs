@@ -29,7 +29,7 @@ impl<'data> Url<'data> {
     ///
     /// ```rust
     /// # use http_url::Url;
-    /// let mut backing = [0; 128];
+    /// let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
     /// let (url, validation_errors) = Url::new(
     ///     b"http://example.com:123/path/to/file?query#fragment",
     ///     &mut backing,
@@ -49,7 +49,7 @@ impl<'data> Url<'data> {
         bytes: &[u8],
         backing: &'data mut [u8],
     ) -> Result<(Self, ValidationErrorIter), Error> {
-        Parser::new(bytes).parse(&Url::emtpy(), UrlBuffer::new(backing))
+        Parser::new(bytes).parse(&Url::empty(), UrlBuffer::new(backing))
     }
 
     /// Parses a byte stream as a URL, with this URL as the base.
@@ -64,10 +64,10 @@ impl<'data> Url<'data> {
     /// ```rust
     /// # use http_url::Url;
     /// # use macro_util::*;
-    /// let mut backing_base = [0; 128];
+    /// let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
     /// let (base, _) = Url::new(b"http://example.com/path/to/file.txt", &mut backing_base).unwrap();
     ///
-    /// let mut backing_url = [0; 128];
+    /// let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
     /// let (url, _) = base.join(b"notes.txt", &mut backing_url).unwrap();
     ///
     /// assert_eq!(url.to_string(), "http://example.com/path/to/notes.txt");
@@ -80,7 +80,7 @@ impl<'data> Url<'data> {
         Parser::new(bytes).parse(self, UrlBuffer::new(backing))
     }
 
-    fn emtpy() -> Self {
+    fn empty() -> Self {
         Self {
             backing: Default::default(),
             scheme: segment::Scheme::default(),
@@ -105,18 +105,6 @@ mod matchers {
     #[inline]
     pub(super) fn c0_control_or_space(c: u8) -> bool {
         c <= b' ' // U+0000 to U+0020
-    }
-
-    /// See the [URL standard], ASCII alpha.
-    ///
-    /// > _"An ASCII alpha is an [ASCII upper alpha] or [ASCII lower alpha]."_
-    ///
-    /// [URL standard]: https://infra.spec.whatwg.org/#ascii-alpha
-    /// [ASCII upper alpha]: https://infra.spec.whatwg.org/#ascii-upper-alpha
-    /// [ASCII lower alpha]: https://infra.spec.whatwg.org/#ascii-lower-alpha
-    #[inline]
-    pub(super) fn ascii_alpha(c: u8) -> bool {
-        c.is_ascii_alphabetic()
     }
 }
 
@@ -203,9 +191,7 @@ mod state_machine {
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             let checkpoint = self.cursor;
 
-            if let Some(first) = self.cursor.first()
-                && matchers::ascii_alpha(*first)
-            {
+            if let Some(first @ ascii_alpha!()) = self.cursor.first() {
                 buffer.push_byte(first.to_ascii_lowercase())?;
                 forward!(self.cursor, by 1);
 
@@ -235,7 +221,72 @@ mod state_machine {
                         b':' => {
                             buffer.push_byte(b':')?;
                             forward!(self.cursor, by 1);
-                            break;
+
+                            let scheme = segment::Scheme(0..buffer.len() - 1);
+
+                            // We specify each arm explicitly instead of using pattern capture to
+                            // make it easier for the compiler to inline each scheme comparison on
+                            // the base URL.
+                            match &buffer[scheme.0.clone()] {
+                                b"file" => {
+                                    todo!("file state: https://url.spec.whatwg.org/#file-state")
+                                },
+
+                                b"ftp" => {
+                                    return if base.scheme() == b"ftp" {
+                                        self.state_special_relative_or_authority(
+                                            base, scheme, 21, buffer,
+                                        )
+                                    } else {
+                                        self.state_special_authority_slashes(scheme, 21, buffer)
+                                    };
+                                },
+
+                                b"http" => {
+                                    return if base.scheme() == b"http" {
+                                        self.state_special_relative_or_authority(
+                                            base, scheme, 80, buffer,
+                                        )
+                                    } else {
+                                        self.state_special_authority_slashes(scheme, 80, buffer)
+                                    };
+                                },
+
+                                b"ws" => {
+                                    return if base.scheme() == b"ws" {
+                                        self.state_special_relative_or_authority(
+                                            base, scheme, 80, buffer,
+                                        )
+                                    } else {
+                                        self.state_special_authority_slashes(scheme, 80, buffer)
+                                    };
+                                },
+
+                                b"https" => {
+                                    return if base.scheme() == b"https" {
+                                        self.state_special_relative_or_authority(
+                                            base, scheme, 443, buffer,
+                                        )
+                                    } else {
+                                        self.state_special_authority_slashes(scheme, 443, buffer)
+                                    };
+                                },
+
+                                b"wss" => {
+                                    return if base.scheme() == b"wss" {
+                                        self.state_special_relative_or_authority(
+                                            base, scheme, 443, buffer,
+                                        )
+                                    } else {
+                                        self.state_special_authority_slashes(scheme, 443, buffer)
+                                    };
+                                },
+
+                                // non-special scheme
+                                _ => {
+                                    return self.state_nonspecial(scheme, buffer);
+                                },
+                            }
                         },
 
                         // Invalid character, scheme error.
@@ -245,73 +296,9 @@ mod state_machine {
                         },
                     }
                 }
-
-                // This is safe to index as we have already pushed at least one character to `buffer`.
-                if buffer.as_ref()[buffer.len() - 1] == b':' {
-                    let scheme = segment::Scheme(0..buffer.len() - 1);
-
-                    #[cfg(test)]
-                    let _scheme = utf8::from_bytes(&buffer[scheme.0.clone()]);
-
-                    #[cfg(test)]
-                    let _remaining = utf8::from_bytes(self.cursor);
-
-                    // We specify each arm explicitly instead of using pattern capture to make it
-                    // easier for the compiler to inline each scheme comparison on the base URL.
-                    match &buffer[scheme.0.clone()] {
-                        b"file" => todo!("file state: https://url.spec.whatwg.org/#file-state"),
-
-                        b"ftp" => {
-                            return if base.scheme() == b"ftp" {
-                                self.state_special_relative_or_authority(base, scheme, 21, buffer)
-                            } else {
-                                self.state_special_authority_slashes(scheme, 21, buffer)
-                            };
-                        },
-
-                        b"http" => {
-                            return if base.scheme() == b"http" {
-                                self.state_special_relative_or_authority(base, scheme, 80, buffer)
-                            } else {
-                                self.state_special_authority_slashes(scheme, 80, buffer)
-                            };
-                        },
-
-                        b"ws" => {
-                            return if base.scheme() == b"ws" {
-                                self.state_special_relative_or_authority(base, scheme, 80, buffer)
-                            } else {
-                                self.state_special_authority_slashes(scheme, 80, buffer)
-                            };
-                        },
-
-                        b"https" => {
-                            return if base.scheme() == b"https" {
-                                self.state_special_relative_or_authority(base, scheme, 443, buffer)
-                            } else {
-                                self.state_special_authority_slashes(scheme, 443, buffer)
-                            };
-                        },
-
-                        b"wss" => {
-                            return if base.scheme() == b"wss" {
-                                self.state_special_relative_or_authority(base, scheme, 443, buffer)
-                            } else {
-                                self.state_special_authority_slashes(scheme, 443, buffer)
-                            };
-                        },
-
-                        // non-special scheme
-                        _ => {
-                            return self.state_nonspecial(scheme, buffer);
-                        },
-                    }
-                }
             }
 
-            buffer.clear();
             self.cursor = checkpoint;
-
             self.state_scheme_none(base, buffer)
         }
 
@@ -325,8 +312,6 @@ mod state_machine {
         ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
             const SPECIAL: bool = false;
 
-            assert!(buffer.is_empty());
-
             if base.scheme.0.is_empty() {
                 Err(Error::MissingSchemeNonRelativeUrl)
             } else {
@@ -338,6 +323,7 @@ mod state_machine {
                     Some(b'#') if base.is_opaque() => {
                         forward!(self.cursor, by 1);
 
+                        buffer.clear();
                         buffer.push_str(&base.backing[..base.query.0.end])?;
 
                         let Url {
@@ -489,6 +475,7 @@ mod state_machine {
                     // Skip U+003F (?) query segment delimiter
                     forward!(self.cursor, by 1);
 
+                    buffer.clear();
                     buffer.push_str(&base.backing[..base.path.0.end])?;
 
                     let Url {
@@ -546,6 +533,7 @@ mod state_machine {
                     // Skip U+003F (#) fragment segment delimiter
                     forward!(self.cursor, by 1);
 
+                    buffer.clear();
                     buffer.push_str(&base.backing[..base.query.0.end])?;
 
                     let Url {
@@ -603,6 +591,7 @@ mod state_machine {
                     //
                     // https://url.spec.whatwg.org/#relative-state
 
+                    buffer.clear();
                     buffer.push_str(&base.backing[..base.path.0.start])?;
 
                     let Url {
@@ -647,6 +636,7 @@ mod state_machine {
                     //
                     // https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L713-L714
 
+                    buffer.clear();
                     buffer.push_str(&base.backing[..base.fragment.0.start])?;
 
                     let Url {
@@ -723,13 +713,15 @@ mod state_machine {
 
             // ASCII tab or newline  already accounted for
             match self.cursor.first() {
-                Some(b'/') => {
+                Some(b'/') if SPECIAL => {
+                    // Skip U+002F (/) path segment delimiter
                     forward!(self.cursor, by 1);
 
                     self.state_special_authority_ignore_slashes(scheme, default_scheme_port, buffer)
                 },
 
-                Some(b'\\') => {
+                Some(b'\\') if SPECIAL => {
+                    // Skip U+005C (\) path segment delimiter
                     forward!(self.cursor, by 1);
 
                     self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
@@ -738,11 +730,20 @@ mod state_machine {
                     self.state_special_authority_ignore_slashes(scheme, default_scheme_port, buffer)
                 },
 
+                Some(b'/') => {
+                    // Skip U+002F (/) path segment delimiter
+                    forward!(self.cursor, by 1);
+
+                    buffer.clear();
+                    buffer.push_str(&base.backing[..base.scheme.0.end])?;
+                    buffer.push_byte(b':')?;
+
+                    self.common_after_scheme::<SPECIAL>(scheme, default_scheme_port, buffer)
+                },
+
                 _ => {
                     // Relative slash state fallback in case parsed network bytes starts with a
                     // slash but no double slash.
-
-                    self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
 
                     buffer.clear();
                     buffer.push_str(&base.backing[..base.path.0.start])?;
@@ -893,14 +894,15 @@ mod state_machine {
 
                 let (path, query, fragment) = self.state_path_opaque(&mut buffer)?;
 
-                // TODO: refactor this into a common path as well?
-
                 #[cfg(test)]
-                let _path = utf8::from_bytes(&buffer[path.0.clone()]);
-                #[cfg(test)]
-                let _query = utf8::from_bytes(&buffer[query.0.clone()]);
-                #[cfg(test)]
-                let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
+                {
+                    let _username = utf8::from_bytes(&buffer[username.0.clone()]);
+                    let _password = utf8::from_bytes(&buffer[password.0.clone()]);
+                    let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+                    let _query = utf8::from_bytes(&buffer[query.0.clone()]);
+                    let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
+                }
 
                 let backing = buffer.into_inner();
 
@@ -1130,12 +1132,6 @@ mod state_machine {
             ),
             Error,
         > {
-            // == hostname state =======================================================================
-            //
-            // https://url.spec.whatwg.org/#hostname-state
-            //
-            // =========================================================================================
-
             // ASCII tab or newline characters are skipped first so as not to cause the checkpoint to
             // parse them again.
             if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
@@ -1351,11 +1347,9 @@ mod state_machine {
 
             // char_count_hostname includes ASCII tab and newlines, so we can't use that outright to
             // determine the size of the host.
-            let domain = percent::decode(self.cursor.iter());
-
-            for c in domain.take(char_count_hostname) {
+            for c in self.cursor.iter().take(char_count_hostname) {
                 if !matches!(c, ascii_tab_or_newline!()) {
-                    buffer.push_byte(c)?;
+                    buffer.push_byte(*c)?;
                 }
             }
             forward!(self.cursor, by char_count_hostname);
@@ -1553,15 +1547,15 @@ mod state_machine {
                 // percent-encoded, which complicates the detection logic a bit.
                 match path_stack.segment_peek() {
                     #[allow(clippy::unnested_or_patterns)]
-                    [b'.', b'.', b'/']
-                    | [b'%', b'2', b'e', b'%', b'2', b'e', b'/']
-                    | [b'%', b'2', b'e', b'%', b'2', b'E', b'/']
-                    | [b'%', b'2', b'E', b'%', b'2', b'e', b'/']
-                    | [b'%', b'2', b'E', b'%', b'2', b'E', b'/']
-                    | [b'%', b'2', b'e', b'.', b'/']
-                    | [b'%', b'2', b'E', b'.', b'/']
-                    | [b'.', b'%', b'2', b'e', b'/']
-                    | [b'.', b'%', b'2', b'E', b'/'] => {
+                    [b'.', b'.', ..]
+                    | [b'%', b'2', b'e', b'%', b'2', b'e', ..]
+                    | [b'%', b'2', b'e', b'%', b'2', b'E', ..]
+                    | [b'%', b'2', b'E', b'%', b'2', b'e', ..]
+                    | [b'%', b'2', b'E', b'%', b'2', b'E', ..]
+                    | [b'%', b'2', b'e', b'.', ..]
+                    | [b'%', b'2', b'E', b'.', ..]
+                    | [b'.', b'%', b'2', b'e', ..]
+                    | [b'.', b'%', b'2', b'E', ..] => {
                         // Remove the current path segment (../)
                         path_stack.segment_pop();
 
@@ -1597,6 +1591,7 @@ mod state_machine {
                 let mut prev = 0;
                 for n in memchr::memchr_iter(b'/', path_base) {
                     path_stack.segment_push_str(&path_base[prev..=n])?;
+                    path_stack.segment_next()?;
                     prev = n + 1;
                 }
             }
@@ -1636,11 +1631,7 @@ mod state_machine {
                         unsafe { buffer.force_forwards(len) };
 
                         let path_stop = buffer.len();
-
                         let path = segment::Path(path_start..path_stop);
-
-                        #[cfg(test)]
-                        let _remaining_query = utf8::from_bytes(self.cursor);
 
                         let (query, fragment) = self.state_query::<SPECIAL>(buffer)?;
 
@@ -1662,9 +1653,6 @@ mod state_machine {
 
                         let path = segment::Path(path_start..path_stop);
                         let query = segment::Query(path_stop..path_stop);
-
-                        #[cfg(test)]
-                        let _remaining_fragment = utf8::from_bytes(self.cursor);
 
                         let fragment = self.state_fragment(buffer)?;
 
@@ -1715,9 +1703,6 @@ mod state_machine {
                 // Skip U+003F (?) query segment delimiter
                 forward!(parser.cursor, by 1);
 
-                #[cfg(test)]
-                let _remaining_query = utf8::from_bytes(parser.cursor);
-
                 let (query, fragment) = parser.state_query::<SPECIAL>(buffer)?;
 
                 Ok((path, query, fragment))
@@ -1731,9 +1716,6 @@ mod state_machine {
             ) -> Result<(segment::Path, segment::Query, segment::Fragment), Error> {
                 // Skip U+0023 (#) fragment segment delimiter
                 forward!(parser.cursor, by 1);
-
-                #[cfg(test)]
-                let _remaining_fragment = utf8::from_bytes(parser.cursor);
 
                 let fragment = parser.state_fragment(buffer)?;
 
@@ -1841,12 +1823,7 @@ mod state_machine {
                         forward!(self.cursor, by 1);
 
                         let query_stop = buffer.len();
-
                         let query = segment::Query(query_start..query_stop);
-
-                        #[cfg(test)]
-                        let _remaining_fragment = utf8::from_bytes(self.cursor);
-
                         let fragment = self.state_fragment(buffer)?;
 
                         return Ok((query, fragment));
@@ -2492,12 +2469,12 @@ mod test {
         const BASE: &str = "http://example.com?base-query#base-fragment";
         const URL: &str = "path/to/file?query#fragment";
 
-        let mut backing_base = [0; 128];
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
         assert_eq!(err_base.next(), None);
 
-        let mut backing_url = [0; 128];
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
         assert_eq!(err_url.next(), None);
@@ -2519,15 +2496,15 @@ mod test {
 
     #[test]
     fn url_join_on_path_extend() {
-        const BASE: &str = "http://example.com/path/to/file?base-query#base-fragment";
-        const URL: &str = "folder/journal?query#fragment";
+        const BASE: &str = "http://example.com/path/to/file.txt?base-query#base-fragment";
+        const URL: &str = "folder/journal.txt?query#fragment";
 
-        let mut backing_base = [0; 128];
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
         assert_eq!(err_base.next(), None);
 
-        let mut backing_url = [0; 128];
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
         assert_eq!(err_url.next(), None);
@@ -2537,13 +2514,43 @@ mod test {
         assert_utf8_eq!(url.password(), b"");
         assert_utf8_eq!(url.host(), b"example.com");
         assert_eq!(url.port(), None);
-        assert_utf8_eq!(url.path(), b"/path/to/folder/journal");
+        assert_utf8_eq!(url.path(), b"/path/to/folder/journal.txt");
         assert_utf8_eq!(url.query(), b"query");
         assert_utf8_eq!(url.fragment(), b"fragment");
 
         assert_eq!(
             format!("{url}"),
-            "http://example.com/path/to/folder/journal?query#fragment"
+            "http://example.com/path/to/folder/journal.txt?query#fragment"
+        );
+    }
+
+    #[test]
+    fn url_join_on_path_relative() {
+        const BASE: &str = "http://example.com/path/to/files/files.txt?base-query#base-fragment";
+        const URL: &str = "../folder/journal.txt?query#fragment";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"http");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/path/to/folder/journal.txt");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"fragment");
+
+        assert_eq!(
+            format!("{url}"),
+            "http://example.com/path/to/folder/journal.txt?query#fragment"
         );
     }
 
@@ -2552,12 +2559,12 @@ mod test {
         const BASE: &str = "http://example.com/path/to/file?base-query#base-fragment";
         const URL: &str = "?query#fragment";
 
-        let mut backing_base = [0; 128];
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
         assert_eq!(err_base.next(), None);
 
-        let mut backing_url = [0; 128];
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
         assert_eq!(err_url.next(), None);
@@ -2582,12 +2589,12 @@ mod test {
         const BASE: &str = "http://example.com/path/to/file?query#base-fragment";
         const URL: &str = "#fragment";
 
-        let mut backing_base = [0; 128];
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
         assert_eq!(err_base.next(), None);
 
-        let mut backing_url = [0; 128];
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
         assert_eq!(err_url.next(), None);
@@ -2608,10 +2615,64 @@ mod test {
     }
 
     #[test]
+    fn url_join_nonspecial_host() {
+        const BASE: &str = "scheme:/a";
+        const URL: &str = "//b";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"b");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/");
+        assert_utf8_eq!(url.query(), b"");
+        assert_utf8_eq!(url.fragment(), b"");
+
+        assert_eq!(url.to_string(), "scheme://b/");
+    }
+
+    #[test]
+    fn url_join_nonspecial_path() {
+        const BASE: &str = "scheme:/a";
+        const URL: &str = "/b";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"scheme");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/b");
+        assert_utf8_eq!(url.query(), b"");
+        assert_utf8_eq!(url.fragment(), b"");
+
+        assert_eq!(url.to_string(), "scheme:/b");
+    }
+
+    #[test]
     fn url_parse_full_special() {
         const URL: &str = "http://user:password@example.com:123/path/to/file?query#fragment";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -2640,7 +2701,7 @@ mod test {
         const URL: &str =
             "scheme://user:password@example.com:123/\\path\\to\\file?query\\nonspecial#fragment";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         // `\` is not a valid URL code point, even if it is not part of the PATH percent-encode set.
@@ -2674,7 +2735,7 @@ mod test {
         const URL: &str =
             "scheme:/user:password@example.com:123/\\path\\to\\file?query\\nonspecial#fragment";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         // `\` is not a valid URL code point, even if it is not part of the PATH percent-encode set.
@@ -2707,7 +2768,7 @@ mod test {
         const URL: &str =
             "scheme:user : password@example.com:123/path/to/file ?query\\nonspecial#fragment";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         // ` ` is a valid code point but its use in opaque paths still raises an InvalidURLUnit
@@ -2740,7 +2801,7 @@ mod test {
     fn url_parse_userinfo_special() {
         const URL: &str = "http://user:password@example.com";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -2760,7 +2821,7 @@ mod test {
     fn url_parse_userinfo_nonspecial() {
         const URL: &str = "scheme://\\user:\\password\\@example.com";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -2783,7 +2844,7 @@ mod test {
     fn url_parse_userinfo_only_user() {
         const URL: &str = "http://user@example.com";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -2803,7 +2864,7 @@ mod test {
     fn url_parse_userinfo_only_password() {
         const URL: &str = "http://:password@example.com";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -2823,7 +2884,7 @@ mod test {
     fn url_parse_userinfo_with_encoded() {
         const URL: &str = "http://user:password@@example.com";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -2843,7 +2904,7 @@ mod test {
     fn url_parse_host_domain_special() {
         const URL: &str = "http://example.com";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -2860,7 +2921,7 @@ mod test {
     fn url_parse_host_domain_nonspecial_full() {
         const URL: &str = "scheme://example.com";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -2878,7 +2939,7 @@ mod test {
         // Non-special schemes allow for an empty host
         const URL: &str = "scheme://";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -2896,7 +2957,7 @@ mod test {
     fn url_parse_port_special() {
         const URL: &str = "http://example.com:123";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -2915,7 +2976,7 @@ mod test {
     fn url_parse_port_nonspecial() {
         const URL: &str = "scheme://example.com:123";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -2934,7 +2995,7 @@ mod test {
     fn url_parse_port_default_ftp() {
         const URL: &str = "ftp://example.com:21";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -2953,7 +3014,7 @@ mod test {
     fn url_parse_port_default_http() {
         const URL: &str = "http://example.com:80";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -2972,7 +3033,7 @@ mod test {
     fn url_parse_port_default_ws() {
         const URL: &str = "ws://example.com:80";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -2991,7 +3052,7 @@ mod test {
     fn url_parse_port_default_https() {
         const URL: &str = "https://example.com:443";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3010,7 +3071,7 @@ mod test {
     fn url_parse_port_default_wss() {
         const URL: &str = "wss://example.com:443";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3029,7 +3090,7 @@ mod test {
     fn url_parse_port_empty() {
         const URL: &str = "http://example.com:";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3048,7 +3109,7 @@ mod test {
     fn url_parse_path_special_absolute() {
         const URL: &str = "http://example.com/Documents/code/rust/http/examples/client.rs";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3070,7 +3131,7 @@ mod test {
     fn url_parse_path_special_relative() {
         const URL: &str = "http://example.com/.././Documents/code/python/./../rust/http/src/../examples/server/../client.rs";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3092,7 +3153,7 @@ mod test {
     fn url_parse_path_special_emtpy_segments() {
         const URL: &str = "http://example.com//..//..//../";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3135,7 +3196,7 @@ mod test {
     fn url_parse_path_nonspecial() {
         const URL: &str = "scheme://example.com/\\cat\\pictures\\";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         // `\` is not a valid URL code point, even if it is not part of the PATH percent-encode set.
@@ -3159,7 +3220,7 @@ mod test {
     fn url_parse_path_opaque_absolute() {
         const URL: &str = "scheme:Documents/code/rust/http/examples/client.rs";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3182,7 +3243,7 @@ mod test {
         const URL: &str =
             "scheme:.././Documents/code/python/./../rust/http/src/../examples/server/../client.rs";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3208,7 +3269,7 @@ mod test {
     fn url_parse_query_special() {
         const URL: &str = "http://example.com?name=cat.txt";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3228,7 +3289,7 @@ mod test {
     fn url_parse_query_nonspecial() {
         const URL: &str = "scheme://example.com?\\name=\\cat.txt";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         // `\` is not a valid URL code point, even if it is not part of the QUERY percent-encode set.
@@ -3253,7 +3314,7 @@ mod test {
     fn url_parse_fragment_special() {
         const URL: &str = "http://example.com#about";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3274,7 +3335,7 @@ mod test {
     fn url_percent_encoded_valid() {
         const URL: &str = "http://example.com/pictures/of%20my%20cat/";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3296,7 +3357,7 @@ mod test {
     fn url_percent_encoded_empty() {
         const URL: &str = "http://example.com/pictures/of% my% cat/";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -3322,7 +3383,7 @@ mod test {
     fn url_percent_encoded_invalid() {
         const URL: &str = "http://example.com/pictures/of%Azmy%Zacat/";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -3348,7 +3409,7 @@ mod test {
     fn url_code_point_percent_encode_non_url_code_points() {
         const URL: &str = "http://example.com/pictures/of my cat/";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -3378,7 +3439,7 @@ mod test {
             112, 105, 0x80, 99, 0xC0, 116, 117, 0xF5, 114, 101, 115,
         ];
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL, &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3404,7 +3465,7 @@ mod test {
             112, 105, 99, 116, 117, 114, 101, 115, 0xF4,
         ];
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL, &mut backing).unwrap();
 
         assert_eq!(validation_errors.next(), None);
@@ -3423,7 +3484,7 @@ mod test {
     fn url_trim_c0_control_or_space_front() {
         const URL: &str = "\u{0}\u{1}\u{2}\u{3}\u{4}\u{5}\u{6}\u{7}\u{8}\u{9}\u{10}\u{11}\u{12}\u{13}\u{14}\u{15}\u{16}\u{17}\u{18}\u{19}\u{20}http://example.com";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -3439,7 +3500,7 @@ mod test {
     fn url_trim_c0_control_or_space_back() {
         const URL: &str = "http://example.com\u{20}\u{19}\u{18}\u{17}\u{16}\u{15}\u{14}\u{13}\u{12}\u{11}\u{10}\u{9}\u{8}\u{7}\u{6}\u{5}\u{4}\u{3}\u{2}\u{1}\u{0}";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -3461,7 +3522,7 @@ mod test {
                 acc
             });
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (url, mut validation_errors) = Url::new(url_input.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -3485,7 +3546,7 @@ mod test {
     fn url_scheme_missing_following_solidus_file() {
         const URL: &str = "file:c:/my-secret-folder";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -3500,7 +3561,7 @@ mod test {
     fn url_scheme_missing_following_solidus_special_non_file() {
         const URL: &str = "http:example.com";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -3514,7 +3575,7 @@ mod test {
     fn url_scheme_missing_expected_double_slash_non_file() {
         const URL: &str = "http://\\\\/\\///example.com";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
         assert_eq!(
@@ -3535,10 +3596,26 @@ mod test {
     }
 
     #[test]
+    fn url_err_opaque_base() {
+        const BASE: &str = "scheme:foobazz";
+        const URL: &str = "/path/to/file.txt";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut validation_error) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(validation_error.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let err = base.join(URL.as_ref(), &mut backing_url).unwrap_err();
+
+        assert_eq!(err, Error::MissingSchemeNonRelativeUrl);
+    }
+
+    #[test]
     fn url_err_empty_host_after_userinfo() {
         const URL: &str = "http://user:password@";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
 
         assert_eq!(err, Error::HostMissing);
@@ -3548,7 +3625,7 @@ mod test {
     fn url_err_empty_host_domain() {
         const URL: &str = "http://";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
 
         assert_eq!(err, Error::HostMissing);
@@ -3558,7 +3635,7 @@ mod test {
     fn url_err_empty_host_domain_query() {
         const URL: &str = "http://?query";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
 
         assert_eq!(err, Error::HostMissing);
@@ -3568,7 +3645,7 @@ mod test {
     fn url_err_port_out_of_range() {
         const URL: &str = "http://example.com:70000";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
 
         assert_eq!(err, Error::PortOutOfRange);
@@ -3578,7 +3655,7 @@ mod test {
     fn url_err_port_invalid() {
         const URL: &str = "http://example.com:7z";
 
-        let mut backing = [0; 128];
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
         let err = Url::new(URL.as_bytes(), &mut backing).unwrap_err();
 
         assert_eq!(err, Error::PortInvalid);
