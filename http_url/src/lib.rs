@@ -97,10 +97,19 @@ pub(crate) mod segment {
 }
 
 pub(crate) mod macros {
+    pub(crate) use crate::ascii_alpha;
     pub(crate) use crate::ascii_hexdigit;
     pub(crate) use crate::ascii_tab_or_newline;
     pub(crate) use crate::forward;
     pub(crate) use crate::shrink;
+
+    #[doc(hidden)]
+    #[macro_export]
+    macro_rules! ascii_alpha {
+        () => {
+            b'A'..=b'Z' | b'a'..=b'z'
+        };
+    }
 
     #[doc(hidden)]
     #[macro_export]

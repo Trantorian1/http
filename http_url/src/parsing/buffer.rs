@@ -42,6 +42,12 @@ impl<'data> UrlBuffer<'data> {
         }
     }
 
+    /// Manually advances the next write location in the backing buffer with no bounds checks.
+    ///
+    /// # Panics
+    ///
+    /// `n` must be less than or equal to the remaining space  in the backing buffer otherwise this
+    /// can cause other methods to panic.
     pub(crate) unsafe fn force_forwards(&mut self, n: usize) {
         self.next += n;
     }
@@ -60,10 +66,6 @@ impl<'data> UrlBuffer<'data> {
 
     pub(crate) fn len(&self) -> usize {
         self.next
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 }
 
