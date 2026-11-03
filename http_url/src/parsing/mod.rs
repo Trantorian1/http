@@ -1,4 +1,4 @@
-//! [`Url`] parsing utilitiessupport relative paths or path shortening.
+//! [`Url`] parsing utilities.
 
 pub(crate) mod buffer;
 mod error;
@@ -29,14 +29,14 @@ impl<'data> Url<'data> {
     ///
     /// ```rust
     /// # use http_url::Url;
-    /// let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-    /// let (url, validation_errors) = Url::new(
-    ///     b"http://example.com:123/path/to/file?query#fragment",
-    ///     &mut backing,
-    /// )
-    /// .unwrap();
+    /// # use http_url::Error;
+    /// # use http_url::ValidationError;
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut backing = [0; 128];
+    /// const URL: &str = "http://example.com:123/path/to/file?query#fragment";
+    /// let (url, errs) = Url::new(URL.as_bytes(), &mut backing)?;
     ///
-    /// assert_eq!(validation_errors.len(), 0);
+    /// assert!(errs.is_empty());
     ///
     /// assert_eq!(url.scheme(), b"http");
     /// assert_eq!(url.host(), b"example.com");
@@ -44,11 +44,10 @@ impl<'data> Url<'data> {
     /// assert_eq!(url.path(), b"/path/to/file");
     /// assert_eq!(url.query(), b"query");
     /// assert_eq!(url.fragment(), b"fragment");
+    /// # Ok(())
+    /// # }
     /// ```
-    pub fn new(
-        bytes: &[u8],
-        backing: &'data mut [u8],
-    ) -> Result<(Self, ValidationErrorIter), Error> {
+    pub fn new(bytes: &[u8], backing: &'data mut [u8]) -> Result<(Self, ValidationErrors), Error> {
         Parser::new(bytes).parse(&Url::empty(), UrlBuffer::new(backing))
     }
 
@@ -63,20 +62,23 @@ impl<'data> Url<'data> {
     ///
     /// ```rust
     /// # use http_url::Url;
-    /// # use macro_util::*;
-    /// let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-    /// let (base, _) = Url::new(b"http://example.com/path/to/file.txt", &mut backing_base).unwrap();
-    ///
-    /// let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-    /// let (url, _) = base.join(b"notes.txt", &mut backing_url).unwrap();
+    /// # use http_url::Error;
+    /// # use http_url::ValidationError;
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut backing_base = [0; 128];
+    /// # let mut backing_url = [0; 128];
+    /// let (base, _) = Url::new(b"http://example.com/path/to/file.txt", &mut backing_base)?;
+    /// let (url, _) = base.join(b"notes.txt", &mut backing_url)?;
     ///
     /// assert_eq!(url.to_string(), "http://example.com/path/to/notes.txt");
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn join(
         &self,
         bytes: &[u8],
         backing: &'data mut [u8],
-    ) -> Result<(Self, ValidationErrorIter), Error> {
+    ) -> Result<(Self, ValidationErrors), Error> {
         Parser::new(bytes).parse(self, UrlBuffer::new(backing))
     }
 
@@ -127,7 +129,7 @@ impl<'input> Parser<'input> {
         mut self,
         base: &Url<'_>,
         buffer: UrlBuffer<'output>,
-    ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+    ) -> Result<(Url<'output>, ValidationErrors), Error> {
         self.state_c0_control_or_space();
         self.state_scheme(base, buffer)
     }
@@ -188,7 +190,7 @@ mod state_machine {
             mut self,
             base: &Url<'_>,
             mut buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             let checkpoint = self.cursor;
 
             if let Some(first @ ascii_alpha!()) = self.cursor.first() {
@@ -310,7 +312,7 @@ mod state_machine {
             mut self,
             base: &Url<'_>,
             mut buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             const SPECIAL: bool = false;
 
             if base.scheme.0.is_empty() {
@@ -370,7 +372,7 @@ mod state_machine {
                                 query: query.clone(),
                                 fragment,
                             },
-                            error_bitset.iter(),
+                            error_bitset,
                         ))
                     },
 
@@ -408,7 +410,7 @@ mod state_machine {
             scheme: segment::Scheme,
             default_scheme_port: u16,
             buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             const SPECIAL: bool = true;
 
             if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
@@ -466,7 +468,7 @@ mod state_machine {
             mut self,
             base: &Url<'_>,
             mut buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             assert!(!matches!(
                 self.cursor.first(),
                 Some(ascii_tab_or_newline!())
@@ -681,7 +683,7 @@ mod state_machine {
             scheme: segment::Scheme,
             default_scheme_port: u16,
             mut buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                 self.skip_ascii_tab_or_newline();
             }
@@ -752,7 +754,7 @@ mod state_machine {
             base: &Url<'_>,
             scheme: segment::Scheme,
             mut buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             buffer.push_str(b"//")?;
 
             // File state must start with `//` just like other special states.
@@ -972,7 +974,7 @@ mod state_machine {
             base: &Url<'_>,
             scheme: segment::Scheme,
             mut buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                 self.skip_ascii_tab_or_newline();
             }
@@ -1216,7 +1218,7 @@ mod state_machine {
             mut self,
             scheme: segment::Scheme,
             mut buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             const SPECIAL: bool = true;
 
             #[inline]
@@ -1236,6 +1238,11 @@ mod state_machine {
                 let username = segment::Username::empty(buffer);
                 let password = segment::Password::empty(buffer);
                 let port = segment::Port::empty();
+
+                // Unlike other special schemes, file hosts can be empty.
+                if char_count_hostname == 0 {
+                    return Ok((username, password, segment::Host::empty(buffer), port));
+                }
 
                 // File hosts can be a windows drive letter which, while considered a validation
                 // error, still supersedes host parsing. This just logs a warning instead.
@@ -1408,7 +1415,7 @@ mod state_machine {
             scheme: segment::Scheme,
             default_scheme_port: u16,
             buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
                 self.skip_ascii_tab_or_newline();
             }
@@ -1454,7 +1461,7 @@ mod state_machine {
             scheme: segment::Scheme,
             default_scheme_port: u16,
             buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             const SPECIAL: bool = true;
 
             loop {
@@ -1484,7 +1491,7 @@ mod state_machine {
             mut self,
             scheme: segment::Scheme,
             mut buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             const SPECIAL: bool = false;
 
             if let Some(b'/') = self.cursor.first() {
@@ -2528,7 +2535,7 @@ mod common {
             scheme: segment::Scheme,
             default_scheme_port: u16,
             mut buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             buffer.push_str(b"//")?;
 
             let (username, password) = self.state_authority::<SPECIAL>(&mut buffer)?;
@@ -2552,7 +2559,7 @@ mod common {
                     query,
                     fragment,
                 },
-                error_bitset.iter(),
+                error_bitset,
             ))
         }
 
@@ -2565,7 +2572,7 @@ mod common {
             host: segment::Host,
             port: segment::Port,
             mut buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             let (path, query, fragment) = self.state_path::<SPECIAL>(&mut buffer, &[])?;
 
             let backing = buffer.into_inner();
@@ -2584,7 +2591,7 @@ mod common {
                     query,
                     fragment,
                 },
-                error_bitset.iter(),
+                error_bitset,
             ))
         }
 
@@ -2600,7 +2607,7 @@ mod common {
             query: segment::Query,
             fragment: segment::Fragment,
             buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+        ) -> Result<(Url<'output>, ValidationErrors), Error> {
             let backing = buffer.into_inner();
             let error_bitset = self.error_bitset;
 
@@ -2617,7 +2624,7 @@ mod common {
                     query,
                     fragment,
                 },
-                error_bitset.iter(),
+                error_bitset,
             ))
         }
     }
@@ -3190,14 +3197,14 @@ mod test {
         const URL: &str = "path/to/file?query#fragment";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -3220,14 +3227,14 @@ mod test {
         const URL: &str = "folder/journal.txt?query#fragment";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -3250,14 +3257,14 @@ mod test {
         const URL: &str = "../folder/journal.txt?query#fragment";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -3280,14 +3287,14 @@ mod test {
         const URL: &str = "?query#fragment";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -3310,14 +3317,14 @@ mod test {
         const URL: &str = "#fragment";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -3340,14 +3347,14 @@ mod test {
         const URL: &str = "//b";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"scheme");
         assert_utf8_eq!(url.username(), b"");
@@ -3367,14 +3374,14 @@ mod test {
         const URL: &str = "/b";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"scheme");
         assert_utf8_eq!(url.username(), b"");
@@ -3394,14 +3401,14 @@ mod test {
         const URL: &str = "data.txt?url-query#url-fragment";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3424,14 +3431,14 @@ mod test {
         const URL: &str = "?url-query#url-fragment";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3454,14 +3461,14 @@ mod test {
         const URL: &str = "#url-fragment";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3484,14 +3491,14 @@ mod test {
         const URL: &str = "";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3514,22 +3521,24 @@ mod test {
         const URL: &str = "file:c:/data.txt";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        let mut errs_iter = errs_url.iter();
 
         assert_eq!(
-            err_url.next(),
+            errs_iter.next(),
             Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
         );
         assert_eq!(
-            err_url.next(),
+            errs_iter.next(),
             Some(ValidationError::FileInvalidWindowsDriveLetter)
         );
-        assert_eq!(err_url.next(), None);
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3549,14 +3558,14 @@ mod test {
         const URL: &str = "/data.txt?url-query#url-fragment";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3579,14 +3588,14 @@ mod test {
         const URL: &str = "/?url-query#url-fragment";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3609,14 +3618,14 @@ mod test {
         const URL: &str = "/#url-fragment";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3636,14 +3645,14 @@ mod test {
         const URL: &str = "/";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(err_base.next(), None);
+        assert!(errs_base.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+        let (url, errs_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
 
-        assert_eq!(err_url.next(), None);
+        assert!(errs_url.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3662,13 +3671,12 @@ mod test {
         const URL: &str = "http://user:password@example.com:123/path/to/file?query#fragment";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidCredentials)
-        );
-        assert_eq!(validation_errors.next(), None);
+        let mut errs_iter = errs.iter();
+
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidCredentials));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"user");
@@ -3691,18 +3699,14 @@ mod test {
             "scheme://user:password@example.com:123/\\path\\to\\file?query\\nonspecial#fragment";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        let mut errs_iter = errs.iter();
 
         // `\` is not a valid URL code point, even if it is not part of the PATH percent-encode set.
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidCredentials)
-        );
-        assert_eq!(validation_errors.next(), None);
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidURLUnit));
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidCredentials));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"scheme");
         assert_utf8_eq!(url.username(), b"user");
@@ -3725,14 +3729,13 @@ mod test {
             "scheme:/user:password@example.com:123/\\path\\to\\file?query\\nonspecial#fragment";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        let mut errs_iter = errs.iter();
 
         // `\` is not a valid URL code point, even if it is not part of the PATH percent-encode set.
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(validation_errors.next(), None);
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidURLUnit));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"scheme");
         assert_utf8_eq!(url.username(), b"");
@@ -3758,15 +3761,14 @@ mod test {
             "scheme:user : password@example.com:123/path/to/file ?query\\nonspecial#fragment";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        let mut errs_iter = errs.iter();
 
         // ` ` is a valid code point but its use in opaque paths still raises an InvalidURLUnit
         // error, even if it is not part of the PATH percent-encode set.
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(validation_errors.next(), None);
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidURLUnit));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"scheme");
         assert_utf8_eq!(url.username(), b"");
@@ -3791,9 +3793,9 @@ mod test {
         const URL: &str = "file://example.com/c:path/to/file.txt?query#fragment";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3815,17 +3817,19 @@ mod test {
         const URL: &str = "file:\\\\example.com/c:path/to/file.txt?query#fragment";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        let mut errs_iter = errs.iter();
 
         assert_eq!(
-            validation_errors.next(),
+            errs_iter.next(),
             Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
         );
         assert_eq!(
-            validation_errors.next(),
+            errs_iter.next(),
             Some(ValidationError::InvalidReverseSolidus)
         );
-        assert_eq!(validation_errors.next(), None);
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3843,17 +3847,40 @@ mod test {
     }
 
     #[test]
-    fn url_parse_file_windows_drive_host() {
+    fn url_parse_file_no_host() {
+        const URL: &str = "file:///c:path/to/file.txt?query#fragment";
+
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert!(errs.is_empty());
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:path/to/file.txt");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"fragment");
+
+        assert_eq!(url.to_string(), "file:///c:path/to/file.txt?query#fragment");
+    }
+
+    #[test]
+    fn url_parse_file_invalid_windows_drive_letter_host() {
         const URL: &str = "file://c:/path/to/file.txt?query#fragment";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        let mut errs_iter = errs.iter();
 
         assert_eq!(
-            validation_errors.next(),
+            errs_iter.next(),
             Some(ValidationError::FileInvalidWindowsDriveLetterHost)
         );
-        assert_eq!(validation_errors.next(), None);
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3872,9 +3899,9 @@ mod test {
         const URL: &str = "file://localhost/c:path/to/file.txt?query#fragment";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3893,13 +3920,15 @@ mod test {
         const URL: &str = "file:/c:path/to/file.txt?query#fragment";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        let mut errs_iter = errs.iter();
 
         assert_eq!(
-            validation_errors.next(),
+            errs_iter.next(),
             Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
         );
-        assert_eq!(validation_errors.next(), None);
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"file");
         assert_utf8_eq!(url.username(), b"");
@@ -3918,13 +3947,12 @@ mod test {
         const URL: &str = "http://user:password@example.com";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidCredentials)
-        );
-        assert_eq!(validation_errors.next(), None);
+        let mut errs_iter = errs.iter();
+
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidCredentials));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"user");
@@ -3938,13 +3966,12 @@ mod test {
         const URL: &str = "scheme://\\user:\\password\\@example.com";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidCredentials)
-        );
-        assert_eq!(validation_errors.next(), None);
+        let mut errs_iter = errs.iter();
+
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidCredentials));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"scheme");
         assert_utf8_eq!(url.username(), b"%5Cuser");
@@ -3961,13 +3988,12 @@ mod test {
         const URL: &str = "http://user@example.com";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidCredentials)
-        );
-        assert_eq!(validation_errors.next(), None);
+        let mut errs_iter = errs.iter();
+
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidCredentials));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"user");
@@ -3981,13 +4007,12 @@ mod test {
         const URL: &str = "http://:password@example.com";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidCredentials)
-        );
-        assert_eq!(validation_errors.next(), None);
+        let mut errs_iter = errs.iter();
+
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidCredentials));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4001,13 +4026,12 @@ mod test {
         const URL: &str = "http://user:password@@example.com";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidCredentials)
-        );
-        assert_eq!(validation_errors.next(), None);
+        let mut errs_iter = errs.iter();
+
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidCredentials));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"user");
@@ -4021,9 +4045,9 @@ mod test {
         const URL: &str = "http://example.com";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4038,9 +4062,9 @@ mod test {
         const URL: &str = "scheme://example.com";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"scheme");
         assert_utf8_eq!(url.username(), b"");
@@ -4056,9 +4080,9 @@ mod test {
         const URL: &str = "scheme://";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"scheme");
         assert_utf8_eq!(url.username(), b"");
@@ -4074,9 +4098,9 @@ mod test {
         const URL: &str = "http://example.com:123";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4093,9 +4117,9 @@ mod test {
         const URL: &str = "scheme://example.com:123";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"scheme");
         assert_utf8_eq!(url.username(), b"");
@@ -4112,9 +4136,9 @@ mod test {
         const URL: &str = "ftp://example.com:21";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"ftp");
         assert_utf8_eq!(url.username(), b"");
@@ -4131,9 +4155,9 @@ mod test {
         const URL: &str = "http://example.com:80";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4150,9 +4174,9 @@ mod test {
         const URL: &str = "ws://example.com:80";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"ws");
         assert_utf8_eq!(url.username(), b"");
@@ -4169,9 +4193,9 @@ mod test {
         const URL: &str = "https://example.com:443";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"https");
         assert_utf8_eq!(url.username(), b"");
@@ -4188,9 +4212,9 @@ mod test {
         const URL: &str = "wss://example.com:443";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"wss");
         assert_utf8_eq!(url.username(), b"");
@@ -4207,9 +4231,9 @@ mod test {
         const URL: &str = "http://example.com:";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4226,9 +4250,9 @@ mod test {
         const URL: &str = "http://example.com/Documents/code/rust/http/examples/client.rs";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4248,9 +4272,9 @@ mod test {
         const URL: &str = "http://example.com/.././Documents/code/python/./../rust/http/src/../examples/server/../client.rs";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4270,9 +4294,9 @@ mod test {
         const URL: &str = "http://example.com//..//..//../";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4289,14 +4313,16 @@ mod test {
         const URL: &str = "http://example.com\\/\\////\\\\\\///////";
 
         let mut backing = [0; 512];
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        let mut errs_iter = errs.iter();
 
         // `\` is not a valid URL code point, even if it is not part of the PATH percent-encode set.
         assert_eq!(
-            validation_errors.next(),
+            errs_iter.next(),
             Some(ValidationError::InvalidReverseSolidus)
         );
-        assert_eq!(validation_errors.next(), None);
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4313,14 +4339,13 @@ mod test {
         const URL: &str = "scheme://example.com/\\cat\\pictures\\";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        let mut errs_iter = errs.iter();
 
         // `\` is not a valid URL code point, even if it is not part of the PATH percent-encode set.
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(validation_errors.next(), None);
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidURLUnit));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"scheme");
         assert_utf8_eq!(url.username(), b"");
@@ -4337,9 +4362,9 @@ mod test {
         const URL: &str = "scheme:Documents/code/rust/http/examples/client.rs";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"scheme");
         assert_utf8_eq!(url.username(), b"");
@@ -4360,9 +4385,9 @@ mod test {
             "scheme:.././Documents/code/python/./../rust/http/src/../examples/server/../client.rs";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         // Opaque path URLs do not support relative paths or path shortening
         assert_utf8_eq!(url.scheme(), b"scheme");
@@ -4386,9 +4411,9 @@ mod test {
         const URL: &str = "http://example.com?name=cat.txt";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4406,14 +4431,13 @@ mod test {
         const URL: &str = "scheme://example.com?\\name=\\cat.txt";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        let mut errs_iter = errs.iter();
 
         // `\` is not a valid URL code point, even if it is not part of the QUERY percent-encode set.
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(validation_errors.next(), None);
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidURLUnit));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"scheme");
         assert_utf8_eq!(url.username(), b"");
@@ -4431,9 +4455,9 @@ mod test {
         const URL: &str = "http://example.com#about";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4452,9 +4476,9 @@ mod test {
         const URL: &str = "http://example.com/pictures/of%20my%20cat/";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4474,13 +4498,12 @@ mod test {
         const URL: &str = "http://example.com/pictures/of% my% cat/";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(validation_errors.next(), None);
+        let mut errs_iter = errs.iter();
+
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidURLUnit));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4500,13 +4523,12 @@ mod test {
         const URL: &str = "http://example.com/pictures/of%Azmy%Zacat/";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(validation_errors.next(), None);
+        let mut errs_iter = errs.iter();
+
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidURLUnit));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4526,13 +4548,12 @@ mod test {
         const URL: &str = "http://example.com/pictures/of my cat/";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(validation_errors.next(), None);
+        let mut errs_iter = errs.iter();
+
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidURLUnit));
+        assert_eq!(errs_iter.next(), None);
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4556,9 +4577,9 @@ mod test {
         ];
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL, &mut backing).unwrap();
+        let (url, errs) = Url::new(URL, &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4582,9 +4603,9 @@ mod test {
         ];
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL, &mut backing).unwrap();
+        let (url, errs) = Url::new(URL, &mut backing).unwrap();
 
-        assert_eq!(validation_errors.next(), None);
+        assert!(errs.is_empty());
 
         assert_utf8_eq!(url.scheme(), b"http");
         assert_utf8_eq!(url.username(), b"");
@@ -4601,13 +4622,12 @@ mod test {
         const URL: &str = "\u{0}\u{1}\u{2}\u{3}\u{4}\u{5}\u{6}\u{7}\u{8}\u{9}\u{10}\u{11}\u{12}\u{13}\u{14}\u{15}\u{16}\u{17}\u{18}\u{19}\u{20}http://example.com";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(validation_errors.next(), None);
+        let mut errs_iter = errs.iter();
+
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidURLUnit));
+        assert_eq!(errs_iter.next(), None);
 
         assert_eq!(format!("{url}"), "http://example.com/");
     }
@@ -4617,13 +4637,12 @@ mod test {
         const URL: &str = "http://example.com\u{20}\u{19}\u{18}\u{17}\u{16}\u{15}\u{14}\u{13}\u{12}\u{11}\u{10}\u{9}\u{8}\u{7}\u{6}\u{5}\u{4}\u{3}\u{2}\u{1}\u{0}";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(validation_errors.next(), None);
+        let mut errs_iter = errs.iter();
+
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidURLUnit));
+        assert_eq!(errs_iter.next(), None);
 
         assert_eq!(format!("{url}"), "http://example.com/");
     }
@@ -4639,17 +4658,13 @@ mod test {
             });
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (url, mut validation_errors) = Url::new(url_input.as_bytes(), &mut backing).unwrap();
+        let (url, errs) = Url::new(url_input.as_bytes(), &mut backing).unwrap();
 
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidURLUnit)
-        );
-        assert_eq!(
-            validation_errors.next(),
-            Some(ValidationError::InvalidCredentials)
-        );
-        assert_eq!(validation_errors.next(), None);
+        let mut errs_iter = errs.iter();
+
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidURLUnit));
+        assert_eq!(errs_iter.next(), Some(ValidationError::InvalidCredentials));
+        assert_eq!(errs_iter.next(), None);
 
         assert_eq!(
             format!("{url}"),
@@ -4663,13 +4678,15 @@ mod test {
         const URL: &str = "file:c:/my-secret-folder";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (_, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        let mut errs_iter = errs.iter();
 
         assert_eq!(
-            validation_errors.next(),
+            errs_iter.next(),
             Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
         );
-        assert_eq!(validation_errors.next(), None);
+        assert_eq!(errs_iter.next(), None);
     }
 
     #[test]
@@ -4678,13 +4695,15 @@ mod test {
         const URL: &str = "http:example.com";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (_, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        let mut errs_iter = errs.iter();
 
         assert_eq!(
-            validation_errors.next(),
+            errs_iter.next(),
             Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
         );
-        assert_eq!(validation_errors.next(), None);
+        assert_eq!(errs_iter.next(), None);
     }
 
     #[test]
@@ -4692,13 +4711,15 @@ mod test {
         const URL: &str = "http://\\\\/\\///example.com";
 
         let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (_, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+        let (_, errs) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        let mut errs_iter = errs.iter();
 
         assert_eq!(
-            validation_errors.next(),
+            errs_iter.next(),
             Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
         );
-        assert_eq!(validation_errors.next(), None);
+        assert_eq!(errs_iter.next(), None);
     }
 
     #[test]
@@ -4717,9 +4738,9 @@ mod test {
         const URL: &str = "/path/to/file.txt";
 
         let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
-        let (base, mut validation_error) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+        let (base, errs) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
 
-        assert_eq!(validation_error.next(), None);
+        assert!(errs.is_empty());
 
         let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
         let err = base.join(URL.as_ref(), &mut backing_url).unwrap_err();

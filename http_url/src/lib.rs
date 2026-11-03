@@ -190,13 +190,19 @@ impl<'data> Url<'data> {
     ///
     /// # Example
     ///
-    /// ```
+    ///
+    /// ```rust
     /// # use http_url::Url;
     /// # use http_url::Error;
-    /// let mut backing = [0; 128];
-    /// let (url, validation_errors) = Url::new(b"http://example.com", &mut backing).unwrap();
+    /// # use http_url::ValidationError;
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut backing = [0; 128];
+    /// let (url, errs) = Url::new(b"http://example.com", &mut backing)?;
     ///
     /// assert_eq!(url.scheme(), b"http");
+    /// assert_eq!(url.host(), b"example.com");
+    /// # Ok(())
+    /// # }
     /// ```
     #[must_use]
     pub fn scheme(&self) -> &'data [u8] {
@@ -210,18 +216,18 @@ impl<'data> Url<'data> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```rust
     /// # use http_url::Url;
+    /// # use http_url::Error;
     /// # use http_url::ValidationError;
-    /// let mut backing = [0; 128];
-    /// let (url, mut validation_errors) = Url::new(b"http://user@abc.com", &mut backing).unwrap();
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut backing = [0; 128];
+    /// let (url, errs) = Url::new(b"http://user@abc.com", &mut backing)?;
     ///
-    /// assert_eq!(
-    ///     validation_errors.next(),
-    ///     Some(ValidationError::InvalidCredentials)
-    /// );
-    ///
+    /// assert!(errs.contains(ValidationError::InvalidCredentials));
     /// assert_eq!(url.username(), b"user");
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Warning
@@ -242,19 +248,20 @@ impl<'data> Url<'data> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```rust
     /// # use http_url::Url;
+    /// # use http_url::Error;
     /// # use http_url::ValidationError;
-    /// let mut backing = [0; 128];
-    /// let (url, mut validation_errors) = Url::new(b"http://user:123@abc.com", &mut backing).unwrap();
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut backing = [0; 128];
+    /// let (url, errs) = Url::new(b"http://user:123@abc.com", &mut backing)?;
     ///
-    /// assert_eq!(
-    ///     validation_errors.next(),
-    ///     Some(ValidationError::InvalidCredentials)
-    /// );
+    /// assert!(errs.contains(ValidationError::InvalidCredentials));
     ///
     /// assert_eq!(url.username(), b"user");
     /// assert_eq!(url.password(), b"123");
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Warning
@@ -274,12 +281,17 @@ impl<'data> Url<'data> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```rust
     /// # use http_url::Url;
-    /// let mut backing = [0; 128];
-    /// let (url, validation_errors) = Url::new(b"https://example.com", &mut backing).unwrap();
+    /// # use http_url::Error;
+    /// # use http_url::ValidationError;
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut backing = [0; 128];
+    /// let (url, errs) = Url::new(b"https://example.com", &mut backing)?;
     ///
     /// assert_eq!(url.host(), b"example.com");
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [domain]: https://url.spec.whatwg.org/#concept-domain
@@ -295,12 +307,17 @@ impl<'data> Url<'data> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```rust
     /// # use http_url::Url;
-    /// let mut backing = [0; 128];
-    /// let (url, validation_errors) = Url::new(b"https://example.com:30", &mut backing).unwrap();
+    /// # use http_url::Error;
+    /// # use http_url::ValidationError;
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut backing = [0; 128];
+    /// let (url, errs) = Url::new(b"https://example.com:30", &mut backing)?;
     ///
     /// assert_eq!(url.port(), Some(30));
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Warning
@@ -319,12 +336,17 @@ impl<'data> Url<'data> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```rust
     /// # use http_url::Url;
-    /// let mut backing = [0; 128];
-    /// let (url, validation_errors) = Url::new(b"https://example.com/my/file", &mut backing).unwrap();
+    /// # use http_url::Error;
+    /// # use http_url::ValidationError;
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut backing = [0; 128];
+    /// let (url, errs) = Url::new(b"https://example.com/my/file", &mut backing)?;
     ///
     /// assert_eq!(url.path(), b"/my/file");
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [URL path segment]: https://url.spec.whatwg.org/#url-path-segment
@@ -337,12 +359,17 @@ impl<'data> Url<'data> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```rust
     /// # use http_url::Url;
-    /// let mut backing = [0; 128];
-    /// let (url, validation_errors) = Url::new(b"https://example.com?query", &mut backing).unwrap();
+    /// # use http_url::Error;
+    /// # use http_url::ValidationError;
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut backing = [0; 128];
+    /// let (url, errs) = Url::new(b"https://example.com?query", &mut backing)?;
     ///
     /// assert_eq!(url.query(), b"query");
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// # Warning
@@ -360,13 +387,17 @@ impl<'data> Url<'data> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```rust
     /// # use http_url::Url;
+    /// # use http_url::Error;
     /// # use http_url::ValidationError;
-    /// let mut backing = [0; 128];
-    /// let (url, validation_errors) = Url::new(b"http://example.com#about", &mut backing).unwrap();
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut backing = [0; 128];
+    /// let (url, errs) = Url::new(b"http://example.com#about", &mut backing)?;
     ///
     /// assert_eq!(url.fragment(), b"about");
+    /// # Ok(())
+    /// # }
     /// ```
     #[must_use]
     pub fn fragment(&self) -> &'data [u8] {
@@ -380,13 +411,18 @@ impl<'data> Url<'data> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```rust
     /// # use http_url::Url;
-    /// let mut backing = [0; 128];
-    /// let (url, validation_errors) = Url::new(b"scheme:opaque-path", &mut backing).unwrap();
+    /// # use http_url::Error;
+    /// # use http_url::ValidationError;
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut backing = [0; 128];
+    /// let (url, errs) = Url::new(b"scheme:opaque-path", &mut backing)?;
     ///
     /// assert!(url.is_opaque());
     /// assert_eq!(url.path(), b"opaque-path");
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [special scheme]: https://url.spec.whatwg.org/#special-scheme
