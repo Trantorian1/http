@@ -35,8 +35,6 @@ pub enum Error {
     /// ```
     PortOutOfRange,
 
-    // TODO: these should be replaced with Rust examples
-    //
     /// The input is missing a scheme, because it does not begin with an ASCII alpha, and either
     /// no base URL was provided or the base URL cannot be used as a base URL because it has an
     /// opaque path.
@@ -45,14 +43,35 @@ pub enum Error {
     ///
     /// Input’s scheme is missing and no base URL is given:
     ///
-    /// ```text
-    /// "💩";
+    /// ```
+    /// # use http_url::Url;
+    /// # use http_url::Error;
+    /// let mut backing = [0; 128];
+    ///
+    /// assert_eq!(
+    ///     Url::new("💩".as_bytes(), &mut backing),
+    ///     Err(Error::MissingSchemeNonRelativeUrl)
+    /// );
     /// ```
     ///
     /// Input’s scheme is missing, but the base URL has an opaque path.
     ///
-    /// ```text
-    /// const url = new URL("💩", "mailto:user@example.org");
+    /// ```
+    /// # use http_url::Url;
+    /// # use http_url::Error;
+    /// # fn example() -> Result<(), Error> {
+    /// let mut backing_base = [0; 128];
+    /// let mut backing_url = [0; 128];
+    ///
+    /// let (base, validation_errors) =
+    ///     Url::new("mailto:user@example.org".as_bytes(), &mut backing_base)?;
+    ///
+    /// assert_eq!(
+    ///     base.join("💩".as_bytes(), &mut backing_url),
+    ///     Err(Error::MissingSchemeNonRelativeUrl)
+    /// );
+    /// # Ok(())
+    /// # }
     /// ```
     MissingSchemeNonRelativeUrl,
 }
@@ -112,6 +131,13 @@ pub enum ValidationError {
     /// "https://example.org\path\to\file"
     /// ```
     InvalidReverseSolidus,
+
+    /// The input is a relative-URL string that starts with a Windows drive letter and the base
+    /// URL’s scheme is "file".
+    FileInvalidWindowsDriveLetter,
+
+    /// A file URL’s host is a Windows drive letter.
+    FileInvalidWindowsDriveLetterHost,
 }
 
 #[cfg(test)]

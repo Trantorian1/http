@@ -52,6 +52,15 @@ impl<'data> UrlBuffer<'data> {
         self.next += n;
     }
 
+    /// Manually walks back the write location in the backing buffer with no bounds checks.
+    ///
+    /// # Panics
+    ///
+    /// `n` must be less than the current number of bytes written so far to [`UrlBuffer`].
+    pub(crate) unsafe fn force_backwards(&mut self, n: usize) {
+        self.next -= n;
+    }
+
     pub(crate) fn leftover(&mut self) -> &mut [u8] {
         &mut self.backing[self.next..]
     }

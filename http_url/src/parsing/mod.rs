@@ -229,7 +229,7 @@ mod state_machine {
                             // the base URL.
                             match &buffer[scheme.0.clone()] {
                                 b"file" => {
-                                    todo!("file state: https://url.spec.whatwg.org/#file-state")
+                                    return self.state_file::<true>(base, scheme, buffer);
                                 },
 
                                 b"ftp" => {
@@ -305,6 +305,7 @@ mod state_machine {
         /// # [No scheme state]
         ///
         /// [No scheme state]: https://url.spec.whatwg.org/#no-scheme-state
+        #[inline]
         pub(super) fn state_scheme_none(
             mut self,
             base: &Url<'_>,
@@ -338,20 +339,20 @@ mod state_machine {
                         } = base;
 
                         #[cfg(test)]
-                        {
-                            let _username = utf8::from_bytes(&buffer[username.0.clone()]);
-                            let _password = utf8::from_bytes(&buffer[password.0.clone()]);
-                            let _host = utf8::from_bytes(&buffer[host.0.clone()]);
-                            let _path = utf8::from_bytes(&buffer[path.0.clone()]);
-                            let _query = utf8::from_bytes(&buffer[query.0.clone()]);
-                        }
+                        let _username = utf8::from_bytes(&buffer[username.0.clone()]);
+                        #[cfg(test)]
+                        let _password = utf8::from_bytes(&buffer[password.0.clone()]);
+                        #[cfg(test)]
+                        let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+                        #[cfg(test)]
+                        let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+                        #[cfg(test)]
+                        let _query = utf8::from_bytes(&buffer[query.0.clone()]);
 
                         let fragment = self.state_fragment(&mut buffer)?;
 
                         #[cfg(test)]
-                        {
-                            let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
-                        }
+                        let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
                         let backing = buffer.into_inner();
                         let error_bitset = self.error_bitset;
@@ -376,7 +377,12 @@ mod state_machine {
                     _ if base.is_opaque() => Err(Error::MissingSchemeNonRelativeUrl),
 
                     _ if base.scheme() == b"file" => {
-                        todo!("file state: https://url.spec.whatwg.org/#file-state")
+                        buffer.clear();
+                        buffer.push_str(b"file:")?;
+
+                        let scheme = base.scheme.clone();
+
+                        return self.state_file::<SPECIAL>(base, scheme, buffer);
                     },
 
                     Some(b'/') => {
@@ -455,6 +461,7 @@ mod state_machine {
         /// [Relative state]: https://url.spec.whatwg.org/#relative-state
         /// [`state_special_relative_or_authority`]: Self::state_special_relative_or_authority
         /// [`state_scheme_none`]: Self::state_scheme_none
+        #[inline]
         pub(super) fn state_relative<const SPECIAL: bool>(
             mut self,
             base: &Url<'_>,
@@ -489,39 +496,32 @@ mod state_machine {
                     } = base;
 
                     #[cfg(test)]
-                    {
-                        let _username = utf8::from_bytes(&buffer[username.0.clone()]);
-                        let _password = utf8::from_bytes(&buffer[password.0.clone()]);
-                        let _host = utf8::from_bytes(&buffer[host.0.clone()]);
-                        let _path = utf8::from_bytes(&buffer[path.0.clone()]);
-                    }
+                    let _username = utf8::from_bytes(&buffer[username.0.clone()]);
+                    #[cfg(test)]
+                    let _password = utf8::from_bytes(&buffer[password.0.clone()]);
+                    #[cfg(test)]
+                    let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+                    #[cfg(test)]
+                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
 
                     let (query, fragment) = self.state_query::<SPECIAL>(&mut buffer)?;
 
                     #[cfg(test)]
-                    {
-                        let _query = utf8::from_bytes(&buffer[query.0.clone()]);
-                        let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
-                    }
+                    let _query = utf8::from_bytes(&buffer[query.0.clone()]);
+                    #[cfg(test)]
+                    let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                    let backing = buffer.into_inner();
-                    let error_bitset = self.error_bitset;
-
-                    Ok((
-                        Url {
-                            backing,
-
-                            scheme: scheme.clone(),
-                            username: username.clone(),
-                            password: password.clone(),
-                            host: host.clone(),
-                            port: port.clone(),
-                            path: path.clone(),
-                            query,
-                            fragment,
-                        },
-                        error_bitset.iter(),
-                    ))
+                    return self.common_after_all(
+                        scheme.clone(),
+                        username.clone(),
+                        password.clone(),
+                        host.clone(),
+                        port.clone(),
+                        path.clone(),
+                        query,
+                        fragment,
+                        buffer,
+                    );
                 },
                 Some(b'#') => {
                     // This is an optimization over the naive relative state fallback.
@@ -548,39 +548,32 @@ mod state_machine {
                     } = base;
 
                     #[cfg(test)]
-                    {
-                        let _username = utf8::from_bytes(&buffer[username.0.clone()]);
-                        let _password = utf8::from_bytes(&buffer[password.0.clone()]);
-                        let _host = utf8::from_bytes(&buffer[host.0.clone()]);
-                        let _path = utf8::from_bytes(&buffer[path.0.clone()]);
-                        let _query = utf8::from_bytes(&buffer[query.0.clone()]);
-                    }
+                    let _username = utf8::from_bytes(&buffer[username.0.clone()]);
+                    #[cfg(test)]
+                    let _password = utf8::from_bytes(&buffer[password.0.clone()]);
+                    #[cfg(test)]
+                    let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+                    #[cfg(test)]
+                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+                    #[cfg(test)]
+                    let _query = utf8::from_bytes(&buffer[query.0.clone()]);
 
                     let fragment = self.state_fragment(&mut buffer)?;
 
                     #[cfg(test)]
-                    {
-                        let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
-                    }
+                    let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                    let backing = buffer.into_inner();
-                    let error_bitset = self.error_bitset;
-
-                    Ok((
-                        Url {
-                            backing,
-
-                            scheme: scheme.clone(),
-                            username: username.clone(),
-                            password: password.clone(),
-                            host: host.clone(),
-                            port: port.clone(),
-                            path: path.clone(),
-                            query: query.clone(),
-                            fragment,
-                        },
-                        error_bitset.iter(),
-                    ))
+                    return self.common_after_all(
+                        scheme.clone(),
+                        username.clone(),
+                        password.clone(),
+                        host.clone(),
+                        port.clone(),
+                        path.clone(),
+                        query.clone(),
+                        fragment,
+                        buffer,
+                    );
                 },
                 Some(c) => {
                     // U+002F (/) checks are performed in parent functions
@@ -606,35 +599,21 @@ mod state_machine {
                     let (path, query, fragment) =
                         self.state_path::<SPECIAL>(&mut buffer, base.path())?;
 
-                    let backing = buffer.into_inner();
-                    let error_bitset = self.error_bitset;
-
-                    Ok((
-                        Url {
-                            backing,
-
-                            scheme: scheme.clone(),
-                            username: username.clone(),
-                            password: password.clone(),
-                            host: host.clone(),
-                            port: port.clone(),
-                            path: path.clone(),
-                            query: query.clone(),
-                            fragment,
-                        },
-                        error_bitset.iter(),
-                    ))
+                    return self.common_after_all(
+                        scheme.clone(),
+                        username.clone(),
+                        password.clone(),
+                        host.clone(),
+                        port.clone(),
+                        path,
+                        query,
+                        fragment,
+                        buffer,
+                    );
                 },
                 None => {
-                    // This is an optimization over the naive relative state fallback.
-                    //
-                    // Since there are no more segments left to parse we just return the base
-                    // URL. Strange thing is the rust-url source code actually removes the
-                    // fragment in this case? TBH the specs themselves aren't very clear as to
-                    // what should happen in case we reach the EOF code point (it isn't
-                    // specified).
-                    //
-                    // https://github.com/servo/rust-url/blob/00a6ce58d02f4e0d43c5ca0702c0bedb8b1ebf3a/url/src/parser.rs#L713-L714
+                    // This is an optimization over the naive relative state fallback which avoid
+                    // further branching when we know there to be no more input bytes.
 
                     buffer.clear();
                     buffer.push_str(&base.backing[..base.fragment.0.start])?;
@@ -650,37 +629,32 @@ mod state_machine {
                         ..
                     } = base;
 
-                    // We follow rust-url on this one
-                    let fragment = segment::Fragment(query.0.end..query.0.end);
+                    let fragment = segment::Fragment::empty(&buffer);
 
                     #[cfg(test)]
-                    {
-                        let _username = utf8::from_bytes(&buffer[username.0.clone()]);
-                        let _password = utf8::from_bytes(&buffer[password.0.clone()]);
-                        let _host = utf8::from_bytes(&buffer[host.0.clone()]);
-                        let _path = utf8::from_bytes(&buffer[path.0.clone()]);
-                        let _query = utf8::from_bytes(&buffer[query.0.clone()]);
-                        let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
-                    }
+                    let _username = utf8::from_bytes(&buffer[username.0.clone()]);
+                    #[cfg(test)]
+                    let _password = utf8::from_bytes(&buffer[password.0.clone()]);
+                    #[cfg(test)]
+                    let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+                    #[cfg(test)]
+                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+                    #[cfg(test)]
+                    let _query = utf8::from_bytes(&buffer[query.0.clone()]);
+                    #[cfg(test)]
+                    let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                    let backing = buffer.into_inner();
-                    let error_bitset = self.error_bitset;
-
-                    Ok((
-                        Url {
-                            backing,
-
-                            scheme: scheme.clone(),
-                            username: username.clone(),
-                            password: password.clone(),
-                            host: host.clone(),
-                            port: port.clone(),
-                            path: path.clone(),
-                            query: query.clone(),
-                            fragment,
-                        },
-                        error_bitset.iter(),
-                    ))
+                    return self.common_after_all(
+                        scheme.clone(),
+                        username.clone(),
+                        password.clone(),
+                        host.clone(),
+                        port.clone(),
+                        path.clone(),
+                        query.clone(),
+                        fragment,
+                        buffer,
+                    );
                 },
             }
         }
@@ -700,6 +674,7 @@ mod state_machine {
         /// know the URL is special!
         ///
         /// [Relative slash state]: https://url.spec.whatwg.org/#relative-slash-state
+        #[inline]
         pub(super) fn state_relative_slash<const SPECIAL: bool>(
             mut self,
             base: &Url<'_>,
@@ -757,6 +732,668 @@ mod state_machine {
                         buffer,
                     )
                 },
+            }
+        }
+
+        /// # [File state]
+        ///
+        /// File parsing and relative file parsing (occurs when a base `file` URL is joined to
+        /// another URL).
+        ///
+        /// Note that the file state is only counted as special when it is applied to absolute URLs.
+        /// Relative URLs with a base shouldn't trigger the [`SpecialSchemeMissingFollowingSolidus`]
+        /// [`ValidationError`] which is why this check exists.
+        ///
+        /// [File state]: https://url.spec.whatwg.org/#file-state
+        /// [`SpecialSchemeMissingFollowingSolidus`]: ValidationError::SpecialSchemeMissingFollowingSolidus
+        #[inline]
+        pub(super) fn state_file<const SPECIAL: bool>(
+            mut self,
+            base: &Url<'_>,
+            scheme: segment::Scheme,
+            mut buffer: UrlBuffer<'output>,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            buffer.push_str(b"//")?;
+
+            // File state must start with `//` just like other special states.
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
+                self.skip_ascii_tab_or_newline();
+            }
+
+            match self.cursor.first() {
+                Some(b'/') => {
+                    // Skip U+002F (/) file host segment delimiter
+                    forward!(self.cursor, by 1);
+
+                    return self.state_file_slash::<SPECIAL>(base, scheme, buffer);
+                },
+                Some(b'\\') => {
+                    // Skip U+005C (\) file host segment delimiter
+                    forward!(self.cursor, by 1);
+
+                    if SPECIAL {
+                        self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                    }
+
+                    self.log_error(ValidationError::InvalidReverseSolidus);
+
+                    return self.state_file_slash::<SPECIAL>(base, scheme, buffer);
+                },
+                Some(b'?') => {
+                    if SPECIAL {
+                        self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                    }
+
+                    // Skip U+003F (?) query segment delimiter
+                    forward!(self.cursor, by 1);
+
+                    let username = segment::Username::empty(&buffer);
+                    let password = segment::Password::empty(&buffer);
+                    let port = segment::Port::empty();
+
+                    let (host, path) = if base.scheme() == b"file" {
+                        buffer.push_str(&base.backing[base.host.0.start..base.path.0.end])?;
+                        (base.host.clone(), base.path.clone())
+                    } else {
+                        (
+                            segment::Host::empty(&buffer),
+                            segment::Path::empty(&mut buffer)?,
+                        )
+                    };
+
+                    #[cfg(test)]
+                    let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+                    #[cfg(test)]
+                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+
+                    let (query, fragment) = self.state_query::<SPECIAL>(&mut buffer)?;
+
+                    #[cfg(test)]
+                    let _query = utf8::from_bytes(&buffer[query.0.clone()]);
+                    #[cfg(test)]
+                    let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
+
+                    return self.common_after_all(
+                        scheme,
+                        username,
+                        password,
+                        host.clone(),
+                        port,
+                        path.clone(),
+                        query,
+                        fragment,
+                        buffer,
+                    );
+                },
+                Some(b'#') => {
+                    if SPECIAL {
+                        self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                    }
+
+                    // Skip U+003F (#) fragment segment delimiter
+                    forward!(self.cursor, by 1);
+
+                    let username = segment::Username::empty(&buffer);
+                    let password = segment::Password::empty(&buffer);
+                    let port = segment::Port::empty();
+
+                    let (host, path, query) = if base.scheme() == b"file" {
+                        buffer.push_str(&base.backing[base.host.0.start..base.query.0.end])?;
+                        (base.host.clone(), base.path.clone(), base.query.clone())
+                    } else {
+                        (
+                            segment::Host::empty(&buffer),
+                            segment::Path::empty(&mut buffer)?,
+                            segment::Query::empty(&buffer),
+                        )
+                    };
+
+                    #[cfg(test)]
+                    let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+                    #[cfg(test)]
+                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+                    #[cfg(test)]
+                    let _query = utf8::from_bytes(&buffer[query.0.clone()]);
+
+                    let fragment = self.state_fragment(&mut buffer)?;
+
+                    #[cfg(test)]
+                    let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
+
+                    return self.common_after_all(
+                        scheme,
+                        username,
+                        password,
+                        host.clone(),
+                        port,
+                        path.clone(),
+                        query.clone(),
+                        fragment,
+                        buffer,
+                    );
+                },
+                Some(_c) => {
+                    if SPECIAL {
+                        self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                    }
+
+                    let username = segment::Username::empty(&buffer);
+                    let password = segment::Password::empty(&buffer);
+                    let port = segment::Port::empty();
+
+                    let (host, path_base) = if base.scheme() == b"file" {
+                        buffer.push_str(base.host())?;
+
+                        if self.starts_with_windows_drive_letter().is_some() {
+                            self.log_error(ValidationError::FileInvalidWindowsDriveLetter);
+                            (base.host.clone(), &[] as &[u8])
+                        } else {
+                            (base.host.clone(), base.path())
+                        }
+                    } else {
+                        (segment::Host::empty(&buffer), &[] as &[u8])
+                    };
+
+                    #[cfg(test)]
+                    let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+
+                    let (path, query, fragment) =
+                        self.state_path::<SPECIAL>(&mut buffer, path_base)?;
+
+                    #[cfg(test)]
+                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+                    #[cfg(test)]
+                    let _query = utf8::from_bytes(&buffer[query.0.clone()]);
+                    #[cfg(test)]
+                    let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
+
+                    return self.common_after_all(
+                        scheme, username, password, host, port, path, query, fragment, buffer,
+                    );
+                },
+                None => {
+                    if SPECIAL {
+                        self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                    }
+
+                    let username = segment::Username::empty(&buffer);
+                    let password = segment::Password::empty(&buffer);
+                    let port = segment::Port::empty();
+
+                    let (host, path, query) = if base.scheme() == b"file" {
+                        buffer.push_str(&base.backing[base.host.0.start..base.query.0.end])?;
+                        (base.host.clone(), base.path.clone(), base.query.clone())
+                    } else {
+                        (
+                            segment::Host::empty(&buffer),
+                            segment::Path::empty(&mut buffer)?,
+                            segment::Query::empty(&buffer),
+                        )
+                    };
+
+                    #[cfg(test)]
+                    let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+                    #[cfg(test)]
+                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+
+                    let fragment = segment::Fragment::empty(&buffer);
+
+                    return self.common_after_all(
+                        scheme,
+                        username,
+                        password,
+                        host.clone(),
+                        port,
+                        path.clone(),
+                        query.clone(),
+                        fragment,
+                        buffer,
+                    );
+                },
+            }
+        }
+
+        /// # [File Slash State]
+        ///
+        /// Distinguishes between double-slash and single-slash file states, taking into account
+        /// reverse solidus U+005C (\) code points.
+        ///
+        /// # Example
+        ///
+        /// ```text
+        /// file://file.txt
+        /// file:/file.txt
+        /// ```
+        ///
+        /// [File Slash State]: https://url.spec.whatwg.org/#file-slash-state
+        #[inline]
+        pub(super) fn state_file_slash<const SPECIAL: bool>(
+            mut self,
+            base: &Url<'_>,
+            scheme: segment::Scheme,
+            mut buffer: UrlBuffer<'output>,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
+                self.skip_ascii_tab_or_newline();
+            }
+
+            match self.cursor.first() {
+                Some(b'/') => {
+                    // Skip U+002F (/) file host segment delimiter
+                    forward!(self.cursor, by 1);
+
+                    self.state_file_host(scheme, buffer)
+                },
+                Some(b'\\') => {
+                    // Skip U+005C (\) file host segment delimiter
+                    forward!(self.cursor, by 1);
+
+                    if SPECIAL {
+                        self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                    }
+
+                    self.log_error(ValidationError::InvalidReverseSolidus);
+
+                    self.state_file_host(scheme, buffer)
+                },
+                Some(b'?') => {
+                    // Skip U+003F (?) query segment delimiter
+                    forward!(self.cursor, by 1);
+
+                    if SPECIAL {
+                        self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                    }
+
+                    let username = segment::Username::empty(&buffer);
+                    let password = segment::Password::empty(&buffer);
+                    let port = segment::Port::empty();
+
+                    // This is an optimized version of the windows drive letter check which is
+                    // done to see if we should apply base's path. In this case, since the current
+                    // code point is U+003F (?), we know that the input does not have a path, which
+                    // means we do not need to check and see if it starts with a windows drive
+                    // letter.
+                    let (host, path) = if base.scheme() == b"file" {
+                        if windows::base_path_starts_with_windows_drive_letter_normalized(&base) {
+                            // We only copy the drive letter.
+                            let path = base.path.0.start..base.path.0.start + 4;
+                            let to_copy = base.host.0.start..path.end;
+                            buffer.push_str(&base.backing[to_copy])?;
+                            (base.host.clone(), segment::Path(path))
+                        } else {
+                            buffer.push_str(&base.backing[base.host.0.start..base.host.0.end])?;
+                            (base.host.clone(), segment::Path::empty(&mut buffer)?)
+                        }
+                    } else {
+                        (
+                            segment::Host::empty(&buffer),
+                            segment::Path::empty(&mut buffer)?,
+                        )
+                    };
+
+                    #[cfg(test)]
+                    let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+                    #[cfg(test)]
+                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+
+                    let (query, fragment) = self.state_query::<SPECIAL>(&mut buffer)?;
+
+                    #[cfg(test)]
+                    let _query = utf8::from_bytes(&buffer[query.0.clone()]);
+                    #[cfg(test)]
+                    let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
+
+                    return self.common_after_all(
+                        scheme,
+                        username,
+                        password,
+                        host.clone(),
+                        port,
+                        path.clone(),
+                        query,
+                        fragment,
+                        buffer,
+                    );
+                },
+                Some(b'#') => {
+                    // Skip U+003F (#) fragment segment delimiter
+                    forward!(self.cursor, by 1);
+
+                    if SPECIAL {
+                        self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                    }
+
+                    let username = segment::Username::empty(&buffer);
+                    let password = segment::Password::empty(&buffer);
+                    let port = segment::Port::empty();
+
+                    // This is an optimized version of the windows drive letter check which is
+                    // done to see if we should apply base's path. In this case, since the current
+                    // code point is U+003F (?), we know that the input does not have a path, which
+                    // means we do not need to check and see if it starts with a windows drive
+                    // letter.
+                    let (host, path) = if base.scheme() == b"file" {
+                        if windows::base_path_starts_with_windows_drive_letter_normalized(&base) {
+                            // We only copy the drive letter.
+                            let path = base.path.0.start..base.path.0.start + 4;
+                            let to_copy = base.host.0.start..path.end;
+                            buffer.push_str(&base.backing[to_copy])?;
+                            (base.host.clone(), segment::Path(path))
+                        } else {
+                            buffer.push_str(&base.backing[base.host.0.start..base.host.0.end])?;
+                            (base.host.clone(), segment::Path::empty(&mut buffer)?)
+                        }
+                    } else {
+                        (
+                            segment::Host::empty(&buffer),
+                            segment::Path::empty(&mut buffer)?,
+                        )
+                    };
+
+                    #[cfg(test)]
+                    let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+                    #[cfg(test)]
+                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+
+                    // WARNING: This needs to happen AFTER path segment initialization so that it
+                    // correctly indexes into the byte segment following the path. Even if they are
+                    // empty, it makes sense for segment indexes to correctly follow each other in
+                    // case anybody else (incorrectly!) tries to use them to index into other
+                    // sections down the line. This really isn't something you should do, but I am
+                    // worried it is something that would seem simple enough that you *might* want
+                    // to do it, which would introduce a lot of subtle and hard to detect bugs if
+                    // ever the indexes were out-of order.
+                    let query = segment::Query::empty(&buffer);
+                    let fragment = self.state_fragment(&mut buffer)?;
+
+                    #[cfg(test)]
+                    let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
+
+                    return self.common_after_all(
+                        scheme, username, password, host, port, path, query, fragment, buffer,
+                    );
+                },
+                Some(_c) => {
+                    if SPECIAL {
+                        self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                    }
+
+                    let username = segment::Username::empty(&buffer);
+                    let password = segment::Password::empty(&buffer);
+                    let port = segment::Port::empty();
+
+                    // We apply base's path IFF:
+                    //
+                    // 1. Input bytes DO NOT start with a windows drive letter (ex: "C:")
+                    // 2. Base's path IS a NORMALIZED windows drive letter
+                    //
+                    // This is a bit convoluted so is best thought of as: if the input bytes do not
+                    // contain drive info but the base does, then we treat the base as the source of
+                    // truth and append the rest of input's path after that.
+                    let (host, path_base) = if base.scheme() == b"file" {
+                        if !self.starts_with_windows_drive_letter().is_some()
+                            && windows::base_path_starts_with_windows_drive_letter_normalized(&base)
+                        {
+                            buffer.push_str(&base.backing[base.host.0.start..base.host.0.end])?;
+                            (base.host.clone(), &base.path()[..4])
+                        } else {
+                            buffer.push_str(&base.backing[base.host.0.start..base.host.0.end])?;
+                            (base.host.clone(), &[] as &[u8])
+                        }
+                    } else {
+                        (segment::Host::empty(&buffer), &[] as &[u8])
+                    };
+
+                    let (path, query, fragment) =
+                        self.state_path::<SPECIAL>(&mut buffer, path_base)?;
+
+                    #[cfg(test)]
+                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+                    #[cfg(test)]
+                    let _query = utf8::from_bytes(&buffer[query.0.clone()]);
+                    #[cfg(test)]
+                    let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
+
+                    return self.common_after_all(
+                        scheme, username, password, host, port, path, query, fragment, buffer,
+                    );
+                },
+                None => {
+                    if SPECIAL {
+                        self.log_error(ValidationError::SpecialSchemeMissingFollowingSolidus);
+                    }
+
+                    let username = segment::Username::empty(&buffer);
+                    let password = segment::Password::empty(&buffer);
+                    let port = segment::Port::empty();
+
+                    // This is an optimized version of the windows drive letter check which is
+                    // done to see if we should apply base's path. In this case, since the current
+                    // code point is U+003F (?), we know that the input does not have a path, which
+                    // means we do not need to check and see if it starts with a windows drive
+                    // letter.
+                    let (host, path) = if base.scheme() == b"file" {
+                        if windows::base_path_starts_with_windows_drive_letter_normalized(&base) {
+                            // We only copy the drive letter.
+                            let path = base.path.0.start..base.path.0.start + 4;
+                            let to_copy = base.host.0.start..path.end;
+                            buffer.push_str(&base.backing[to_copy])?;
+                            (base.host.clone(), segment::Path(path))
+                        } else {
+                            buffer.push_str(&base.backing[base.host.0.start..base.host.0.end])?;
+                            (base.host.clone(), segment::Path::empty(&mut buffer)?)
+                        }
+                    } else {
+                        (
+                            segment::Host::empty(&buffer),
+                            segment::Path::empty(&mut buffer)?,
+                        )
+                    };
+
+                    #[cfg(test)]
+                    let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+                    #[cfg(test)]
+                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+
+                    let query = segment::Query::empty(&buffer);
+                    let fragment = segment::Fragment::empty(&buffer);
+
+                    return self.common_after_all(
+                        scheme, username, password, host, port, path, query, fragment, buffer,
+                    );
+                },
+            }
+        }
+
+        /// # [File Host State]
+        ///
+        /// File host parsing is a bit more involved than typical host parsing and comes with a few
+        /// special rules around windows drive letters which affect how bases should be joined.
+        ///
+        /// [File Host State]: https://url.spec.whatwg.org/#file-host-state
+        #[inline]
+        pub(super) fn state_file_host(
+            mut self,
+            scheme: segment::Scheme,
+            mut buffer: UrlBuffer<'output>,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            const SPECIAL: bool = true;
+
+            #[inline]
+            fn parse_host<'output>(
+                parser: &mut Parser<'_>,
+                char_count_hostname: usize,
+                buffer: &mut UrlBuffer<'output>,
+            ) -> Result<
+                (
+                    segment::Username,
+                    segment::Password,
+                    segment::Host,
+                    segment::Port,
+                ),
+                Error,
+            > {
+                let username = segment::Username::empty(buffer);
+                let password = segment::Password::empty(buffer);
+                let port = segment::Port::empty();
+
+                // File hosts can be a windows drive letter which, while considered a validation
+                // error, still supersedes host parsing. This just logs a warning instead.
+                if let Some(windows_drive_letter) = parser.starts_with_windows_drive_letter() {
+                    parser.log_error(ValidationError::FileInvalidWindowsDriveLetterHost);
+
+                    forward!(parser.cursor, by windows_drive_letter.len());
+
+                    let host_start = buffer.len();
+                    buffer.push_str(&windows_drive_letter)?;
+                    let host_stop = buffer.len();
+
+                    return Ok((
+                        username,
+                        password,
+                        segment::Host(host_start..host_stop),
+                        port,
+                    ));
+                }
+
+                let host = parser.state_hostname::<SPECIAL, false>(
+                    &username,
+                    &password,
+                    char_count_hostname,
+                    buffer,
+                )?;
+
+                #[cfg(test)]
+                let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+
+                // a localhost file host is elided by default
+                if &buffer[host.0.clone()] == b"localhost" {
+                    // SAFETY: buffer is already confirmed to end with "localhost"
+                    unsafe { buffer.force_backwards(b"localhost".len()) };
+                    Ok((username, password, segment::Host::empty(buffer), port))
+                } else {
+                    Ok((username, password, host, port))
+                }
+            }
+
+            let checkpoint = self.cursor;
+            let mut char_count_hostname = 0;
+
+            loop {
+                match self.cursor.first() {
+                    Some(ascii_tab_or_newline!()) => {
+                        char_count_hostname += self.skip_ascii_tab_or_newline() + 1;
+                    },
+                    Some(b'/') => {
+                        self.cursor = checkpoint;
+
+                        let (username, password, host, port) =
+                            parse_host(&mut self, char_count_hostname, &mut buffer)?;
+
+                        // Skip U+002F (/) path segment delimiter
+                        forward!(self.cursor, by 1);
+
+                        let (path, query, fragment) =
+                            self.state_path::<SPECIAL>(&mut buffer, &[])?;
+
+                        #[cfg(test)]
+                        let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+                        #[cfg(test)]
+                        let _query = utf8::from_bytes(&buffer[query.0.clone()]);
+                        #[cfg(test)]
+                        let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
+
+                        return self.common_after_all(
+                            scheme, username, password, host, port, path, query, fragment, buffer,
+                        );
+                    },
+                    Some(b'\\') => {
+                        self.cursor = checkpoint;
+
+                        self.log_error(ValidationError::InvalidReverseSolidus);
+
+                        let (username, password, host, port) =
+                            parse_host(&mut self, char_count_hostname, &mut buffer)?;
+
+                        // Skip U+005C (\) path segment delimiter
+                        forward!(self.cursor, by 1);
+
+                        let (path, query, fragment) =
+                            self.state_path::<SPECIAL>(&mut buffer, &[])?;
+
+                        #[cfg(test)]
+                        let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+                        #[cfg(test)]
+                        let _query = utf8::from_bytes(&buffer[query.0.clone()]);
+                        #[cfg(test)]
+                        let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
+
+                        return self.common_after_all(
+                            scheme, username, password, host, port, path, query, fragment, buffer,
+                        );
+                    },
+                    Some(b'?') => {
+                        self.cursor = checkpoint;
+
+                        let (username, password, host, port) =
+                            parse_host(&mut self, char_count_hostname, &mut buffer)?;
+
+                        // Skip U+003F (?) query segment delimiter
+                        forward!(self.cursor, by 1);
+
+                        let path = segment::Path::empty(&mut buffer)?;
+
+                        let (query, fragment) = self.state_query::<SPECIAL>(&mut buffer)?;
+
+                        #[cfg(test)]
+                        let _query = utf8::from_bytes(&buffer[query.0.clone()]);
+                        #[cfg(test)]
+                        let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
+
+                        return self.common_after_all(
+                            scheme, username, password, host, port, path, query, fragment, buffer,
+                        );
+                    },
+                    Some(b'#') => {
+                        self.cursor = checkpoint;
+
+                        let (username, password, host, port) =
+                            parse_host(&mut self, char_count_hostname, &mut buffer)?;
+
+                        // Skip U+003F (#) fragment segment delimiter
+                        forward!(self.cursor, by 1);
+
+                        let path = segment::Path::empty(&mut buffer)?;
+                        let query = segment::Query::empty(&mut buffer);
+
+                        let fragment = self.state_fragment(&mut buffer)?;
+
+                        #[cfg(test)]
+                        let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
+
+                        return self.common_after_all(
+                            scheme, username, password, host, port, path, query, fragment, buffer,
+                        );
+                    },
+                    Some(_c) => {
+                        char_count_hostname += 1;
+                        forward!(self.cursor, by 1);
+                    },
+                    None => {
+                        self.cursor = checkpoint;
+
+                        let (username, password, host, port) =
+                            parse_host(&mut self, char_count_hostname, &mut buffer)?;
+
+                        let path = segment::Path::empty(&mut buffer)?;
+                        let query = segment::Query::empty(&mut buffer);
+                        let fragment = segment::Fragment::empty(&mut buffer);
+
+                        return self.common_after_all(
+                            scheme, username, password, host, port, path, query, fragment, buffer,
+                        );
+                    },
+                }
             }
         }
 
@@ -895,32 +1532,21 @@ mod state_machine {
                 let (path, query, fragment) = self.state_path_opaque(&mut buffer)?;
 
                 #[cfg(test)]
-                {
-                    let _username = utf8::from_bytes(&buffer[username.0.clone()]);
-                    let _password = utf8::from_bytes(&buffer[password.0.clone()]);
-                    let _host = utf8::from_bytes(&buffer[host.0.clone()]);
-                    let _path = utf8::from_bytes(&buffer[path.0.clone()]);
-                    let _query = utf8::from_bytes(&buffer[query.0.clone()]);
-                    let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
-                }
+                let _username = utf8::from_bytes(&buffer[username.0.clone()]);
+                #[cfg(test)]
+                let _password = utf8::from_bytes(&buffer[password.0.clone()]);
+                #[cfg(test)]
+                let _host = utf8::from_bytes(&buffer[host.0.clone()]);
+                #[cfg(test)]
+                let _path = utf8::from_bytes(&buffer[path.0.clone()]);
+                #[cfg(test)]
+                let _query = utf8::from_bytes(&buffer[query.0.clone()]);
+                #[cfg(test)]
+                let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                let backing = buffer.into_inner();
-
-                Ok((
-                    Url {
-                        backing,
-
-                        scheme,
-                        username,
-                        password,
-                        host,
-                        port,
-                        path,
-                        query,
-                        fragment,
-                    },
-                    self.error_bitset.iter(),
-                ))
+                self.common_after_all(
+                    scheme, username, password, host, port, path, query, fragment, buffer,
+                )
             }
         }
 
@@ -1961,6 +2587,39 @@ mod common {
                 error_bitset.iter(),
             ))
         }
+
+        #[inline]
+        pub(super) fn common_after_all(
+            self,
+            scheme: segment::Scheme,
+            username: segment::Username,
+            password: segment::Password,
+            host: segment::Host,
+            port: segment::Port,
+            path: segment::Path,
+            query: segment::Query,
+            fragment: segment::Fragment,
+            buffer: UrlBuffer<'output>,
+        ) -> Result<(Url<'output>, ValidationErrorIter), Error> {
+            let backing = buffer.into_inner();
+            let error_bitset = self.error_bitset;
+
+            Ok((
+                Url {
+                    backing,
+
+                    scheme,
+                    username,
+                    password,
+                    host,
+                    port,
+                    path,
+                    query,
+                    fragment,
+                },
+                error_bitset.iter(),
+            ))
+        }
     }
 }
 
@@ -2108,6 +2767,67 @@ mod util {
             forward!(self.cursor, by skip);
 
             skip
+        }
+    }
+}
+
+mod windows {
+    #[allow(clippy::wildcard_imports)]
+    use super::*;
+
+    pub(super) fn base_path_starts_with_windows_drive_letter_normalized(base: &Url<'_>) -> bool {
+        if !base.path().len() >= 4 {
+            let path = base.path();
+            path[0] == b'/' && path[1].is_ascii_alphabetic() && path[2] == b':' && path[3] == b'/'
+        } else {
+            false
+        }
+    }
+
+    impl Parser<'_> {
+        #[inline]
+        pub(super) fn starts_with_windows_drive_letter(&mut self) -> Option<[u8; 2]> {
+            let mut windows_drive_letter = [0; 2];
+            let checkpoint = self.cursor;
+
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
+                self.skip_ascii_tab_or_newline();
+            }
+
+            let Some(ascii_alpha!()) = self.cursor.first() else {
+                self.cursor = checkpoint;
+                return None;
+            };
+
+            windows_drive_letter[0] = self.cursor[0];
+            forward!(self.cursor, by 1);
+
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
+                self.skip_ascii_tab_or_newline();
+            }
+
+            let Some(b':' | b'|') = self.cursor.first() else {
+                self.cursor = checkpoint;
+                return None;
+            };
+
+            windows_drive_letter[1] = self.cursor[0];
+            forward!(self.cursor, by 1);
+
+            if let Some(ascii_tab_or_newline!()) = self.cursor.first() {
+                self.skip_ascii_tab_or_newline();
+            }
+
+            match self.cursor.first() {
+                Some(b'/') | None => {
+                    self.cursor = checkpoint;
+                    Some(windows_drive_letter)
+                },
+                _ => {
+                    self.cursor = checkpoint;
+                    None
+                },
+            }
         }
     }
 }
@@ -2669,6 +3389,275 @@ mod test {
     }
 
     #[test]
+    fn url_join_on_file_full() {
+        const BASE: &str = "file://example.com/c:/path/to/file.txt?query#fragment";
+        const URL: &str = "data.txt?url-query#url-fragment";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:/path/to/data.txt");
+        assert_utf8_eq!(url.query(), b"url-query");
+        assert_utf8_eq!(url.fragment(), b"url-fragment");
+
+        assert_eq!(
+            url.to_string(),
+            "file://example.com/c:/path/to/data.txt?url-query#url-fragment"
+        );
+    }
+
+    #[test]
+    fn url_join_on_file_query() {
+        const BASE: &str = "file://example.com/c:/path/to/file.txt?query#fragment";
+        const URL: &str = "?url-query#url-fragment";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:/path/to/file.txt");
+        assert_utf8_eq!(url.query(), b"url-query");
+        assert_utf8_eq!(url.fragment(), b"url-fragment");
+
+        assert_eq!(
+            url.to_string(),
+            "file://example.com/c:/path/to/file.txt?url-query#url-fragment"
+        );
+    }
+
+    #[test]
+    fn url_join_on_file_fragment() {
+        const BASE: &str = "file://example.com/c:/path/to/file.txt?query#fragment";
+        const URL: &str = "#url-fragment";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:/path/to/file.txt");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"url-fragment");
+
+        assert_eq!(
+            url.to_string(),
+            "file://example.com/c:/path/to/file.txt?query#url-fragment"
+        );
+    }
+
+    #[test]
+    fn url_join_on_file_eof() {
+        const BASE: &str = "file://example.com/c:/path/to/file.txt?query#fragment";
+        const URL: &str = "";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:/path/to/file.txt");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"");
+
+        assert_eq!(
+            url.to_string(),
+            "file://example.com/c:/path/to/file.txt?query"
+        );
+    }
+
+    #[test]
+    fn url_join_on_file_invalid_windows_drive_letter() {
+        const BASE: &str = "file://example.com/c:/path/to/file.txt?query#fragment";
+        const URL: &str = "file:c:/data.txt";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(
+            err_url.next(),
+            Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
+        );
+        assert_eq!(
+            err_url.next(),
+            Some(ValidationError::FileInvalidWindowsDriveLetter)
+        );
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:/data.txt");
+        assert_utf8_eq!(url.query(), b"");
+        assert_utf8_eq!(url.fragment(), b"");
+
+        assert_eq!(url.to_string(), "file://example.com/c:/data.txt");
+    }
+
+    #[test]
+    fn url_join_on_file_path_full() {
+        const BASE: &str = "file://example.com/c:/path/to/file.txt?query#fragment";
+        const URL: &str = "/data.txt?url-query#url-fragment";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:/data.txt");
+        assert_utf8_eq!(url.query(), b"url-query");
+        assert_utf8_eq!(url.fragment(), b"url-fragment");
+
+        assert_eq!(
+            url.to_string(),
+            "file://example.com/c:/data.txt?url-query#url-fragment"
+        );
+    }
+
+    #[test]
+    fn url_join_on_file_path_query() {
+        const BASE: &str = "file://example.com/c:/path/to/file.txt?query#fragment";
+        const URL: &str = "/?url-query#url-fragment";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:/");
+        assert_utf8_eq!(url.query(), b"url-query");
+        assert_utf8_eq!(url.fragment(), b"url-fragment");
+
+        assert_eq!(
+            url.to_string(),
+            "file://example.com/c:/?url-query#url-fragment"
+        );
+    }
+
+    #[test]
+    fn url_join_on_file_path_fragment() {
+        const BASE: &str = "file://example.com/c:/path/to/file.txt?query#fragment";
+        const URL: &str = "/#url-fragment";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:/");
+        assert_utf8_eq!(url.query(), b"");
+        assert_utf8_eq!(url.fragment(), b"url-fragment");
+
+        assert_eq!(url.to_string(), "file://example.com/c:/#url-fragment");
+    }
+
+    #[test]
+    fn url_join_on_file_path_eof() {
+        const BASE: &str = "file://example.com/c:/path/to/file.txt?query#fragment";
+        const URL: &str = "/";
+
+        let mut backing_base: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (base, mut err_base) = Url::new(BASE.as_bytes(), &mut backing_base).unwrap();
+
+        assert_eq!(err_base.next(), None);
+
+        let mut backing_url: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut err_url) = base.join(URL.as_bytes(), &mut backing_url).unwrap();
+
+        assert_eq!(err_url.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:/");
+        assert_utf8_eq!(url.query(), b"");
+        assert_utf8_eq!(url.fragment(), b"");
+
+        assert_eq!(url.to_string(), "file://example.com/c:/");
+    }
+
+    #[test]
     fn url_parse_full_special() {
         const URL: &str = "http://user:password@example.com:123/path/to/file?query#fragment";
 
@@ -2795,6 +3784,133 @@ mod test {
             format!("{url}"),
             "scheme:user : password@example.com:123/path/to/file%20?query\\nonspecial#fragment"
         );
+    }
+
+    #[test]
+    fn url_parse_file_full() {
+        const URL: &str = "file://example.com/c:path/to/file.txt?query#fragment";
+
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:path/to/file.txt");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"fragment");
+
+        assert_eq!(
+            url.to_string(),
+            "file://example.com/c:path/to/file.txt?query#fragment"
+        );
+    }
+
+    #[test]
+    fn url_parse_file_reverse_solidus() {
+        const URL: &str = "file:\\\\example.com/c:path/to/file.txt?query#fragment";
+
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
+        );
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::InvalidReverseSolidus)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"example.com");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:path/to/file.txt");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"fragment");
+
+        assert_eq!(
+            url.to_string(),
+            "file://example.com/c:path/to/file.txt?query#fragment"
+        );
+    }
+
+    #[test]
+    fn url_parse_file_windows_drive_host() {
+        const URL: &str = "file://c:/path/to/file.txt?query#fragment";
+
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::FileInvalidWindowsDriveLetterHost)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"c:");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/path/to/file.txt");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"fragment");
+
+        assert_eq!(url.to_string(), "file://c:/path/to/file.txt?query#fragment");
+    }
+
+    #[test]
+    fn url_parse_file_localhost() {
+        const URL: &str = "file://localhost/c:path/to/file.txt?query#fragment";
+
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:path/to/file.txt");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"fragment");
+
+        assert_eq!(url.to_string(), "file:///c:path/to/file.txt?query#fragment");
+    }
+
+    #[test]
+    fn url_parse_file_path() {
+        const URL: &str = "file:/c:path/to/file.txt?query#fragment";
+
+        let mut backing: [u8; 128] = std::array::from_fn(|i| i as u8);
+        let (url, mut validation_errors) = Url::new(URL.as_bytes(), &mut backing).unwrap();
+
+        assert_eq!(
+            validation_errors.next(),
+            Some(ValidationError::SpecialSchemeMissingFollowingSolidus)
+        );
+        assert_eq!(validation_errors.next(), None);
+
+        assert_utf8_eq!(url.scheme(), b"file");
+        assert_utf8_eq!(url.username(), b"");
+        assert_utf8_eq!(url.password(), b"");
+        assert_utf8_eq!(url.host(), b"");
+        assert_eq!(url.port(), None);
+        assert_utf8_eq!(url.path(), b"/c:path/to/file.txt");
+        assert_utf8_eq!(url.query(), b"query");
+        assert_utf8_eq!(url.fragment(), b"fragment");
+
+        assert_eq!(url.to_string(), "file:///c:path/to/file.txt?query#fragment");
     }
 
     #[test]

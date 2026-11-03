@@ -62,14 +62,35 @@ pub(crate) mod segment {
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
     pub(super) struct Fragment(pub std::ops::Range<usize>);
 
+    impl Username {
+        pub(super) fn empty(buffer: &buffer::UrlBuffer<'_>) -> Self {
+            let n = buffer.len();
+            Self(n..n)
+        }
+    }
+
+    impl Password {
+        pub(super) fn empty(buffer: &buffer::UrlBuffer<'_>) -> Self {
+            let n = buffer.len();
+            Self(n..n)
+        }
+    }
+
+    impl Host {
+        pub(super) fn empty(buffer: &buffer::UrlBuffer<'_>) -> Self {
+            let n = buffer.len();
+            Self(n..n)
+        }
+    }
+
     impl Port {
-        pub(super) fn empty() -> Port {
-            Port::default()
+        pub(super) fn empty() -> Self {
+            Self::default()
         }
     }
 
     impl Path {
-        pub(super) fn empty(buffer: &mut buffer::UrlBuffer<'_>) -> Result<Path, Error> {
+        pub(super) fn empty(buffer: &mut buffer::UrlBuffer<'_>) -> Result<Self, Error> {
             let path_start = buffer.len();
 
             // Path is never empty;
@@ -77,21 +98,21 @@ pub(crate) mod segment {
 
             let path_stop = buffer.len();
 
-            Ok(Path(path_start..path_stop))
+            Ok(Self(path_start..path_stop))
         }
     }
 
     impl Query {
-        pub(super) fn empty(buffer: &buffer::UrlBuffer<'_>) -> Query {
+        pub(super) fn empty(buffer: &buffer::UrlBuffer<'_>) -> Self {
             let n = buffer.len();
-            Query(n..n)
+            Self(n..n)
         }
     }
 
     impl Fragment {
-        pub(super) fn empty(buffer: &buffer::UrlBuffer<'_>) -> Fragment {
+        pub(super) fn empty(buffer: &buffer::UrlBuffer<'_>) -> Self {
             let n = buffer.len();
-            Fragment(n..n)
+            Self(n..n)
         }
     }
 }
@@ -171,6 +192,7 @@ impl<'data> Url<'data> {
     ///
     /// ```
     /// # use http_url::Url;
+    /// # use http_url::Error;
     /// let mut backing = [0; 128];
     /// let (url, validation_errors) = Url::new(b"http://example.com", &mut backing).unwrap();
     ///
@@ -371,6 +393,26 @@ impl<'data> Url<'data> {
     #[must_use]
     pub fn is_opaque(&self) -> bool {
         !matches!(self.backing.get(self.scheme.0.end + 1), Some(b'/'))
+    }
+}
+
+impl std::cmp::PartialEq for Url<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.backing == other.backing
+    }
+}
+
+impl std::cmp::Eq for Url<'_> {}
+
+impl std::cmp::PartialOrd for Url<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl std::cmp::Ord for Url<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.backing.cmp(other.backing)
     }
 }
 
