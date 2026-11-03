@@ -28,7 +28,7 @@ pub mod prelude {
 /// # Examples
 ///
 /// ```rust
-/// # use http_primitives::prelude::*;
+/// # use macro_util::prelude::*;
 /// assert_eq!(nonzero!(42), std::num::NonZero::new(42).unwrap());
 /// ```
 ///
@@ -44,7 +44,7 @@ macro_rules! nonzero {
 /// # Examples
 ///
 /// ```rust
-/// # use http_primitives::prelude::*;
+/// # use macro_util::prelude::*;
 /// assert_le!(3, 4);
 /// ```
 #[macro_export]
@@ -62,7 +62,7 @@ macro_rules! assert_le {
 /// # Examples
 ///
 /// ```rust
-/// # use http_primitives::prelude::*;
+/// # use macro_util::prelude::*;
 /// assert_leq!(4, 4);
 /// ```
 #[macro_export]
@@ -80,7 +80,7 @@ macro_rules! assert_leq {
 /// # Examples
 ///
 /// ```rust
-/// # use http_primitives::prelude::*;
+/// # use macro_util::prelude::*;
 /// assert_gr!(4, 3);
 /// ```
 #[macro_export]
@@ -98,7 +98,7 @@ macro_rules! assert_gr {
 /// # Examples
 ///
 /// ```rust
-/// # use http_primitives::prelude::*;
+/// # use macro_util::prelude::*;
 /// assert_greq!(4, 4);
 /// ```
 #[macro_export]
@@ -116,8 +116,8 @@ macro_rules! assert_greq {
 /// # Examples
 ///
 /// ```rust
-/// # use http_primitives::prelude::*;
-/// assert_streq!(b"Trantorian", b"Trantorian");
+/// # use macro_util::prelude::*;
+/// assert_utf8_eq!(b"Trantorian", b"Trantorian");
 /// ```
 #[macro_export]
 macro_rules! assert_utf8_eq {
@@ -134,7 +134,7 @@ macro_rules! assert_utf8_eq {
 ///
 /// ```rust
 /// use macro_util::*;
-/// assert_char_eq!(b'a', b'a');
+/// assert_byte_eq!(b'a', b'a');
 /// ```
 #[macro_export]
 macro_rules! assert_byte_eq {

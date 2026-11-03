@@ -197,7 +197,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "assertion failed: !backing.is_empty()")]
+    #[should_panic(expected = "assertion `left != right` failed\n  left: []\n right: []")]
     fn stream_with_capacity_zero_should_panic() {
         let mut stream_buffer = [0; 0];
         let _stream = ByteStream::new(&mut stream_buffer);
