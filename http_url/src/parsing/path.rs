@@ -208,7 +208,6 @@ impl AsRef<[u8]> for PathStack<'_> {
 
 #[cfg(test)]
 mod test {
-    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     #[test]

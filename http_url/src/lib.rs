@@ -27,7 +27,6 @@ pub mod prelude {
 }
 
 pub(crate) mod segment {
-    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     #[repr(transparent)]

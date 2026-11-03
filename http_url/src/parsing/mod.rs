@@ -139,7 +139,7 @@ impl<'input> Parser<'input> {
 ///
 /// [URL parsing]: https://url.spec.whatwg.org/#url-parsing
 mod state_machine {
-    #[allow(clippy::wildcard_imports)]
+
     use super::*;
 
     impl<'output> Parser<'_> {
@@ -384,7 +384,7 @@ mod state_machine {
 
                         let scheme = base.scheme.clone();
 
-                        return self.state_file::<SPECIAL>(base, scheme, buffer);
+                        self.state_file::<SPECIAL>(base, scheme, buffer)
                     },
 
                     Some(b'/') => {
@@ -513,7 +513,7 @@ mod state_machine {
                     #[cfg(test)]
                     let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                    return self.common_after_all(
+                    Ok(self.common_after_all(
                         scheme.clone(),
                         username.clone(),
                         password.clone(),
@@ -523,7 +523,7 @@ mod state_machine {
                         query,
                         fragment,
                         buffer,
-                    );
+                    ))
                 },
                 Some(b'#') => {
                     // This is an optimization over the naive relative state fallback.
@@ -565,7 +565,7 @@ mod state_machine {
                     #[cfg(test)]
                     let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                    return self.common_after_all(
+                    Ok(self.common_after_all(
                         scheme.clone(),
                         username.clone(),
                         password.clone(),
@@ -575,7 +575,7 @@ mod state_machine {
                         query.clone(),
                         fragment,
                         buffer,
-                    );
+                    ))
                 },
                 Some(c) => {
                     // U+002F (/) checks are performed in parent functions
@@ -601,7 +601,7 @@ mod state_machine {
                     let (path, query, fragment) =
                         self.state_path::<SPECIAL>(&mut buffer, base.path())?;
 
-                    return self.common_after_all(
+                    Ok(self.common_after_all(
                         scheme.clone(),
                         username.clone(),
                         password.clone(),
@@ -611,7 +611,7 @@ mod state_machine {
                         query,
                         fragment,
                         buffer,
-                    );
+                    ))
                 },
                 None => {
                     // This is an optimization over the naive relative state fallback which avoid
@@ -646,7 +646,7 @@ mod state_machine {
                     #[cfg(test)]
                     let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                    return self.common_after_all(
+                    Ok(self.common_after_all(
                         scheme.clone(),
                         username.clone(),
                         password.clone(),
@@ -656,7 +656,7 @@ mod state_machine {
                         query.clone(),
                         fragment,
                         buffer,
-                    );
+                    ))
                 },
             }
         }
@@ -767,7 +767,7 @@ mod state_machine {
                     // Skip U+002F (/) file host segment delimiter
                     forward!(self.cursor, by 1);
 
-                    return self.state_file_slash::<SPECIAL>(base, scheme, buffer);
+                    self.state_file_slash::<SPECIAL>(base, scheme, buffer)
                 },
                 Some(b'\\') => {
                     // Skip U+005C (\) file host segment delimiter
@@ -779,7 +779,7 @@ mod state_machine {
 
                     self.log_error(ValidationError::InvalidReverseSolidus);
 
-                    return self.state_file_slash::<SPECIAL>(base, scheme, buffer);
+                    self.state_file_slash::<SPECIAL>(base, scheme, buffer)
                 },
                 Some(b'?') => {
                     if SPECIAL {
@@ -815,7 +815,7 @@ mod state_machine {
                     #[cfg(test)]
                     let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                    return self.common_after_all(
+                    Ok(self.common_after_all(
                         scheme,
                         username,
                         password,
@@ -825,7 +825,7 @@ mod state_machine {
                         query,
                         fragment,
                         buffer,
-                    );
+                    ))
                 },
                 Some(b'#') => {
                     if SPECIAL {
@@ -862,7 +862,7 @@ mod state_machine {
                     #[cfg(test)]
                     let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                    return self.common_after_all(
+                    Ok(self.common_after_all(
                         scheme,
                         username,
                         password,
@@ -872,7 +872,7 @@ mod state_machine {
                         query.clone(),
                         fragment,
                         buffer,
-                    );
+                    ))
                 },
                 Some(_c) => {
                     if SPECIAL {
@@ -909,9 +909,9 @@ mod state_machine {
                     #[cfg(test)]
                     let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                    return self.common_after_all(
+                    Ok(self.common_after_all(
                         scheme, username, password, host, port, path, query, fragment, buffer,
-                    );
+                    ))
                 },
                 None => {
                     if SPECIAL {
@@ -940,7 +940,7 @@ mod state_machine {
 
                     let fragment = segment::Fragment::empty(&buffer);
 
-                    return self.common_after_all(
+                    Ok(self.common_after_all(
                         scheme,
                         username,
                         password,
@@ -950,7 +950,7 @@ mod state_machine {
                         query.clone(),
                         fragment,
                         buffer,
-                    );
+                    ))
                 },
             }
         }
@@ -1016,7 +1016,7 @@ mod state_machine {
                     // means we do not need to check and see if it starts with a windows drive
                     // letter.
                     let (host, path) = if base.scheme() == b"file" {
-                        if windows::base_path_starts_with_windows_drive_letter_normalized(&base) {
+                        if windows::base_path_starts_with_windows_drive_letter_normalized(base) {
                             // We only copy the drive letter.
                             let path = base.path.0.start..base.path.0.start + 4;
                             let to_copy = base.host.0.start..path.end;
@@ -1045,7 +1045,7 @@ mod state_machine {
                     #[cfg(test)]
                     let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                    return self.common_after_all(
+                    Ok(self.common_after_all(
                         scheme,
                         username,
                         password,
@@ -1055,7 +1055,7 @@ mod state_machine {
                         query,
                         fragment,
                         buffer,
-                    );
+                    ))
                 },
                 Some(b'#') => {
                     // Skip U+003F (#) fragment segment delimiter
@@ -1075,7 +1075,7 @@ mod state_machine {
                     // means we do not need to check and see if it starts with a windows drive
                     // letter.
                     let (host, path) = if base.scheme() == b"file" {
-                        if windows::base_path_starts_with_windows_drive_letter_normalized(&base) {
+                        if windows::base_path_starts_with_windows_drive_letter_normalized(base) {
                             // We only copy the drive letter.
                             let path = base.path.0.start..base.path.0.start + 4;
                             let to_copy = base.host.0.start..path.end;
@@ -1111,9 +1111,9 @@ mod state_machine {
                     #[cfg(test)]
                     let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                    return self.common_after_all(
+                    Ok(self.common_after_all(
                         scheme, username, password, host, port, path, query, fragment, buffer,
-                    );
+                    ))
                 },
                 Some(_c) => {
                     if SPECIAL {
@@ -1133,8 +1133,8 @@ mod state_machine {
                     // contain drive info but the base does, then we treat the base as the source of
                     // truth and append the rest of input's path after that.
                     let (host, path_base) = if base.scheme() == b"file" {
-                        if !self.starts_with_windows_drive_letter().is_some()
-                            && windows::base_path_starts_with_windows_drive_letter_normalized(&base)
+                        if self.starts_with_windows_drive_letter().is_none()
+                            && windows::base_path_starts_with_windows_drive_letter_normalized(base)
                         {
                             buffer.push_str(&base.backing[base.host.0.start..base.host.0.end])?;
                             (base.host.clone(), &base.path()[..4])
@@ -1156,9 +1156,9 @@ mod state_machine {
                     #[cfg(test)]
                     let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                    return self.common_after_all(
+                    Ok(self.common_after_all(
                         scheme, username, password, host, port, path, query, fragment, buffer,
-                    );
+                    ))
                 },
                 None => {
                     if SPECIAL {
@@ -1175,7 +1175,7 @@ mod state_machine {
                     // means we do not need to check and see if it starts with a windows drive
                     // letter.
                     let (host, path) = if base.scheme() == b"file" {
-                        if windows::base_path_starts_with_windows_drive_letter_normalized(&base) {
+                        if windows::base_path_starts_with_windows_drive_letter_normalized(base) {
                             // We only copy the drive letter.
                             let path = base.path.0.start..base.path.0.start + 4;
                             let to_copy = base.host.0.start..path.end;
@@ -1200,9 +1200,9 @@ mod state_machine {
                     let query = segment::Query::empty(&buffer);
                     let fragment = segment::Fragment::empty(&buffer);
 
-                    return self.common_after_all(
+                    Ok(self.common_after_all(
                         scheme, username, password, host, port, path, query, fragment, buffer,
-                    );
+                    ))
                 },
             }
         }
@@ -1222,10 +1222,10 @@ mod state_machine {
             const SPECIAL: bool = true;
 
             #[inline]
-            fn parse_host<'output>(
+            fn parse_host(
                 parser: &mut Parser<'_>,
                 char_count_hostname: usize,
-                buffer: &mut UrlBuffer<'output>,
+                buffer: &mut UrlBuffer<'_>,
             ) -> Result<
                 (
                     segment::Username,
@@ -1310,9 +1310,9 @@ mod state_machine {
                         #[cfg(test)]
                         let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                        return self.common_after_all(
+                        return Ok(self.common_after_all(
                             scheme, username, password, host, port, path, query, fragment, buffer,
-                        );
+                        ));
                     },
                     Some(b'\\') => {
                         self.cursor = checkpoint;
@@ -1335,9 +1335,9 @@ mod state_machine {
                         #[cfg(test)]
                         let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                        return self.common_after_all(
+                        return Ok(self.common_after_all(
                             scheme, username, password, host, port, path, query, fragment, buffer,
-                        );
+                        ));
                     },
                     Some(b'?') => {
                         self.cursor = checkpoint;
@@ -1357,9 +1357,9 @@ mod state_machine {
                         #[cfg(test)]
                         let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                        return self.common_after_all(
+                        return Ok(self.common_after_all(
                             scheme, username, password, host, port, path, query, fragment, buffer,
-                        );
+                        ));
                     },
                     Some(b'#') => {
                         self.cursor = checkpoint;
@@ -1371,16 +1371,16 @@ mod state_machine {
                         forward!(self.cursor, by 1);
 
                         let path = segment::Path::empty(&mut buffer)?;
-                        let query = segment::Query::empty(&mut buffer);
+                        let query = segment::Query::empty(&buffer);
 
                         let fragment = self.state_fragment(&mut buffer)?;
 
                         #[cfg(test)]
                         let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                        return self.common_after_all(
+                        return Ok(self.common_after_all(
                             scheme, username, password, host, port, path, query, fragment, buffer,
-                        );
+                        ));
                     },
                     Some(_c) => {
                         char_count_hostname += 1;
@@ -1393,12 +1393,12 @@ mod state_machine {
                             parse_host(&mut self, char_count_hostname, &mut buffer)?;
 
                         let path = segment::Path::empty(&mut buffer)?;
-                        let query = segment::Query::empty(&mut buffer);
-                        let fragment = segment::Fragment::empty(&mut buffer);
+                        let query = segment::Query::empty(&buffer);
+                        let fragment = segment::Fragment::empty(&buffer);
 
-                        return self.common_after_all(
+                        return Ok(self.common_after_all(
                             scheme, username, password, host, port, path, query, fragment, buffer,
-                        );
+                        ));
                     },
                 }
             }
@@ -1551,9 +1551,9 @@ mod state_machine {
                 #[cfg(test)]
                 let _fragment = utf8::from_bytes(&buffer[fragment.0.clone()]);
 
-                self.common_after_all(
+                Ok(self.common_after_all(
                     scheme, username, password, host, port, path, query, fragment, buffer,
-                )
+                ))
             }
         }
 
@@ -2525,7 +2525,7 @@ mod state_machine {
 }
 
 mod common {
-    #[allow(clippy::wildcard_imports)]
+
     use super::*;
 
     impl<'output> Parser<'_> {
@@ -2607,11 +2607,11 @@ mod common {
             query: segment::Query,
             fragment: segment::Fragment,
             buffer: UrlBuffer<'output>,
-        ) -> Result<(Url<'output>, ValidationErrors), Error> {
+        ) -> (Url<'output>, ValidationErrors) {
             let backing = buffer.into_inner();
             let error_bitset = self.error_bitset;
 
-            Ok((
+            (
                 Url {
                     backing,
 
@@ -2625,13 +2625,13 @@ mod common {
                     fragment,
                 },
                 error_bitset,
-            ))
+            )
         }
     }
 }
 
 mod encode {
-    #[allow(clippy::wildcard_imports)]
+
     use super::*;
 
     impl Parser<'_> {
@@ -2750,7 +2750,7 @@ mod encode {
 }
 
 mod util {
-    #[allow(clippy::wildcard_imports)]
+
     use super::*;
 
     impl Parser<'_> {
@@ -2779,7 +2779,7 @@ mod util {
 }
 
 mod windows {
-    #[allow(clippy::wildcard_imports)]
+
     use super::*;
 
     pub(super) fn base_path_starts_with_windows_drive_letter_normalized(base: &Url<'_>) -> bool {
@@ -2841,7 +2841,7 @@ mod windows {
 
 /// UTF-8 parsing utilities.
 pub mod utf8 {
-    #[allow(clippy::wildcard_imports)]
+
     use super::*;
 
     /// U+FFFD (�) utf-8 replacement code point.
@@ -3188,7 +3188,6 @@ pub mod utf8 {
 
 #[cfg(test)]
 mod test {
-    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     #[test]
