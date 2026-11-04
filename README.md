@@ -1,6 +1,6 @@
 # Http/1.1
 
-A simple stack-based zerocopy implementation of the [HTTP/1.1] spec, based off Codecrafter's 
+A statically allocated zerocopy implementation of the [HTTP/1.1] spec, based off Codecrafter's
 [build your own HTTP server] challenge.
 
 [HTTP/1.1]: https://datatracker.ietf.org/doc/html/rfc9112
