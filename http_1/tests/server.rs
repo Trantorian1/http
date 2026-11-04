@@ -2,6 +2,7 @@
 
 use http_1::prelude::*;
 use http_primitives::*;
+use macro_util::prelude::*;
 
 #[test]
 fn get_origin_200_ok() {
@@ -19,13 +20,19 @@ fn get_origin_200_ok() {
         .send()
         .expect("send should not fail");
 
-    let mut global_request_buffer = [0; 1024];
-    let mut global_response_buffer = [0; 1024];
-    let mut server = Server::new(&mut global_request_buffer, &mut global_response_buffer);
+    let mut global_buffer_request = [0; 1024];
+    let mut global_buffer_response = [0; 1024];
+    let mut global_buffer_url = [0; 1024];
+
+    let mut server = Server::new(
+        &mut global_buffer_request,
+        &mut global_buffer_response,
+        &mut global_buffer_url,
+    );
 
     server.process(&mut stream).respond(|request, response| {
-        assert_eq!(request.method, methods::GET);
-        assert_eq!(request.target.path, b"/");
+        assert_utf8_eq!(request.method, methods::GET);
+        assert_utf8_eq!(request.target.path(), b"/");
 
         response
             .with_status_code(Status::Ok)
@@ -40,6 +47,6 @@ fn get_origin_200_ok() {
         .process()
         .expect("Response should not fail parsing");
 
-    assert_eq!(response.protocol(), PROTOCOL);
-    assert_eq!(response.status(), Status::Ok.code());
+    assert_utf8_eq!(response.protocol(), PROTOCOL);
+    assert_utf8_eq!(response.status(), Status::Ok.code());
 }

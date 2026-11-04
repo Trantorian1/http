@@ -4,6 +4,7 @@
 
 use http_1::prelude::*;
 use http_primitives::prelude::*;
+use macro_util::prelude::*;
 use tracing_subscriber::prelude::*;
 
 // FIXME: we have a lot of work to do before this can output a valid request
@@ -52,5 +53,5 @@ fn main() {
         .process()
         .expect("Failed to read response");
 
-    assert_eq!(response.status(), Status::Ok.code());
+    assert_utf8_eq!(response.status(), Status::Ok.code());
 }

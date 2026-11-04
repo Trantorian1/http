@@ -46,6 +46,7 @@ too_many_lines = "allow"
 too_many_arguments = "allow"
 cast_ptr_alignment = "allow"
 wildcard_imports = "allow"
+struct_field_names = "allow"
 
 shadow_same = "forbid"
 shadow_reuse = "forbid"

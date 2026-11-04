@@ -223,6 +223,7 @@ dependencies = [
  "http_primitives",
  "http_url",
  "itoa",
+ "macro_util",
  "memchr",
  "tracing",
  "tracing-subscriber",

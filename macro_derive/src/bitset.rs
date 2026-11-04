@@ -168,7 +168,7 @@ fn write_implementation(
             /// Initializes a new empty bitset. New error instances can be recorded by calling [`add`].
             ///
             /// [`add`]: Self::add
-            #vis fn new() -> Self {
+            #vis const fn new() -> Self {
                 Self(0)
             }
 
@@ -176,22 +176,22 @@ fn write_implementation(
             /// calling [`contains`].
             ///
             /// [`contains`]: Self::contains
-            #vis fn add(&mut self, err: #enum_name) {
+            #vis const fn add(&mut self, err: #enum_name) {
                 self.0 |= 1 << (err as #bitset_width);
             }
 
             /// Checks if an enum instance was previously recorded into the bitset.
-            #vis fn contains(&self, err: #enum_name) -> bool {
+            #vis const fn contains(&self, err: #enum_name) -> bool {
                 self.0 & 1 << (err as #bitset_width) > 0
             }
 
             /// Returns the number of enum instances recorded into the bitset.
-            #vis fn len(&self) -> usize {
+            #vis const fn len(&self) -> usize {
                 self.0.count_ones() as usize
             }
 
             /// Returns true if the bitset contains no recorded enum instance.
-            #vis fn is_empty(&self) -> bool {
+            #vis const fn is_empty(&self) -> bool {
                 self.len() == 0
             }
 

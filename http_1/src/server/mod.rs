@@ -23,23 +23,26 @@ pub use response::*;
 /// [`process`]: Self::process
 #[derive(Debug)]
 pub struct Server<'data> {
-    global_request_buffer: BufferForReading<'data>,
-    global_response_buffer: BufferForWriting<'data>,
+    global_buffer_request: BufferForReading<'data>,
+    global_buffer_response: BufferForWriting<'data>,
+    global_buffer_url: &'data mut [u8],
 }
 
 impl<'data> Server<'data> {
     /// Creates a new server instance.
     pub fn new(
-        global_request_buffer: &'data mut [u8],
-        global_response_buffer: &'data mut [u8],
+        global_buffer_request: &'data mut [u8],
+        global_buffer_response: &'data mut [u8],
+        global_buffer_url: &'data mut [u8],
     ) -> Self {
         Self {
-            global_request_buffer: BufferForReading::new(global_request_buffer),
-            global_response_buffer: BufferForWriting::new(global_response_buffer),
+            global_buffer_request: BufferForReading::new(global_buffer_request),
+            global_buffer_response: BufferForWriting::new(global_buffer_response),
+            global_buffer_url,
         }
     }
 
-    /// Processes a stream of bytes into a [`RequestHandle`] which can be used to send back a
+    /// Processes a stream of bytes into a [`RequestHandle`] which can be used to send back an HTTP
     /// [`Response`].
     pub fn process<'buf, 'stream, RW>(
         &'buf mut self,
@@ -50,8 +53,9 @@ impl<'data> Server<'data> {
     {
         RequestHandle {
             stream,
-            global_request_buffer: &mut self.global_request_buffer,
-            global_response_buffer: &mut self.global_response_buffer,
+            global_buffer_request: &mut self.global_buffer_request,
+            global_buffer_response: &mut self.global_buffer_response,
+            global_buffer_url: self.global_buffer_url,
         }
     }
 }
@@ -60,8 +64,8 @@ impl<'data> Server<'data> {
 ///
 /// # Drop
 ///
-/// This `struct` will [`clear`] both the global request buffer and global response buffer on drop
-/// to ensure future requests cannot read past data.
+/// This `struct` will [`clear`] all global buffers on drop to ensure future requests cannot read
+/// past data.
 ///
 /// [`clear`]: http_primitives::Buffer::clear
 /// past data.
@@ -71,8 +75,9 @@ where
     RW: std::io::Read + std::io::Write,
 {
     stream: &'stream mut RW,
-    global_request_buffer: &'buf mut BufferForReading<'data>,
-    global_response_buffer: &'buf mut BufferForWriting<'data>,
+    global_buffer_request: &'buf mut BufferForReading<'data>,
+    global_buffer_response: &'buf mut BufferForWriting<'data>,
+    global_buffer_url: &'buf mut [u8],
 }
 
 impl<'buf, 'data, RW> RequestHandle<'buf, 'data, '_, RW>
@@ -82,13 +87,19 @@ where
 {
     /// Respond to a TCP [`Request`].
     pub fn respond(self, f: fn(RequestInfo<'_>, Response<'_, 'data, RW>) -> std::io::Result<()>) {
-        let res = match Request::new(self.global_request_buffer, self.stream).process() {
-            Err(status) => Response::new(self.global_response_buffer, self.stream)
+        let request = Request::new(
+            self.global_buffer_request,
+            self.global_buffer_url,
+            self.stream,
+        );
+
+        let res = match request.process() {
+            Err(status) => Response::new(self.global_buffer_response, self.stream)
                 .with_status_code(status)
                 .send(),
-            Ok(request) => {
-                let response = Response::new(self.global_response_buffer, self.stream);
-                f(request, response)
+            Ok(info) => {
+                let response = Response::new(self.global_buffer_response, self.stream);
+                f(info, response)
             },
         };
 
@@ -104,8 +115,9 @@ where
     RW: std::io::Read + std::io::Write,
 {
     fn drop(&mut self) {
-        self.global_request_buffer.clear();
-        self.global_response_buffer.clear();
+        self.global_buffer_request.clear();
+        self.global_buffer_response.clear();
+        self.global_buffer_url.fill(0);
     }
 }
 
@@ -116,8 +128,9 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RequestHandle")
-            .field("global_request_buffer", &self.global_request_buffer)
-            .field("global_response_buffer", &self.global_response_buffer)
+            .field("global_buffer_request", &self.global_buffer_request)
+            .field("global_buffer_response", &self.global_buffer_response)
+            .field("global_buffer_url", &self.global_buffer_url)
             .finish()
     }
 }

@@ -33,9 +33,15 @@ fn main() {
     let listener = std::net::TcpListener::bind(ADDRESS).unwrap();
     tracing::info!("Listening on {ADDRESS}");
 
-    let mut global_request_buffer = vec![0; 16 * KB].into_boxed_slice();
-    let mut global_response_buffer = vec![0; 64 * KB].into_boxed_slice();
-    let mut server = Server::new(&mut global_request_buffer, &mut global_response_buffer);
+    let mut global_buffer_request = vec![0; 16 * KB].into_boxed_slice();
+    let mut global_buffer_response = vec![0; 64 * KB].into_boxed_slice();
+    let mut global_buffer_url = vec![0; 4 * KB].into_boxed_slice();
+
+    let mut server = Server::new(
+        &mut global_buffer_request,
+        &mut global_buffer_response,
+        &mut global_buffer_url,
+    );
 
     // == Main TCP data loop =======================================================================
 
@@ -46,10 +52,10 @@ fn main() {
                     .process(&mut connection)
                     .respond(|request, response| {
                         tracing::info!(
-                            path = std::str::from_utf8(request.target.path).unwrap_or_default()
+                            path = std::str::from_utf8(request.target.path()).unwrap_or_default()
                         );
 
-                        match (request.method, request.target.path) {
+                        match (request.method, request.target.path()) {
                             (methods::GET, b"/") => response.with_status_code(Status::Ok).send(),
                             (methods::GET, [b'/', b'e', b'c', b'h', b'o', b'/', param @ ..]) => {
                                 response

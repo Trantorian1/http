@@ -39,7 +39,8 @@ where
     'data: 'buf,
     R: std::io::Read,
 {
-    buffer: &'buf mut BufferForReading<'data>,
+    buffer_request: &'buf mut BufferForReading<'data>,
+    buffer_url: &'buf mut [u8],
     stream: &'reader mut R,
 }
 
@@ -49,8 +50,16 @@ where
     R: std::io::Read,
 {
     /// Initializes a new [`Request`].
-    pub fn new(buffer: &'buf mut BufferForReading<'data>, stream: &'reader mut R) -> Self {
-        Self { buffer, stream }
+    pub fn new(
+        buffer_request: &'buf mut BufferForReading<'data>,
+        buffer_url: &'buf mut [u8],
+        stream: &'reader mut R,
+    ) -> Self {
+        Self {
+            buffer_request,
+            buffer_url,
+            stream,
+        }
     }
 
     /// Parses a byte stream into an HTTP/1.1 request, validating format along the way.
@@ -59,7 +68,7 @@ where
     ///
     /// Returns an error [`Status`] code if [`Client`] request parsing fails.
     pub fn process(self) -> Result<RequestInfo<'buf>, Status> {
-        let (method_range, target_range) = self.buffer.read_in(self.stream, |reader| {
+        let (method_range, target_range) = self.buffer_request.read_in(self.stream, |reader| {
             let method = reader.read(parsers::method)?;
 
             reader.read(parsers::sp)?;
@@ -77,7 +86,13 @@ where
             Ok((method, target))
         })?;
 
-        let target = match UrlOld::new(&self.buffer[target_range]) {
+        // TODO: this will need to be replaced with proper header parsing
+        let mut backing_base = [0; 1024];
+        let Ok((base, _)) = Url::new(b"http://example.com/", &mut backing_base) else {
+            unreachable!()
+        };
+
+        let (target, errs) = match base.join(&self.buffer_request[target_range], self.buffer_url) {
             Ok(url) => url,
             Err(err) => {
                 tracing::error!(%err);
@@ -85,8 +100,15 @@ where
             },
         };
 
+        if !errs.is_empty() {
+            for err in errs.iter() {
+                tracing::trace!(%err);
+            }
+            return Err(Status::BadRequest);
+        }
+
         Ok(RequestInfo {
-            method: &self.buffer[method_range],
+            method: &self.buffer_request[method_range],
             target,
         })
     }
@@ -99,7 +121,8 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Request")
-            .field("buffer", &self.buffer)
+            .field("buffer_request", &self.buffer_request)
+            .field("buffer_url", &self.buffer_url)
             .finish()
     }
 }
@@ -154,7 +177,7 @@ pub struct RequestInfo<'data> {
     ///
     /// [RFC9112]: https://datatracker.ietf.org/doc/html/rfc9112#section-3.2
     /// [`400`]: Status::BadRequest
-    pub target: UrlOld<'data>,
+    pub target: Url<'data>,
 }
 
 impl std::fmt::Debug for RequestInfo<'_> {

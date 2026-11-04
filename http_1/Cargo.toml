@@ -20,6 +20,9 @@ tracing-subscriber.workspace = true
 memchr.workspace = true
 itoa.workspace = true
 
+[dev-dependencies]
+macro_util.workspace = true
+
 [[example]]
 name = "server"
 doc-scrape-examples = true

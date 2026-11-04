@@ -1,11 +1,8 @@
 //! [Url] parsing utilities.
 
-mod old;
 pub mod parsing;
 pub mod percent;
-mod query;
 
-pub use old::*;
 pub use parsing::*;
 
 pub mod prelude {
@@ -21,9 +18,8 @@ pub mod prelude {
     //!
     //! The prelude may grow over time as additional items see ubiquitous use.
 
-    pub use super::Query;
-    pub use super::QueryParameter;
-    pub use super::UrlOld;
+    pub use super::Error;
+    pub use super::Url;
 }
 
 pub(crate) mod segment {

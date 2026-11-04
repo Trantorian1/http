@@ -74,11 +74,11 @@ impl<'data> Url<'data> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn join(
+    pub fn join<'input>(
         &self,
         bytes: &[u8],
-        backing: &'data mut [u8],
-    ) -> Result<(Self, ValidationErrors), Error> {
+        backing: &'input mut [u8],
+    ) -> Result<(Url<'input>, ValidationErrors), Error> {
         Parser::new(bytes).parse(self, UrlBuffer::new(backing))
     }
 
@@ -2783,7 +2783,7 @@ mod windows {
     use super::*;
 
     pub(super) fn base_path_starts_with_windows_drive_letter_normalized(base: &Url<'_>) -> bool {
-        if !base.path().len() >= 4 {
+        if base.path().len() >= 4 {
             let path = base.path();
             path[0] == b'/' && path[1].is_ascii_alphabetic() && path[2] == b':' && path[3] == b'/'
         } else {
