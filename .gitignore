@@ -18,3 +18,7 @@ core*
 
 # Nix
 result
+
+# Opencode
+.sandbox
+nix-store-overlay.img
