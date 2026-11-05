@@ -1,0 +1,17 @@
+[package]
+name = "http_headers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Parsing
+memchr.workspace = true
+
+serde.workspace = true
+
+[dev-dependencies]
+serde = { workspace = true, features = ["derive"] }
+
+[lints]
+workspace = true
