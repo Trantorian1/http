@@ -1,21 +1,35 @@
 use super::Error;
 
-pub(crate) struct Lines<'a> {
-    iter: memchr::memmem::FindIter<'a, 'a>,
+pub(crate) struct HeaderLines<'a> {
+    input: &'a [u8],
 }
 
-impl<'a> Lines<'a> {
+impl<'a> HeaderLines<'a> {
     pub(crate) fn new(input: &'a [u8]) -> Self {
-        let iter = memchr::memmem::find_iter(input, crate::constants::CRLF);
-        Self { iter }
+        Self { input }
     }
 }
 
-impl<'a> Iterator for Lines<'a> {
-    type Item = HeaderItem<'a>;
+impl<'a> Iterator for HeaderLines<'a> {
+    type Item = Result<HeaderItem<'a>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        match self.input {
+            // End of header section
+            [b'\r', b'\n', ..] => None,
+
+            _ => match memchr::memmem::find(self.input, crate::constants::CRLF) {
+                // Invalid header line end
+                None => Some(Err(Error::MissingCRLFDelimiter)),
+
+                // Extract and parse header line
+                Some(n) => {
+                    let line = &self.input[..n];
+                    self.input = &self.input[n + crate::constants::CRLF.len()..];
+                    Some(HeaderItem::new(line))
+                },
+            },
+        }
     }
 }
 
@@ -48,15 +62,14 @@ impl<'a> HeaderItem<'a> {
         }
 
         let mut field_value_stop = line.len();
-        while field_value_stop > 0 && crate::constants::OWS.contains(&line[field_value_stop - 1]) {
+        while field_value_stop > field_value_start
+            && crate::constants::OWS.contains(&line[field_value_stop - 1])
+        {
             field_value_stop -= 1;
         }
 
+        // Header values may be empty
         let field_value_range = field_value_start..field_value_stop;
-        if field_value_range.is_empty() {
-            return Err(Error::MissingFieldValue);
-        }
-
         let field_value_raw = &line[field_value_range];
 
         let field_name = std::str::from_utf8(field_name_raw).map_err(Error::InvalidUtf8)?;
@@ -71,12 +84,50 @@ impl<'a> HeaderItem<'a> {
 
 #[cfg(test)]
 mod test {
-    use macro_util::prelude::*;
-
     use super::*;
 
     #[test]
-    fn header_item_line_full() {
+    fn header_line_full() {
+        const LINES: &str = "Content-Type: text/plain\r\nContent-Length: 3\r\n\r\n";
+
+        let expected = [
+            Some(Ok(HeaderItem {
+                field_name: "Content-Type",
+                field_value: "text/plain",
+            })),
+            Some(Ok(HeaderItem {
+                field_name: "Content-Length",
+                field_value: "3",
+            })),
+            None,
+        ]
+        .into_iter();
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        for item in expected {
+            assert_eq!(lines.next(), item);
+        }
+    }
+
+    #[test]
+    fn header_line_empty() {
+        const LINES: &str = "\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn header_line_err_missing_crlf_delimiter() {
+        const LINES: &str = "Content-Type: text/plain";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+        assert_eq!(lines.next(), Some(Err(Error::MissingCRLFDelimiter)));
+    }
+
+    #[test]
+    fn header_item_full() {
         const LINE: &str = "Content-Type:text/plain";
 
         let expected = Ok(HeaderItem {
@@ -88,7 +139,7 @@ mod test {
     }
 
     #[test]
-    fn header_item_line_trim_ows() {
+    fn header_item_trim_ows() {
         const LINE: &str = "Content-Type: \t text/plain\t\t  \t";
 
         let expected = Ok(HeaderItem {
@@ -130,7 +181,10 @@ mod test {
     fn header_item_err_missing_field_value_no_ows() {
         const LINE: &str = "Content-Type:";
 
-        let expected = Err(Error::MissingFieldValue);
+        let expected = Ok(HeaderItem {
+            field_name: "Content-Type",
+            field_value: "",
+        });
 
         assert_eq!(HeaderItem::new(LINE.as_bytes()), expected);
     }
@@ -139,7 +193,10 @@ mod test {
     fn header_item_err_missing_field_value_ows() {
         const LINE: &str = "Content-Type:  \t \t\t  \t";
 
-        let expected = Err(Error::MissingFieldValue);
+        let expected = Ok(HeaderItem {
+            field_name: "Content-Type",
+            field_value: "",
+        });
 
         assert_eq!(HeaderItem::new(LINE.as_bytes()), expected);
     }

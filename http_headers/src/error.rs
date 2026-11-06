@@ -6,6 +6,7 @@ pub enum Error {
     MissingFieldDelimiter,
     MissingFieldName,
     MissingFieldValue,
+    MissingCRLFDelimiter,
 }
 
 impl std::fmt::Display for Error {
