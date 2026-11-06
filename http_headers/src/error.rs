@@ -20,6 +20,10 @@ impl std::error::Error for Error {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ErrorValue {
     EmptyList,
+
+    MissingParameterDelimiter,
+    MissingParameterKey,
+    MissingParameterValue,
 }
 
 impl std::fmt::Display for ErrorValue {

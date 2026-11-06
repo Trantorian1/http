@@ -48,12 +48,11 @@ impl<'a> HeaderItem<'a> {
             return Err(error::Error::EmptyLine);
         }
 
-        let field_name_delimiter =
-            memchr::memchr(b':', line).ok_or(error::Error::MissingFieldDelimiter)?;
-
-        if field_name_delimiter == 0 {
-            return Err(error::Error::MissingFieldName);
-        }
+        let field_name_delimiter = match memchr::memchr(b':', line) {
+            None => return Err(error::Error::MissingFieldDelimiter),
+            Some(0) => return Err(error::Error::MissingFieldName),
+            Some(n) => n,
+        };
 
         let field_name = &line[..field_name_delimiter];
 
@@ -105,49 +104,117 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
     type Item = Result<Value<'a>, error::ErrorValue>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.field_value = ows::skip_leading_ows(self.field_value);
+        loop {
+            self.field_value = ows::skip_ows_leading(self.field_value);
+            let mut element = ows::skip_ows_trailing(self.field_value);
+            let mut next_element = self.field_value.len();
 
-        // Field value lists
-        if let Some(mut list_delimiter) = memchr::memchr(b',', self.field_value) {
-            let mut list_element = ows::skip_trailing_ows(&self.field_value[..list_delimiter]);
+            // Field value lists
+            if let Some(list_delimiter) = memchr::memchr(b',', element) {
+                next_element = list_delimiter;
 
-            while list_element.is_empty() && list_delimiter < self.field_value.len() {
-                self.field_value = &self.field_value[list_delimiter + 1..];
+                // Skip empty list items
+                element = ows::skip_ows_trailing(&self.field_value[..next_element]);
+                while element.is_empty() && next_element < self.field_value.len() {
+                    self.field_value = &self.field_value[next_element + 1..];
+                    self.field_value = ows::skip_ows_leading(self.field_value);
 
-                list_delimiter = match memchr::memchr(b',', self.field_value) {
-                    Some(n) => n,
-                    None => self.field_value.len(),
-                };
+                    next_element = match memchr::memchr(b',', self.field_value) {
+                        Some(n) => n,
+                        None => self.field_value.len(),
+                    };
 
-                list_element = &self.field_value[..list_delimiter];
-                list_element = ows::skip_leading_ows(&list_element);
-                list_element = ows::skip_trailing_ows(&list_element);
+                    element = ows::skip_ows_trailing(&self.field_value[..next_element]);
+                }
+
+                if element.is_empty() {
+                    return Some(Err(error::ErrorValue::EmptyList));
+                }
             }
 
-            self.field_value = &self.field_value[list_delimiter..];
+            // Parameters
+            let mut parameters = memchr::memchr_iter(b';', element);
+            match parameters.next() {
+                Some(0) => {
+                    let mut next_parameter = match parameters.next() {
+                        Some(n) => n,
+                        None => element.len(),
+                    };
 
-            if list_element.is_empty() {
-                return Some(Err(error::ErrorValue::EmptyList));
-            } else {
-                return Some(Ok(Value::Element(list_element)));
+                    // Skip empty parameters
+                    element = ows::skip_ows_all(&element[1..next_parameter]);
+                    while element.is_empty() && next_parameter < element.len() {
+                        self.field_value = &self.field_value[next_parameter + 1..];
+                        self.field_value = ows::skip_ows_leading(self.field_value);
+
+                        next_parameter = match memchr::memchr(b';', element) {
+                            Some(n) => n,
+                            None => element.len(),
+                        };
+
+                        element = ows::skip_ows_trailing(&self.field_value[..next_parameter]);
+                    }
+
+                    // Consume parameter so it is not processed again in the next loop iteration
+                    self.field_value = &self.field_value[next_parameter..];
+
+                    if element.is_empty() {
+                        // Empty list item, move on to next list item (if there is any)
+                        continue;
+                    }
+
+                    match memchr::memchr(b'=', element) {
+                        None => {
+                            return Some(Err(error::ErrorValue::MissingParameterDelimiter));
+                        },
+                        Some(0) => {
+                            return Some(Err(error::ErrorValue::MissingParameterKey));
+                        },
+                        Some(n) if n + 1 >= element.len() => {
+                            return Some(Err(error::ErrorValue::MissingParameterValue));
+                        },
+                        Some(n) => {
+                            // TODO: check for illegal chars
+                            let key = &element[..n];
+                            let val = &element[n + 1..];
+
+                            return Some(Ok(Value::Parameter(ValueParameter { key, val })));
+                        },
+                    };
+                },
+                Some(next_parameter) => {
+                    // Consume the current element up to the parameter so that it is not processed
+                    // again in the next loop iteration
+                    self.field_value = &self.field_value[next_parameter..];
+
+                    let element = &element[..next_parameter];
+                    return Some(Ok(Value::Element(ows::skip_ows_trailing(element))));
+                },
+                None => {
+                    // Consume the current element so that is is not processed again in the next
+                    // loop iteration.
+                    let next = (next_element + 1).min(self.field_value.len());
+                    self.field_value = &self.field_value[next..];
+
+                    if element.is_empty() {
+                        return None;
+                    } else {
+                        return Some(Ok(Value::Element(element)));
+                    }
+                },
             }
-        }
-
-        // Single element
-        let element = ows::skip_trailing_ows(self.field_value);
-        self.field_value = &[];
-
-        if element.is_empty() {
-            None
-        } else {
-            Some(Ok(Value::Element(element)))
         }
     }
 }
 
 mod ows {
     #[inline]
-    pub(super) fn skip_leading_ows(bytes: &[u8]) -> &[u8] {
+    pub(super) fn skip_ows_all(bytes: &[u8]) -> &[u8] {
+        skip_ows_leading(skip_ows_trailing(bytes))
+    }
+
+    #[inline]
+    pub(super) fn skip_ows_leading(bytes: &[u8]) -> &[u8] {
         let mut start = 0;
         while start < bytes.len() && crate::constants::OWS.contains(&bytes[start]) {
             start += 1;
@@ -157,7 +224,7 @@ mod ows {
     }
 
     #[inline]
-    pub(super) fn skip_trailing_ows(bytes: &[u8]) -> &[u8] {
+    pub(super) fn skip_ows_trailing(bytes: &[u8]) -> &[u8] {
         let mut stop = bytes.len();
         while stop > 0 && crate::constants::OWS.contains(&bytes[stop - 1]) {
             stop -= 1;
@@ -256,6 +323,23 @@ mod test {
     }
 
     #[test]
+    fn header_line_empty() {
+        const LINES: &str = "\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn header_line_err_missing_crlf_delimiter() {
+        const LINES: &str = "Content-Type: text/plain";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+        assert_eq!(lines.next(), Some(Err(error::Error::MissingCRLFDelimiter)));
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
     fn header_line_list() {
         // TODO: add support for quotation
         const LINES: &str = "Example-Dates: Sat 04 May 1996, Wed 14 Sep 2005\r\n\r\n";
@@ -312,20 +396,213 @@ mod test {
     }
 
     #[test]
-    fn header_line_empty() {
-        const LINES: &str = "\r\n";
+    fn header_line_parameters_simple() {
+        // TODO: add support for case-insensitivity
+        const LINES: &str =
+            "Content-Type: multipart/form-data; boundary=7MA4YWxkTrZu0gW; charset=utf-8\r\n\r\n";
 
         let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Content-Type");
+
+        let mut v1 = l1.values();
+        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_1, b"multipart/form-data");
+
+        let (key1_2, val1_2) = match v1.next() {
+            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Element(bytes))) => {
+                let element = std::str::from_utf8(bytes).unwrap();
+                panic!("{element}");
+            },
+            other => panic!("{other:?}"),
+        };
+
+        assert_utf8_eq!(key1_2, b"boundary");
+        assert_utf8_eq!(val1_2, b"7MA4YWxkTrZu0gW");
+
+        let (key1_3, val1_3) = match v1.next() {
+            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Element(bytes))) => {
+                let element = std::str::from_utf8(bytes).unwrap();
+                panic!("{element}");
+            },
+            other => panic!("{other:?}"),
+        };
+
+        assert_utf8_eq!(key1_3, b"charset");
+        assert_utf8_eq!(val1_3, b"utf-8");
+
+        assert_eq!(v1.next(), None);
         assert_eq!(lines.next(), None);
     }
 
     #[test]
-    fn header_line_err_missing_crlf_delimiter() {
-        const LINES: &str = "Content-Type: text/plain";
+    fn header_line_parameters_fuck_me() {
+        const LINES: &str = "Accept:    text/*;q=0.3, text/plain;q=0.7;; \t  ;, text/plain;   \
+                             format=flowed,text/plain;   \tformat=fixed;q=0.4, */*  ;    \
+                             q=0.5\t\t\t\t\r\n\r\n";
 
         let mut lines = HeaderLines::new(LINES.as_bytes());
-        assert_eq!(lines.next(), Some(Err(error::Error::MissingCRLFDelimiter)));
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Accept");
+
+        let mut v1 = l1.values();
+
+        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_1, b"text/*");
+
+        let (key1_2, val1_2) = match v1.next() {
+            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Element(bytes))) => {
+                let element = std::str::from_utf8(bytes).unwrap();
+                panic!("{element}");
+            },
+            other => panic!("{other:?}"),
+        };
+
+        assert_utf8_eq!(key1_2, b"q");
+        assert_utf8_eq!(val1_2, b"0.3");
+
+        let Some(Ok(Value::Element(value1_3))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_3, b"text/plain");
+
+        let (key1_4, val1_4) = match v1.next() {
+            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Element(bytes))) => {
+                let element = std::str::from_utf8(bytes).unwrap();
+                panic!("{element}");
+            },
+            other => panic!("{other:?}"),
+        };
+
+        assert_utf8_eq!(key1_4, b"q");
+        assert_utf8_eq!(val1_4, b"0.7");
+
+        let Some(Ok(Value::Element(value1_5))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_5, b"text/plain");
+
+        let (key1_6, val1_6) = match v1.next() {
+            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Element(bytes))) => {
+                let element = std::str::from_utf8(bytes).unwrap();
+                panic!("{element}");
+            },
+            other => panic!("{other:?}"),
+        };
+
+        assert_utf8_eq!(key1_6, b"format");
+        assert_utf8_eq!(val1_6, b"flowed");
+
+        let Some(Ok(Value::Element(value1_7))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_7, b"text/plain");
+
+        let (key1_8, val1_8) = match v1.next() {
+            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Element(bytes))) => {
+                let element = std::str::from_utf8(bytes).unwrap();
+                panic!("{element}");
+            },
+            other => panic!("{other:?}"),
+        };
+
+        assert_utf8_eq!(key1_8, b"format");
+        assert_utf8_eq!(val1_8, b"fixed");
+
+        let (key1_9, val1_9) = match v1.next() {
+            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Element(bytes))) => {
+                let element = std::str::from_utf8(bytes).unwrap();
+                panic!("{element}");
+            },
+            other => panic!("{other:?}"),
+        };
+
+        assert_utf8_eq!(key1_9, b"q");
+        assert_utf8_eq!(val1_9, b"0.4");
+
+        let Some(Ok(Value::Element(value1_10))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_10, b"*/*");
+
+        let (key1_8, val1_8) = match v1.next() {
+            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Element(bytes))) => {
+                let element = std::str::from_utf8(bytes).unwrap();
+                panic!("{element}");
+            },
+            other => panic!("{other:?}"),
+        };
+
+        assert_utf8_eq!(key1_8, b"q");
+        assert_utf8_eq!(val1_8, b"0.5");
+
+        assert_eq!(v1.next(), None);
         assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn header_line_parameters_err_missing_parameter_delimiter() {
+        const LINES: &str = "Content-Type: ;boundary7MA4YWxkTrZu0gW\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Content-Type");
+
+        let mut v1 = l1.values();
+        assert_eq!(
+            v1.next(),
+            Some(Err(error::ErrorValue::MissingParameterDelimiter))
+        );
+    }
+
+    #[test]
+    fn header_line_parameters_err_missing_parameter_key() {
+        const LINES: &str = "Content-Type: ;=7MA4YWxkTrZu0gW\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Content-Type");
+
+        let mut v1 = l1.values();
+        assert_eq!(v1.next(), Some(Err(error::ErrorValue::MissingParameterKey)));
+    }
+
+    #[test]
+    fn header_line_parameters_err_missing_parameter_value() {
+        const LINES: &str = "Content-Type: ;boundary=\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Content-Type");
+
+        let mut v1 = l1.values();
+        assert_eq!(
+            v1.next(),
+            Some(Err(error::ErrorValue::MissingParameterValue))
+        );
     }
 
     #[test]
