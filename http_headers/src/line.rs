@@ -1,3 +1,5 @@
+use macro_util::*;
+
 use super::error;
 
 pub(crate) struct HeaderLines<'a> {
@@ -79,7 +81,15 @@ impl<'a> HeaderItem<'a> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct HeaderValues<'a> {
-    field_value: &'a [u8],
+    state: ParsingStack<'a, 4>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum HeaderSegment<'a> {
+    Line(&'a [u8]),
+    List(&'a [u8], usize),
+    Element(&'a [u8]),
+    Parameter(&'a [u8]),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,7 +106,9 @@ pub(crate) struct ValueParameter<'a> {
 
 impl<'a> HeaderValues<'a> {
     pub(crate) fn new(field_value: &'a [u8]) -> Self {
-        Self { field_value }
+        let mut state = ParsingStack::new();
+        state.push(HeaderSegment::Line(field_value));
+        Self { state }
     }
 }
 
@@ -105,107 +117,192 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            self.field_value = ows::skip_ows_leading(self.field_value);
-            let mut element = ows::skip_ows_trailing(self.field_value);
-            let mut next_element = self.field_value.len();
+            match self.state.peek()? {
+                HeaderSegment::Line(line) => {
+                    if memchr::memchr(b',', line).is_some() {
+                        let list = &line[..];
 
-            // Field value lists
-            if let Some(list_delimiter) = memchr::memchr(b',', element) {
-                next_element = list_delimiter;
+                        self.state.pop();
+                        self.state.push(HeaderSegment::List(list, 0))
+                    } else {
+                        let element = ows::skip_ows_all(&line[..]);
 
-                // Skip empty list items
-                element = ows::skip_ows_trailing(&self.field_value[..next_element]);
-                while element.is_empty() && next_element < self.field_value.len() {
-                    self.field_value = &self.field_value[next_element + 1..];
-                    self.field_value = ows::skip_ows_leading(self.field_value);
-
-                    next_element = match memchr::memchr(b',', self.field_value) {
-                        Some(n) => n,
-                        None => self.field_value.len(),
-                    };
-
-                    element = ows::skip_ows_trailing(&self.field_value[..next_element]);
-                }
-
-                if element.is_empty() {
-                    return Some(Err(error::ErrorValue::EmptyList));
-                }
-            }
-
-            // Parameters
-            let mut parameters = memchr::memchr_iter(b';', element);
-            match parameters.next() {
-                Some(0) => {
-                    let mut next_parameter = match parameters.next() {
-                        Some(n) => n,
-                        None => element.len(),
-                    };
-
-                    // Skip empty parameters
-                    element = ows::skip_ows_all(&element[1..next_parameter]);
-                    while element.is_empty() && next_parameter < element.len() {
-                        self.field_value = &self.field_value[next_parameter + 1..];
-                        self.field_value = ows::skip_ows_leading(self.field_value);
-
-                        next_parameter = match memchr::memchr(b';', element) {
-                            Some(n) => n,
-                            None => element.len(),
-                        };
-
-                        element = ows::skip_ows_trailing(&self.field_value[..next_parameter]);
+                        self.state.pop();
+                        self.state.push(HeaderSegment::Element(element));
                     }
+                },
 
-                    // Consume parameter so it is not processed again in the next loop iteration
-                    self.field_value = &self.field_value[next_parameter..];
+                HeaderSegment::List(list, size) => {
+                    let (delimiter_next, skip) = match memchr::memchr(b',', list) {
+                        Some(n) => (n, n + 1),
+                        None => (list.len(), list.len()),
+                    };
 
+                    let mut element = &list[..delimiter_next];
+                    *list = &list[skip..];
+
+                    element = ows::skip_ows_leading(element);
+
+                    if !element.is_empty() {
+                        *size += 1;
+                        self.state.push(HeaderSegment::Element(element))
+                    } else if list.is_empty() {
+                        if *size == 0 {
+                            self.state.clear();
+                            return Some(Err(error::ErrorValue::EmptyList));
+                        } else {
+                            self.state.pop();
+                        }
+                    }
+                },
+
+                HeaderSegment::Element(element) => {
                     if element.is_empty() {
-                        // Empty list item, move on to next list item (if there is any)
-                        continue;
+                        self.state.pop();
+                        return None;
                     }
 
-                    match memchr::memchr(b'=', element) {
+                    let mut parameters = memchr::memchr_iter(b';', element);
+                    match parameters.next() {
+                        Some(0) => {
+                            let delimiter_next = match parameters.next() {
+                                Some(n) => n,
+                                None => element.len(),
+                            };
+
+                            let parameter = ows::skip_ows_all(&element[1..delimiter_next]);
+
+                            *element = &element[delimiter_next..];
+                            if element.is_empty() {
+                                self.state.pop();
+                            }
+
+                            if !parameter.is_empty() {
+                                self.state.push(HeaderSegment::Parameter(parameter));
+                            }
+                        },
+                        Some(n) => {
+                            let immutable = ows::skip_ows_trailing(&element[..n]);
+                            *element = &element[n..];
+                            return Some(Ok(Value::Element(immutable)));
+                        },
                         None => {
+                            let immutable = *element;
+                            self.state.pop();
+                            return Some(Ok(Value::Element(immutable)));
+                        },
+                    }
+                },
+
+                HeaderSegment::Parameter(parameter) => {
+                    match memchr::memchr(b'=', parameter) {
+                        None => {
+                            self.state.clear();
                             return Some(Err(error::ErrorValue::MissingParameterDelimiter));
                         },
                         Some(0) => {
+                            self.state.clear();
                             return Some(Err(error::ErrorValue::MissingParameterKey));
                         },
-                        Some(n) if n + 1 >= element.len() => {
+                        Some(n) if n + 1 >= parameter.len() => {
+                            self.state.clear();
                             return Some(Err(error::ErrorValue::MissingParameterValue));
                         },
                         Some(n) => {
-                            // TODO: check for illegal chars
-                            let key = &element[..n];
-                            let val = &element[n + 1..];
+                            let key = &parameter[..n];
+                            let val = &parameter[n + 1..];
 
+                            self.state.pop();
                             return Some(Ok(Value::Parameter(ValueParameter { key, val })));
                         },
                     };
-                },
-                Some(next_parameter) => {
-                    // Consume the current element up to the parameter so that it is not processed
-                    // again in the next loop iteration
-                    self.field_value = &self.field_value[next_parameter..];
-
-                    let element = &element[..next_parameter];
-                    return Some(Ok(Value::Element(ows::skip_ows_trailing(element))));
-                },
-                None => {
-                    // Consume the current element so that is is not processed again in the next
-                    // loop iteration.
-                    let next = (next_element + 1).min(self.field_value.len());
-                    self.field_value = &self.field_value[next..];
-
-                    if element.is_empty() {
-                        return None;
-                    } else {
-                        return Some(Ok(Value::Element(element)));
-                    }
                 },
             }
         }
     }
 }
+
+struct ParsingStack<'a, const SIZE: usize> {
+    backing: [std::mem::MaybeUninit<HeaderSegment<'a>>; SIZE],
+    index: usize,
+}
+
+impl<'a, const SIZE: usize> ParsingStack<'a, SIZE> {
+    fn new() -> Self {
+        Self {
+            backing: std::array::from_fn(|_| std::mem::MaybeUninit::uninit()),
+            index: 0,
+        }
+    }
+
+    fn push(&mut self, state: HeaderSegment<'a>) {
+        assert_le!(self.index, SIZE);
+
+        self.backing[self.index].write(state);
+        self.index += 1;
+    }
+
+    fn pop(&mut self) {
+        if self.index > 0 {
+            self.index -= 1
+        }
+    }
+
+    fn peek(&mut self) -> Option<&mut HeaderSegment<'a>> {
+        if self.index > 0 {
+            unsafe { Some(self.backing[self.index - 1].assume_init_mut()) }
+        } else {
+            None
+        }
+    }
+
+    fn clear(&mut self) {
+        self.index = 0;
+    }
+}
+
+impl<'a, const SIZE: usize> Clone for ParsingStack<'a, SIZE> {
+    fn clone(&self) -> Self {
+        Self {
+            backing: std::array::from_fn(|i| {
+                if i < self.index {
+                    std::mem::MaybeUninit::new(unsafe { self.backing[i].assume_init_ref().clone() })
+                } else {
+                    std::mem::MaybeUninit::uninit()
+                }
+            }),
+            index: self.index.clone(),
+        }
+    }
+}
+
+impl<'a, const SIZE: usize> std::fmt::Debug for ParsingStack<'a, SIZE> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParsingStack")
+            .field("backing", &&self.backing[..self.index])
+            .field("index", &self.index)
+            .finish()
+    }
+}
+
+impl<'a, const SIZE: usize> PartialEq for ParsingStack<'a, SIZE> {
+    fn eq(&self, other: &Self) -> bool {
+        if self.index == other.index {
+            for i in 0..self.index {
+                let left = unsafe { self.backing[i].assume_init_ref() };
+                let right = unsafe { other.backing[i].assume_init_ref() };
+                if left != right {
+                    return false;
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl<'a, const SIZE: usize> Eq for ParsingStack<'a, SIZE> {}
 
 mod ows {
     #[inline]
@@ -287,8 +384,6 @@ mod validate {
 
 #[cfg(test)]
 mod test {
-    use macro_util::prelude::*;
-
     use super::*;
 
     #[test]

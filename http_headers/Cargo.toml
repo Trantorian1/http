@@ -9,9 +9,10 @@ rust-version.workspace = true
 serde.workspace = true
 memchr.workspace = true
 
+macro_util.workspace = true
+
 [dev-dependencies]
 serde = { workspace = true, features = ["derive"] }
-macro_util.workspace = true
 
 [lints]
 workspace = true
