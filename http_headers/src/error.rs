@@ -1,34 +1,264 @@
+/// General header line format errors.
+///
+/// This includes errors pertaining to the field name as well as the field value. More specific
+/// value errors are encapsulated in the [`ErrorValue`] type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
+    /// Tried to parse a header with an empty field.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADER: &str = "";
+    ///
+    /// assert_eq!(
+    ///     line::HeaderItem::new(HEADER.as_bytes()),
+    ///     Err(Error::EmptyLine)
+    /// );
+    /// # Ok(())
+    /// # }
+    /// ```
     EmptyLine,
 
+    /// Missing ':' field delimiter in a header line.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADERS: &str = "Content-Type text/plain\r\n";
+    ///
+    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// assert_eq!(headers.next(), Some(Err(Error::MissingFieldDelimiter)));
+    /// # Ok(())
+    /// # }
+    /// ```
     MissingFieldDelimiter,
+
+    /// Missing field name in a header line.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADERS: &str = ": text/plain\r\n";
+    ///
+    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// assert_eq!(headers.next(), Some(Err(Error::MissingFieldName)));
+    /// # Ok(())
+    /// # }
+    /// ```
     MissingFieldName,
+
+    /// Missing [`CRLF`] delimiter at the end of a header line.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADERS: &str = "Content-Type: text/plain";
+    ///
+    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// assert_eq!(headers.next(), Some(Err(Error::MissingCRLFDelimiter)));
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [`CRLF`]: crate::constants::CRLF
     MissingCRLFDelimiter,
 
-    InvalidFieldName,
+    /// Unsupported byte in header field name.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADERS: &str = "Content=Type: text/plain\r\n";
+    ///
+    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// assert_eq!(headers.next(), Some(Err(Error::InvalidFieldName(b'='))));
+    /// # Ok(())
+    /// # }
+    /// ```
+    InvalidFieldName(u8),
+
+    /// Field value parsing error.
+    Value(ErrorValue),
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Error::EmptyLine => {
+                write!(f, "Tried to parse a header with an empty field")
+            },
+            Error::MissingFieldDelimiter => {
+                write!(f, "Missing ':' field delimiter in header line")
+            },
+            Error::MissingFieldName => {
+                write!(f, "Missing field name in header line")
+            },
+            Error::MissingCRLFDelimiter => {
+                write!(f, "Missing CRLF delimiter at the end of a header line")
+            },
+            Error::InvalidFieldName(c) => {
+                write!(f, "Unsupported byte '{c}' in header field name")
+            },
+            Error::Value(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl From<ErrorValue> for Error {
+    fn from(err: ErrorValue) -> Self {
+        Self::Value(err)
     }
 }
 
 impl std::error::Error for Error {}
 
+/// Field-specific header format errors.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ErrorValue {
+    /// Tried to parse an empty header field value list.
+    ///
+    /// # Specs
+    ///
+    /// Header field value lists are defined in [section 5.6.1] of [RFC9110], HTTP Semantics.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADERS: &str = "Example-List: ,  ,, ,\r\n\r\n";
+    ///
+    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut header = headers.next().unwrap()?;
+    /// let mut values = header.values();
+    ///
+    /// assert_eq!(values.next(), Some(Err(ErrorValue::EmptyList)));
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [section 5.6.1]: https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.1
+    /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
     EmptyList,
 
+    /// A header field value parameter is missing its '=' delimiter.
+    ///
+    /// # Specs
+    ///
+    /// Header field parameters are defined in [section 5.6.6] of [RFC9110], HTTP Semantics.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADERS: &str = "Content-Type: ;boundary7MA4YWxkTrZu0gW\r\n\r\n";
+    ///
+    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut header = headers.next().unwrap()?;
+    /// let mut values = header.values();
+    ///
+    /// assert_eq!(
+    ///     values.next(),
+    ///     Some(Err(ErrorValue::MissingParameterDelimiter))
+    /// );
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [section 5.6.6]: https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.6
+    /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
     MissingParameterDelimiter,
+
+    /// A header field value parameter is missing its key.
+    ///
+    /// # Specs
+    ///
+    /// Header field parameters are defined in [section 5.6.6] of [RFC9110], HTTP Semantics.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADERS: &str = "Content-Type: ;=7MA4YWxkTrZu0gW\r\n\r\n";
+    ///
+    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut header = headers.next().unwrap()?;
+    /// let mut values = header.values();
+    ///
+    /// assert_eq!(values.next(), Some(Err(ErrorValue::MissingParameterKey)));
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [section 5.6.6]: https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.6
+    /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
     MissingParameterKey,
+
+    /// A header field value parameter is missing its value.
+    ///
+    /// # Specs
+    ///
+    /// Header field parameters are defined in [section 5.6.6] of [RFC9110], HTTP Semantics.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADERS: &str = "Content-Type: ;boundary=\r\n\r\n";
+    ///
+    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut header = headers.next().unwrap()?;
+    /// let mut values = header.values();
+    ///
+    /// assert_eq!(values.next(), Some(Err(ErrorValue::MissingParameterValue)));
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [section 5.6.6]: https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.6
+    /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
     MissingParameterValue,
 }
 
 impl std::fmt::Display for ErrorValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            ErrorValue::EmptyList => {
+                write!(f, "Header field value lists cannot be empty")
+            },
+            ErrorValue::MissingParameterDelimiter => {
+                write!(f, "Header field value parameter missing its '=' delimiter")
+            },
+            ErrorValue::MissingParameterKey => {
+                write!(f, "Header field value parameter is missing a key")
+            },
+            ErrorValue::MissingParameterValue => {
+                write!(f, "Header field value parameter is missing a value")
+            },
+        }
     }
 }
 

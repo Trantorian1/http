@@ -1,13 +1,84 @@
+//! Header line parsing utilities.
+//!
+//! This is intended as a lower-level API which is not meant for public consumption unless you know
+//! what you are doing. Importantly, parsing at this level is implemented as zero-copy, which
+//! prevents certain sanitization operations from taking place, such as [quoted-pair] escaping.
+//!
+//! Generally speaking, you are better off using the higher-level serde parsers provided by this
+//! crate as they will handle any additional complexities automatically. I've kept this part
+//! publicly available in case you find the rest of the API yields insufficient flexibility for
+//! your specific use-case.
+//!
+//! [quoted-pair]: https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.4
+
 use macro_util::*;
 
 use super::error;
 
-pub(crate) struct HeaderLines<'a> {
+/// Header section parser.
+///
+/// # Specs
+///
+/// See the HTTP field format as described in [section 5] of [RFC9110], HTTP Semantics.
+///
+/// # Examples
+///
+/// ```rust
+/// # fn main() -> Result<(), http_headers::Error> {
+/// use http_headers::prelude::*;
+///
+/// const HEADERS: &str = "Content-Type: text/plain\r\nContent-Length: 3\r\n\r\n";
+///
+/// // While parsing is allocation-free your are free to use your own method
+/// // of collecting the results.
+/// let mut headers = std::collections::HashMap::<_, Vec<_>>::new();
+///
+/// // Parsing is implemented as an iterator over header field lines...
+/// for res in line::HeaderLines::new(HEADERS.as_bytes()) {
+///     let mut header = res?;
+///     let values = headers.entry(header.name()).or_default();
+///
+///     // ...which themselves allow you to iterate over header field values
+///     for res in header.values() {
+///         let value = res?;
+///         values.push(value);
+///     }
+/// }
+///
+/// assert_eq!(
+///     headers.get(b"Content-Type" as &[u8]),
+///     Some(&vec![line::Value::Element(b"text/plain")])
+/// );
+///
+/// assert_eq!(
+///     headers.get(b"Content-Length" as &[u8]),
+///     Some(&vec![line::Value::Element(b"3")])
+/// );
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Parsing is implemented as an iterator over each header field line which allows it to remain
+/// allocation-free and zero-copy. This has the limitation that the underlying header segment bytes
+/// cannot be modified, so certain sanitization operations, such as [quoted-pair] escaping or
+/// cases-insensitive matching cannot take place at this stage.
+///
+/// Keep in mind that the parser will hand back **raw network bytes** which may or may not be safe
+/// for consumption into a [`str`] or other types. Use with caution and make sure to perform your
+/// own validation logic on top!
+///
+/// [section 5]: https://www.rfc-editor.org/rfc/rfc9110.html#name-fields
+/// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
+/// [quoted-pair]: https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.4
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeaderLines<'a> {
     input: &'a [u8],
 }
 
 impl<'a> HeaderLines<'a> {
-    pub(crate) fn new(input: &'a [u8]) -> Self {
+    /// Initializes a new parser with the input bytes to be processed.
+    #[must_use]
+    pub fn new(input: &'a [u8]) -> Self {
         Self { input }
     }
 }
@@ -38,14 +109,70 @@ impl<'a> Iterator for HeaderLines<'a> {
     }
 }
 
+/// Single HTTP header field parser.
+///
+/// # Specs
+///
+/// See the HTTP field line format as described in [section 5.2], Field Lines and Combined Field
+/// Values of [RFC9110], HTTP Semantics.
+///
+/// # Examples
+///
+/// ```rust
+/// # fn main() -> Result<(), http_headers::Error> {
+/// use http_headers::prelude::*;
+///
+/// const HEADER: &str = "Content-Type: text/plain";
+///
+/// let mut header = line::HeaderItem::new(HEADER.as_bytes())?;
+///
+/// let field_name = header.name();
+/// let field_value = header.values().next().unwrap()?;
+///
+/// assert_eq!(field_name, b"Content-Type");
+/// assert_eq!(field_value, line::Value::Element(b"text/plain"));
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Similar caution should be exercised when using this low-level API as with [`HeaderLines`].
+///
+/// [section 5.2]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-lines-and-combined-fi
+/// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct HeaderItem<'a> {
+pub struct HeaderItem<'a> {
     field_name: &'a [u8],
     field_value: HeaderValues<'a>,
 }
 
 impl<'a> HeaderItem<'a> {
-    fn new(line: &'a [u8]) -> Result<Self, error::Error> {
+    /// Initializes a new header field parser.
+    ///
+    /// This method is usually only called by [`HeaderLines`] during the parsing process but can
+    /// also be manually invoked in the rare cases where it is necessary to parse only a _single_
+    /// header field.
+    ///
+    /// # Panics
+    ///
+    /// If ever the input bytes end with a [`CRLF`]. This is guaranteed not to be the case when
+    /// invoked by [`HeaderLines`] during parsing and must also be upheld on manual calls.
+    ///
+    /// # Errors
+    ///
+    /// For malformed inputs, this method will return [`MissingFieldDelimiter`], [`MissingFieldName`]
+    /// or [`InvalidFieldName`] depending on the error type.
+    ///
+    /// [`CRLF`]: crate::constants::CRLF
+    /// [`MissingFieldDelimiter`]: error::Error::MissingFieldDelimiter
+    /// [`MissingFieldName`]: error::Error::MissingFieldName
+    /// [`InvalidFieldName`]: error::Error::InvalidFieldName
+    pub fn new(line: &'a [u8]) -> Result<Self, error::Error> {
+        assert_eq!(
+            memchr::memmem::rfind(line, crate::constants::CRLF),
+            None,
+            "HeaderItem assumes CRLF sanitization has already taken place"
+        );
+
         if line.is_empty() {
             return Err(error::Error::EmptyLine);
         }
@@ -58,8 +185,8 @@ impl<'a> HeaderItem<'a> {
 
         let field_name = &line[..field_name_delimiter];
 
-        if !validate::is_legal_header_name(field_name) {
-            return Err(error::Error::InvalidFieldName);
+        if let Some(c) = validate::is_legal_header_name(field_name) {
+            return Err(error::Error::InvalidFieldName(c));
         }
 
         let field_value = HeaderValues::new(&line[field_name_delimiter + 1..]);
@@ -70,17 +197,37 @@ impl<'a> HeaderItem<'a> {
         })
     }
 
-    fn name(&self) -> &[u8] {
+    /// Returns the header's field name.
+    #[must_use]
+    pub fn name(&self) -> &'a [u8] {
         self.field_name
     }
 
-    fn values(&mut self) -> &mut HeaderValues<'a> {
+    /// Returns an iterator over the header's [field value].
+    ///
+    /// [field value]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values
+    #[must_use]
+    pub fn values(&mut self) -> &mut HeaderValues<'a> {
         &mut self.field_value
     }
 }
 
+/// HTTP header field value parser.
+///
+/// # Specs
+///
+/// See the HTTP field value format as described in [section 5.5], Field Values of [RFC9110], HTTP
+/// Semantics.
+///
+/// # Usage
+///
+/// This parser is not meant to be constructed manually and is instead only returned by
+/// [`HeaderItem::values`].
+///
+/// [section 5.5]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values
+/// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct HeaderValues<'a> {
+pub struct HeaderValues<'a> {
     state: ParsingStack<'a, 4>,
 }
 
@@ -92,16 +239,64 @@ enum HeaderSegment<'a> {
     Parameter(&'a [u8]),
 }
 
+/// A single HTTP header field value.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Value<'a> {
+pub enum Value<'a> {
+    /// Single element field value, can be part of a list.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADER: &str = "Content-Type: text/plain";
+    ///
+    /// let mut header = line::HeaderItem::new(HEADER.as_bytes())?;
+    /// let field_value = header.values().next().unwrap()?;
+    ///
+    /// assert_eq!(field_value, line::Value::Element(b"text/plain"));
+    /// # Ok(())
+    /// # }
+    /// ```
     Element(&'a [u8]),
-    Parameter(ValueParameter<'a>),
-}
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ValueParameter<'a> {
-    key: &'a [u8],
-    val: &'a [u8],
+    /// Dictionary-like field value, can also be part of a list.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADER: &str = "Content-Type: multipart/form-data; boundary=7MA4YWxkTrZu0gW";
+    ///
+    /// let mut header = line::HeaderItem::new(HEADER.as_bytes())?;
+    /// let mut values = header.values();
+    ///
+    /// // Header parameters are still typically associated to a field value element
+    /// assert_eq!(
+    ///     values.next().unwrap()?,
+    ///     line::Value::Element(b"multipart/form-data")
+    /// );
+    ///
+    /// // Header parameters come in key-value pairs, separated by a single '=' delimiter
+    /// assert_eq!(
+    ///     values.next().unwrap()?,
+    ///     line::Value::Parameter {
+    ///         key: b"boundary",
+    ///         val: b"7MA4YWxkTrZu0gW"
+    ///     }
+    /// );
+    /// # Ok(())
+    /// # }
+    /// ```
+    Parameter {
+        /// Parameter key.
+        key: &'a [u8],
+        /// Parameter value.
+        val: &'a [u8],
+    },
 }
 
 impl<'a> HeaderValues<'a> {
@@ -123,7 +318,7 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                         let list = &line[..];
 
                         self.state.pop();
-                        self.state.push(HeaderSegment::List(list, 0))
+                        self.state.push(HeaderSegment::List(list, 0));
                     } else {
                         let element = ows::skip_ows_all(&line[..]);
 
@@ -145,14 +340,13 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
 
                     if !element.is_empty() {
                         *size += 1;
-                        self.state.push(HeaderSegment::Element(element))
+                        self.state.push(HeaderSegment::Element(element));
                     } else if list.is_empty() {
                         if *size == 0 {
                             self.state.clear();
                             return Some(Err(error::ErrorValue::EmptyList));
-                        } else {
-                            self.state.pop();
                         }
+                        self.state.pop();
                     }
                 },
 
@@ -213,7 +407,7 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                             let val = &parameter[n + 1..];
 
                             self.state.pop();
-                            return Some(Ok(Value::Parameter(ValueParameter { key, val })));
+                            return Some(Ok(Value::Parameter { key, val }));
                         },
                     };
                 },
@@ -236,7 +430,11 @@ impl<'a, const SIZE: usize> ParsingStack<'a, SIZE> {
     }
 
     fn push(&mut self, state: HeaderSegment<'a>) {
-        assert_le!(self.index, SIZE);
+        assert_le!(
+            self.index,
+            SIZE,
+            "Cannot push more than SIZE elements to a ParsingStack"
+        );
 
         self.backing[self.index].write(state);
         self.index += 1;
@@ -244,12 +442,14 @@ impl<'a, const SIZE: usize> ParsingStack<'a, SIZE> {
 
     fn pop(&mut self) {
         if self.index > 0 {
-            self.index -= 1
+            self.index -= 1;
         }
     }
 
     fn peek(&mut self) -> Option<&mut HeaderSegment<'a>> {
         if self.index > 0 {
+            // SAFETY: index is kept in sync with stack push/pop operations and therefore only
+            // points to initialized memory.
             unsafe { Some(self.backing[self.index - 1].assume_init_mut()) }
         } else {
             None
@@ -261,22 +461,25 @@ impl<'a, const SIZE: usize> ParsingStack<'a, SIZE> {
     }
 }
 
-impl<'a, const SIZE: usize> Clone for ParsingStack<'a, SIZE> {
+impl<const SIZE: usize> Clone for ParsingStack<'_, SIZE> {
     fn clone(&self) -> Self {
         Self {
             backing: std::array::from_fn(|i| {
                 if i < self.index {
+                    // SAFETY: index is kept in sync with stack push/pop operations and therefore
+                    // only points to initialized memory. Where index - 1 points to the last written
+                    // slot, i < index guarantees that i points to initialized memory.
                     std::mem::MaybeUninit::new(unsafe { self.backing[i].assume_init_ref().clone() })
                 } else {
                     std::mem::MaybeUninit::uninit()
                 }
             }),
-            index: self.index.clone(),
+            index: self.index,
         }
     }
 }
 
-impl<'a, const SIZE: usize> std::fmt::Debug for ParsingStack<'a, SIZE> {
+impl<const SIZE: usize> std::fmt::Debug for ParsingStack<'_, SIZE> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ParsingStack")
             .field("backing", &&self.backing[..self.index])
@@ -285,15 +488,21 @@ impl<'a, const SIZE: usize> std::fmt::Debug for ParsingStack<'a, SIZE> {
     }
 }
 
-impl<'a, const SIZE: usize> PartialEq for ParsingStack<'a, SIZE> {
+impl<const SIZE: usize> PartialEq for ParsingStack<'_, SIZE> {
     fn eq(&self, other: &Self) -> bool {
         if self.index == other.index {
             for i in 0..self.index {
-                let left = unsafe { self.backing[i].assume_init_ref() };
-                let right = unsafe { other.backing[i].assume_init_ref() };
-                if left != right {
-                    return false;
-                }
+                // SAFETY: index is kept in sync with stack push/pop operations and therefore only
+                // points to initialized memory. Where index - 1 points to the last written slot,
+                // i < index guarantees that i points to initialized memory.
+                unsafe {
+                    let left = self.backing[i].assume_init_ref();
+                    let right = other.backing[i].assume_init_ref();
+
+                    if left != right {
+                        return false;
+                    }
+                };
             }
             true
         } else {
@@ -302,7 +511,7 @@ impl<'a, const SIZE: usize> PartialEq for ParsingStack<'a, SIZE> {
     }
 }
 
-impl<'a, const SIZE: usize> Eq for ParsingStack<'a, SIZE> {}
+impl<const SIZE: usize> Eq for ParsingStack<'_, SIZE> {}
 
 mod ows {
     #[inline]
@@ -341,17 +550,17 @@ mod validate {
     /// field-name     = token
     ///
     /// token          = 1*tchar
-
+    ///
     /// tchar          = "!" / "#" / "$" / "%" / "&" / "'" / "*"
     ///                / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
     ///                / DIGIT / ALPHA
     ///                ; any VCHAR, except delimiters
     /// ```
-    /// 
+    ///
     /// See [RFC9110] for more information.
     ///
     /// [RFC9110]: https://www.rfc-editor.org/info/rfc9110/#section-5.6.2
-    pub(crate) fn is_legal_header_name(bytes: &[u8]) -> bool {
+    pub(crate) fn is_legal_header_name(bytes: &[u8]) -> Option<u8> {
         for c in bytes {
             if !matches!(
                 c,
@@ -374,11 +583,11 @@ mod validate {
                 | b'a'..=b'z'
                 | b'A'..=b'Z',
             ) {
-                return false;
+                return Some(*c);
             }
         }
 
-        true
+        None
     }
 }
 
@@ -509,7 +718,7 @@ mod test {
         assert_utf8_eq!(value1_1, b"multipart/form-data");
 
         let (key1_2, val1_2) = match v1.next() {
-            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Parameter { key, val })) => (key, val),
             Some(Ok(Value::Element(bytes))) => {
                 let element = std::str::from_utf8(bytes).unwrap();
                 panic!("{element}");
@@ -521,7 +730,7 @@ mod test {
         assert_utf8_eq!(val1_2, b"7MA4YWxkTrZu0gW");
 
         let (key1_3, val1_3) = match v1.next() {
-            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Parameter { key, val })) => (key, val),
             Some(Ok(Value::Element(bytes))) => {
                 let element = std::str::from_utf8(bytes).unwrap();
                 panic!("{element}");
@@ -556,7 +765,7 @@ mod test {
         assert_utf8_eq!(value1_1, b"text/*");
 
         let (key1_2, val1_2) = match v1.next() {
-            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Parameter { key, val })) => (key, val),
             Some(Ok(Value::Element(bytes))) => {
                 let element = std::str::from_utf8(bytes).unwrap();
                 panic!("{element}");
@@ -574,7 +783,7 @@ mod test {
         assert_utf8_eq!(value1_3, b"text/plain");
 
         let (key1_4, val1_4) = match v1.next() {
-            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Parameter { key, val })) => (key, val),
             Some(Ok(Value::Element(bytes))) => {
                 let element = std::str::from_utf8(bytes).unwrap();
                 panic!("{element}");
@@ -592,7 +801,7 @@ mod test {
         assert_utf8_eq!(value1_5, b"text/plain");
 
         let (key1_6, val1_6) = match v1.next() {
-            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Parameter { key, val })) => (key, val),
             Some(Ok(Value::Element(bytes))) => {
                 let element = std::str::from_utf8(bytes).unwrap();
                 panic!("{element}");
@@ -610,7 +819,7 @@ mod test {
         assert_utf8_eq!(value1_7, b"text/plain");
 
         let (key1_8, val1_8) = match v1.next() {
-            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Parameter { key, val })) => (key, val),
             Some(Ok(Value::Element(bytes))) => {
                 let element = std::str::from_utf8(bytes).unwrap();
                 panic!("{element}");
@@ -622,7 +831,7 @@ mod test {
         assert_utf8_eq!(val1_8, b"fixed");
 
         let (key1_9, val1_9) = match v1.next() {
-            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+            Some(Ok(Value::Parameter { key, val })) => (key, val),
             Some(Ok(Value::Element(bytes))) => {
                 let element = std::str::from_utf8(bytes).unwrap();
                 panic!("{element}");
@@ -639,8 +848,8 @@ mod test {
 
         assert_utf8_eq!(value1_10, b"*/*");
 
-        let (key1_8, val1_8) = match v1.next() {
-            Some(Ok(Value::Parameter(ValueParameter { key, val }))) => (key, val),
+        let (key1_11, val1_11) = match v1.next() {
+            Some(Ok(Value::Parameter { key, val })) => (key, val),
             Some(Ok(Value::Element(bytes))) => {
                 let element = std::str::from_utf8(bytes).unwrap();
                 panic!("{element}");
@@ -648,8 +857,8 @@ mod test {
             other => panic!("{other:?}"),
         };
 
-        assert_utf8_eq!(key1_8, b"q");
-        assert_utf8_eq!(val1_8, b"0.5");
+        assert_utf8_eq!(key1_11, b"q");
+        assert_utf8_eq!(val1_11, b"0.5");
 
         assert_eq!(v1.next(), None);
         assert_eq!(lines.next(), None);
@@ -779,10 +988,28 @@ mod test {
 
     #[test]
     fn header_item_err_invalid_field_name() {
-        const LINE: &str = "Content=Type: text/plain\r\n";
+        const LINE: &str = "Content=Type: text/plain";
 
-        let expected = Err(error::Error::InvalidFieldName);
+        let expected = Err(error::Error::InvalidFieldName(b'='));
 
         assert_eq!(HeaderItem::new(LINE.as_bytes()), expected);
+    }
+
+    #[test]
+    #[should_panic(expected = "HeaderItem assumes CRLF sanitization has already taken place")]
+    fn header_item_panic_trailing_crlf() {
+        const LINE: &str = "Content=Type: text/plain\r\n";
+
+        let expected = Err(error::Error::InvalidFieldName(b'='));
+
+        assert_eq!(HeaderItem::new(LINE.as_bytes()), expected);
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot push more than SIZE elements to a ParsingStack")]
+    fn parsing_stack_push_over_size() {
+        let mut stack = ParsingStack::<1>::new();
+        stack.push(HeaderSegment::Line(b""));
+        stack.push(HeaderSegment::Line(b""));
     }
 }
