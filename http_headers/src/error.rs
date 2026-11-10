@@ -158,6 +158,11 @@ pub enum ErrorValue {
     /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
     EmptyList,
 
+    /// Header field value is missing a closing quote
+    MissingClosingQuote,
+
+    LeftoverBytes,
+
     /// A header field value parameter is missing its '=' delimiter.
     ///
     /// # Specs
@@ -246,16 +251,22 @@ pub enum ErrorValue {
 impl std::fmt::Display for ErrorValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ErrorValue::EmptyList => {
+            Self::EmptyList => {
                 write!(f, "Header field value lists cannot be empty")
             },
-            ErrorValue::MissingParameterDelimiter => {
+            Self::MissingClosingQuote => {
+                write!(f, "Header field value is missing a closing quote")
+            },
+            Self::LeftoverBytes => {
+                write!(f, "Header field value contains leftover bytes afetr quote")
+            },
+            Self::MissingParameterDelimiter => {
                 write!(f, "Header field value parameter missing its '=' delimiter")
             },
-            ErrorValue::MissingParameterKey => {
+            Self::MissingParameterKey => {
                 write!(f, "Header field value parameter is missing a key")
             },
-            ErrorValue::MissingParameterValue => {
+            Self::MissingParameterValue => {
                 write!(f, "Header field value parameter is missing a value")
             },
         }

@@ -328,36 +328,107 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                 },
 
                 HeaderSegment::List(list, size) => {
-                    let (delimiter_next, skip) = match memchr::memchr(b',', list) {
-                        Some(n) => (n, n + 1),
-                        None => (list.len(), list.len()),
-                    };
+                    *list = ows::skip_ows_leading(list);
 
-                    let mut element = &list[..delimiter_next];
-                    *list = &list[skip..];
-
-                    element = ows::skip_ows_leading(element);
-
-                    if !element.is_empty() {
-                        *size += 1;
-                        self.state.push(HeaderSegment::Element(element));
-                    } else if list.is_empty() {
+                    if list.is_empty() {
                         if *size == 0 {
                             self.state.clear();
                             return Some(Err(error::ErrorValue::EmptyList));
                         }
                         self.state.pop();
+                        return None;
+                    }
+
+                    // Field elements can be quoted and may contain ',' delimiters, in which case
+                    // those delimiters are considered as escaped and don't contribute to field
+                    // value splitting.
+                    let element = if list[0] == b'"' {
+                        let mut quote_next = None;
+
+                        // Search for the next non-escaped quote delimiter
+                        let offset = 1;
+                        let quotes = memchr::memchr_iter(b'"', &list[offset..]);
+                        for quote in quotes {
+                            if list[offset - 1 + quote] != b'\\' {
+                                quote_next = Some(quote);
+                                break;
+                            }
+                        }
+
+                        let closing_quote = match quote_next {
+                            Some(n) => n,
+                            None => {
+                                self.state.clear();
+                                return Some(Err(error::ErrorValue::MissingClosingQuote));
+                            },
+                        };
+
+                        // Look for the next list field delimiter AFTER the quoted segment
+                        let unquoted = offset + closing_quote + 1;
+                        let (delimiter_next, skip) = match memchr::memchr(b',', &list[unquoted..]) {
+                            Some(n) => (unquoted + n, unquoted + n + 1),
+                            None => (list.len(), list.len()),
+                        };
+
+                        // We can't guarantee zero-copy and support mixed quoted and unquoted field
+                        // values. Besides which that is a really stupid idea anyway.
+                        let leftover = &list[unquoted..delimiter_next];
+                        if !ows::skip_ows_leading(leftover).is_empty() {
+                            self.state.clear();
+                            return Some(Err(error::ErrorValue::LeftoverBytes));
+                        }
+
+                        let element = &list[..=offset + closing_quote];
+                        *list = &list[skip..];
+
+                        element
+                    } else {
+                        let (delimiter_next, skip) = match memchr::memchr(b',', list) {
+                            Some(n) => (n, n + 1),
+                            None => (list.len(), list.len()),
+                        };
+
+                        let element = &list[..delimiter_next];
+                        *list = &list[skip..];
+
+                        element
+                    };
+
+                    // Element is non-empty
+                    if !element.is_empty() {
+                        // Element is not quoted empty
+                        if element[0] != b'"' || element.len() > 2 {
+                            *size += 1;
+                            self.state.push(HeaderSegment::Element(element));
+                        }
                     }
                 },
 
                 HeaderSegment::Element(element) => {
+                    // Empty element
                     if element.is_empty() {
                         self.state.pop();
                         return None;
                     }
 
+                    // Empty quoted element
+                    if element[0] == b'"' && element.len() >= 2 && element[1] == b'"' {
+                        self.state.pop();
+                        return None;
+                    }
+
+                    // Quoted non-empty elements are returned as-is
+                    // FIXME: check for illegal characters
+                    if element[0] == b'"' && element[element.len() - 1] == b'"' {
+                        let immutable = *element;
+                        self.state.pop();
+                        return Some(Ok(Value::Element(&immutable[1..immutable.len() - 1])));
+                    }
+
+                    // Unquoted elements may still contain field parameters
                     let mut parameters = memchr::memchr_iter(b';', element);
                     match parameters.next() {
+                        // Element IS a field parameter
                         Some(0) => {
                             let delimiter_next = match parameters.next() {
                                 Some(n) => n,
@@ -375,11 +446,16 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                                 self.state.push(HeaderSegment::Parameter(parameter));
                             }
                         },
+
+                        // There are some bytes left to consume before the next field parameter
                         Some(n) => {
                             let immutable = ows::skip_ows_trailing(&element[..n]);
                             *element = &element[n..];
                             return Some(Ok(Value::Element(immutable)));
                         },
+
+                        // Element does not contain any field parameters and can be consumed in its
+                        // entirety.
                         None => {
                             let immutable = *element;
                             self.state.pop();
@@ -404,7 +480,45 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                         },
                         Some(n) => {
                             let key = &parameter[..n];
-                            let val = &parameter[n + 1..];
+
+                            // Field parameter values may be quoted, but field parameter keys cannot.
+                            let val = if parameter[n + 1] == b'"' {
+                                let mut quote_next = None;
+
+                                // Search for the next non-escaped quote delimiter
+                                let offset = n + 2;
+                                let quotes = memchr::memchr_iter(b'"', &parameter[offset..]);
+                                for quote in quotes {
+                                    if parameter[n + 1 + quote] != b'\\' {
+                                        quote_next = Some(quote);
+                                        break;
+                                    }
+                                }
+
+                                let closing_quote = match quote_next {
+                                    Some(n) => n,
+                                    None => {
+                                        self.state.clear();
+                                        return Some(Err(error::ErrorValue::MissingClosingQuote));
+                                    },
+                                };
+
+                                if offset + closing_quote != parameter.len() - 1 {
+                                    self.state.clear();
+                                    return Some(Err(error::ErrorValue::LeftoverBytes));
+                                }
+
+                                // Value can once again be empty after unquoting
+                                let val = &parameter[offset..offset + closing_quote];
+                                if val.is_empty() {
+                                    self.state.clear();
+                                    return Some(Err(error::ErrorValue::MissingParameterValue));
+                                }
+
+                                val
+                            } else {
+                                &parameter[n + 1..]
+                            };
 
                             self.state.pop();
                             return Some(Ok(Value::Parameter { key, val }));
@@ -645,7 +759,6 @@ mod test {
 
     #[test]
     fn header_line_list() {
-        // TODO: add support for quotation
         const LINES: &str = "Example-Dates: Sat 04 May 1996, Wed 14 Sep 2005\r\n\r\n";
 
         let mut lines = HeaderLines::new(LINES.as_bytes());
@@ -688,6 +801,20 @@ mod test {
     #[test]
     fn header_line_err_empty_list_delimiter_multiple() {
         const LINES: &str = "Example-List: ,   ,\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Example-List");
+
+        let mut v1 = l1.values();
+        assert_eq!(v1.next(), Some(Err(error::ErrorValue::EmptyList)));
+        assert_eq!(v1.next(), None);
+    }
+
+    #[test]
+    fn header_line_err_empty_list_delimiter_quoted() {
+        const LINES: &str = "Example-List: \"\",  \"\"\t, \"\"   \r\n\r\n";
 
         let mut lines = HeaderLines::new(LINES.as_bytes());
 
@@ -907,6 +1034,221 @@ mod test {
             v1.next(),
             Some(Err(error::ErrorValue::MissingParameterValue))
         );
+    }
+
+    #[test]
+    fn header_line_quoted_element_simple() {
+        const LINES: &str = "Example-Dates: \"Sat, 04 May 1996\"\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Example-Dates");
+
+        let mut v1 = l1.values();
+        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_1, b"Sat, 04 May 1996");
+
+        assert_eq!(v1.next(), None);
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn header_line_quoted_element_empty() {
+        const LINES: &str = "Example-Dates: \"\"\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Example-Dates");
+
+        let mut v1 = l1.values();
+
+        assert_eq!(v1.next(), None);
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn header_line_quoted_list_simple() {
+        const LINES: &str = "Example-Dates: \"Sat, 04 May 1996\", \"Wed, 14 Sep 2005\"\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Example-Dates");
+
+        let mut v1 = l1.values();
+        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_1, b"Sat, 04 May 1996");
+
+        let Some(Ok(Value::Element(value1_2))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_2, b"Wed, 14 Sep 2005");
+
+        assert_eq!(v1.next(), None);
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn header_line_quoted_list_empty_element() {
+        const LINES: &str = "Example-Dates: \"Sat, 04 May 1996\", \"\"\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Example-Dates");
+
+        let mut v1 = l1.values();
+        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_1, b"Sat, 04 May 1996");
+
+        assert_eq!(v1.next(), None);
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn header_line_quoted_parameter() {
+        const LINES: &str =
+            "Content-Type: multipart/form-data; boundary=\"7MA4YWxkTrZu0gW\"\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Content-Type");
+
+        let mut v1 = l1.values();
+        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_1, b"multipart/form-data");
+
+        let Some(Ok(Value::Parameter {
+            key: key1_2,
+            val: val1_2,
+        })) = v1.next()
+        else {
+            panic!();
+        };
+
+        assert_utf8_eq!(key1_2, b"boundary");
+        assert_utf8_eq!(val1_2, b"7MA4YWxkTrZu0gW");
+
+        assert_eq!(v1.next(), None);
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn header_line_quoted_err_missing_quote_delimiter_element() {
+        const LINES: &str = "Example-Dates: \"Sat, 04 May 1996\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Example-Dates");
+
+        let mut v1 = l1.values();
+        assert_eq!(v1.next(), Some(Err(error::ErrorValue::MissingClosingQuote)));
+
+        assert_eq!(v1.next(), None);
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn header_line_quoted_err_missing_quote_delimiter_parameter() {
+        const LINES: &str = "Content-Type: multipart/form-data; boundary=\"7MA4YWxkTrZu0gW\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Content-Type");
+
+        let mut v1 = l1.values();
+        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_1, b"multipart/form-data");
+
+        assert_eq!(v1.next(), Some(Err(error::ErrorValue::MissingClosingQuote)));
+
+        assert_eq!(v1.next(), None);
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn header_line_quoted_err_leftover_bytes_element() {
+        const LINES: &str = "Example-Dates: \"Sat, 04 May\" 1996\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Example-Dates");
+
+        let mut v1 = l1.values();
+        assert_eq!(v1.next(), Some(Err(error::ErrorValue::LeftoverBytes)));
+
+        assert_eq!(v1.next(), None);
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn header_line_quoted_err_leftover_bytes_parameter() {
+        const LINES: &str =
+            "Content-Type: multipart/form-data; boundary=\"7MA4YWxkTr\"Zu0gW\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Content-Type");
+
+        let mut v1 = l1.values();
+        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_1, b"multipart/form-data");
+
+        assert_eq!(v1.next(), Some(Err(error::ErrorValue::LeftoverBytes)));
+
+        assert_eq!(v1.next(), None);
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn header_line_quoted_err_missing_parameter_value() {
+        const LINES: &str = "Content-Type: multipart/form-data; boundary=\"\"\r\n\r\n";
+
+        let mut lines = HeaderLines::new(LINES.as_bytes());
+
+        let mut l1 = lines.next().unwrap().unwrap();
+        assert_utf8_eq!(l1.name(), b"Content-Type");
+
+        let mut v1 = l1.values();
+        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
+            panic!();
+        };
+
+        assert_utf8_eq!(value1_1, b"multipart/form-data");
+
+        assert_eq!(
+            v1.next(),
+            Some(Err(error::ErrorValue::MissingParameterValue))
+        );
+
+        assert_eq!(v1.next(), None);
+        assert_eq!(lines.next(), None);
     }
 
     #[test]
