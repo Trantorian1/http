@@ -158,9 +158,58 @@ pub enum ErrorValue {
     /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
     EmptyList,
 
-    /// Header field value is missing a closing quote
+    /// Header field value is missing a closing quote.
+    ///
+    /// # Specs
+    ///
+    /// Header field quotation semantics are defined in [section 5.6.4] of [RFC9110], HTTP Semantics.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADERS: &str = "Content-Type: \"multipart/form-data\r\n\r\n";
+    ///
+    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut header = headers.next().unwrap()?;
+    /// let mut values = header.values();
+    ///
+    /// assert_eq!(values.next(), Some(Err(ErrorValue::MissingClosingQuote)));
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [section 5.6.4]: https://www.rfc-editor.org/rfc/rfc9110.html#name-quoted-strings
+    /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
     MissingClosingQuote,
 
+    /// Header field value has leftover bytes after its closing quote delimiter.
+    ///
+    /// # Specs
+    ///
+    /// Header field quotation semantics are defined in [section 5.6.4] of [RFC9110], HTTP Semantics.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), http_headers::Error> {
+    /// use http_headers::prelude::*;
+    ///
+    /// const HEADERS: &str = "Content-Type: \"multipart\"/form-data\r\n\r\n";
+    ///
+    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut header = headers.next().unwrap()?;
+    /// let mut values = header.values();
+    ///
+    /// assert_eq!(values.next(), Some(Err(ErrorValue::LeftoverBytes)));
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [section 5.6.4]: https://www.rfc-editor.org/rfc/rfc9110.html#name-quoted-strings
+    /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
     LeftoverBytes,
 
     /// A header field value parameter is missing its '=' delimiter.
