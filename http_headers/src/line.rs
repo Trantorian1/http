@@ -322,6 +322,25 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                     } else {
                         let element = ows::skip_ows_all(&line[..]);
 
+                        // The element state itself does not perform any quote checks due to how
+                        // specific to each parsing state those are. Here for example we don't have
+                        // to worry about list separators, which is not the case in the list state.
+                        if !element.is_empty() && element[0] == b'"' {
+                            let closing_quote = match quote::closing_quote(element, 1) {
+                                Some(n) => n,
+                                None => {
+                                    self.state.clear();
+                                    return Some(Err(error::ErrorValue::MissingClosingQuote));
+                                },
+                            };
+
+                            let leftover = &element[closing_quote + 1..];
+                            if !ows::skip_ows_leading(leftover).is_empty() {
+                                self.state.clear();
+                                return Some(Err(error::ErrorValue::LeftoverBytes));
+                            }
+                        }
+
                         self.state.pop();
                         self.state.push(HeaderSegment::Element(element));
                     }
@@ -343,19 +362,7 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                     // those delimiters are considered as escaped and don't contribute to field
                     // value splitting.
                     let element = if list[0] == b'"' {
-                        let mut quote_next = None;
-
-                        // Search for the next non-escaped quote delimiter
-                        let offset = 1;
-                        let quotes = memchr::memchr_iter(b'"', &list[offset..]);
-                        for quote in quotes {
-                            if list[offset - 1 + quote] != b'\\' {
-                                quote_next = Some(quote);
-                                break;
-                            }
-                        }
-
-                        let closing_quote = match quote_next {
+                        let closing_quote = match quote::closing_quote(list, 1) {
                             Some(n) => n,
                             None => {
                                 self.state.clear();
@@ -364,7 +371,7 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                         };
 
                         // Look for the next list field delimiter AFTER the quoted segment
-                        let unquoted = offset + closing_quote + 1;
+                        let unquoted = closing_quote + 1;
                         let (delimiter_next, skip) = match memchr::memchr(b',', &list[unquoted..]) {
                             Some(n) => (unquoted + n, unquoted + n + 1),
                             None => (list.len(), list.len()),
@@ -378,7 +385,7 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                             return Some(Err(error::ErrorValue::LeftoverBytes));
                         }
 
-                        let element = &list[..=offset + closing_quote];
+                        let element = &list[..=closing_quote];
                         *list = &list[skip..];
 
                         element
@@ -483,19 +490,7 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
 
                             // Field parameter values may be quoted, but field parameter keys cannot.
                             let val = if parameter[n + 1] == b'"' {
-                                let mut quote_next = None;
-
-                                // Search for the next non-escaped quote delimiter
-                                let offset = n + 2;
-                                let quotes = memchr::memchr_iter(b'"', &parameter[offset..]);
-                                for quote in quotes {
-                                    if parameter[n + 1 + quote] != b'\\' {
-                                        quote_next = Some(quote);
-                                        break;
-                                    }
-                                }
-
-                                let closing_quote = match quote_next {
+                                let closing_quote = match quote::closing_quote(parameter, n + 2) {
                                     Some(n) => n,
                                     None => {
                                         self.state.clear();
@@ -503,13 +498,13 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                                     },
                                 };
 
-                                if offset + closing_quote != parameter.len() - 1 {
+                                if closing_quote != parameter.len() - 1 {
                                     self.state.clear();
                                     return Some(Err(error::ErrorValue::LeftoverBytes));
                                 }
 
                                 // Value can once again be empty after unquoting
-                                let val = &parameter[offset..offset + closing_quote];
+                                let val = &parameter[n + 2..closing_quote];
                                 if val.is_empty() {
                                     self.state.clear();
                                     return Some(Err(error::ErrorValue::MissingParameterValue));
@@ -654,6 +649,19 @@ mod ows {
     }
 }
 
+mod quote {
+    pub(super) fn closing_quote(bytes: &[u8], offset: usize) -> Option<usize> {
+        let quotes = memchr::memchr_iter(b'"', &bytes[offset..]);
+        for quote in quotes {
+            if bytes[offset - 1 + quote] != b'\\' {
+                return Some(quote + offset);
+            }
+        }
+
+        None
+    }
+}
+
 mod validate {
     /// HTTP header field names can be made up of any visible ASCII character (VCHAR), except for
     /// delimiters (DQUOTE and "(),/:;<=>?@[\]{}").
@@ -674,7 +682,7 @@ mod validate {
     /// See [RFC9110] for more information.
     ///
     /// [RFC9110]: https://www.rfc-editor.org/info/rfc9110/#section-5.6.2
-    pub(crate) fn is_legal_header_name(bytes: &[u8]) -> Option<u8> {
+    pub(super) fn is_legal_header_name(bytes: &[u8]) -> Option<u8> {
         for c in bytes {
             if !matches!(
                 c,
@@ -1150,13 +1158,13 @@ mod test {
     }
 
     #[test]
-    fn header_line_quoted_err_missing_quote_delimiter_element() {
-        const LINES: &str = "Example-Dates: \"Sat, 04 May 1996\r\n\r\n";
+    fn header_line_quoted_err_missing_closing_quote_element() {
+        const LINES: &str = "Content-Type: \"multipart/form-data\r\n\r\n";
 
         let mut lines = HeaderLines::new(LINES.as_bytes());
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Example-Dates");
+        assert_utf8_eq!(l1.name(), b"Content-Type");
 
         let mut v1 = l1.values();
         assert_eq!(v1.next(), Some(Err(error::ErrorValue::MissingClosingQuote)));
@@ -1166,7 +1174,7 @@ mod test {
     }
 
     #[test]
-    fn header_line_quoted_err_missing_quote_delimiter_parameter() {
+    fn header_line_quoted_err_missing_closing_quote_parameter() {
         const LINES: &str = "Content-Type: multipart/form-data; boundary=\"7MA4YWxkTrZu0gW\r\n\r\n";
 
         let mut lines = HeaderLines::new(LINES.as_bytes());
@@ -1189,12 +1197,12 @@ mod test {
 
     #[test]
     fn header_line_quoted_err_leftover_bytes_element() {
-        const LINES: &str = "Example-Dates: \"Sat, 04 May\" 1996\r\n\r\n";
+        const LINES: &str = "Content-Type: \"multipart\"/form-data\r\n\r\n";
 
         let mut lines = HeaderLines::new(LINES.as_bytes());
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Example-Dates");
+        assert_utf8_eq!(l1.name(), b"Content-Type");
 
         let mut v1 = l1.values();
         assert_eq!(v1.next(), Some(Err(error::ErrorValue::LeftoverBytes)));
