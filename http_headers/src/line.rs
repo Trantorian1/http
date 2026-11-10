@@ -326,12 +326,9 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                         // specific to each parsing state those are. Here for example we don't have
                         // to worry about list separators, which is not the case in the list state.
                         if !element.is_empty() && element[0] == b'"' {
-                            let closing_quote = match quote::closing_quote(element, 1) {
-                                Some(n) => n,
-                                None => {
-                                    self.state.clear();
-                                    return Some(Err(error::ErrorValue::MissingClosingQuote));
-                                },
+                            let Some(closing_quote) = quote::closing_quote(element, 1) else {
+                                self.state.clear();
+                                return Some(Err(error::ErrorValue::MissingClosingQuote));
                             };
 
                             let leftover = &element[closing_quote + 1..];
@@ -362,12 +359,9 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                     // those delimiters are considered as escaped and don't contribute to field
                     // value splitting.
                     let element = if list[0] == b'"' {
-                        let closing_quote = match quote::closing_quote(list, 1) {
-                            Some(n) => n,
-                            None => {
-                                self.state.clear();
-                                return Some(Err(error::ErrorValue::MissingClosingQuote));
-                            },
+                        let Some(closing_quote) = quote::closing_quote(list, 1) else {
+                            self.state.clear();
+                            return Some(Err(error::ErrorValue::MissingClosingQuote));
                         };
 
                         // Look for the next list field delimiter AFTER the quoted segment
@@ -471,8 +465,8 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                     }
                 },
 
-                HeaderSegment::Parameter(parameter) => {
-                    match memchr::memchr(b'=', parameter) {
+                HeaderSegment::Parameter(param) => {
+                    match memchr::memchr(b'=', param) {
                         None => {
                             self.state.clear();
                             return Some(Err(error::ErrorValue::MissingParameterDelimiter));
@@ -481,30 +475,27 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                             self.state.clear();
                             return Some(Err(error::ErrorValue::MissingParameterKey));
                         },
-                        Some(n) if n + 1 >= parameter.len() => {
+                        Some(n) if n + 1 >= param.len() => {
                             self.state.clear();
                             return Some(Err(error::ErrorValue::MissingParameterValue));
                         },
                         Some(n) => {
-                            let key = &parameter[..n];
+                            let key = &param[..n];
 
                             // Field parameter values may be quoted, but field parameter keys cannot.
-                            let val = if parameter[n + 1] == b'"' {
-                                let closing_quote = match quote::closing_quote(parameter, n + 2) {
-                                    Some(n) => n,
-                                    None => {
-                                        self.state.clear();
-                                        return Some(Err(error::ErrorValue::MissingClosingQuote));
-                                    },
+                            let val = if param[n + 1] == b'"' {
+                                let Some(closing_quote) = quote::closing_quote(param, n + 2) else {
+                                    self.state.clear();
+                                    return Some(Err(error::ErrorValue::MissingClosingQuote));
                                 };
 
-                                if closing_quote != parameter.len() - 1 {
+                                if closing_quote != param.len() - 1 {
                                     self.state.clear();
                                     return Some(Err(error::ErrorValue::LeftoverBytes));
                                 }
 
                                 // Value can once again be empty after unquoting
-                                let val = &parameter[n + 2..closing_quote];
+                                let val = &param[n + 2..closing_quote];
                                 if val.is_empty() {
                                     self.state.clear();
                                     return Some(Err(error::ErrorValue::MissingParameterValue));
@@ -512,7 +503,7 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
 
                                 val
                             } else {
-                                &parameter[n + 1..]
+                                &param[n + 1..]
                             };
 
                             self.state.pop();
