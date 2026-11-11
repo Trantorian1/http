@@ -113,7 +113,7 @@ impl std::fmt::Display for Error {
                 write!(f, "Missing CRLF delimiter at the end of a header line")
             },
             Error::InvalidFieldName(c) => {
-                write!(f, "Unsupported byte '{c}' in header field name")
+                write!(f, "Invalid byte '{c}' in header field name")
             },
             Error::Value(err) => write!(f, "{err}"),
         }
@@ -295,6 +295,12 @@ pub enum ErrorValue {
     /// [section 5.6.6]: https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.6
     /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
     MissingParameterValue,
+
+    InvalidFieldElement(u8),
+
+    InvalidFieldParameter(u8),
+
+    InvalidQuotedPair(u8),
 }
 
 impl std::fmt::Display for ErrorValue {
@@ -317,6 +323,15 @@ impl std::fmt::Display for ErrorValue {
             },
             Self::MissingParameterValue => {
                 write!(f, "Header field value parameter is missing a value")
+            },
+            Self::InvalidFieldElement(c) => {
+                write!(f, "Invalid byte '{c}' in header field element")
+            },
+            Self::InvalidFieldParameter(c) => {
+                write!(f, "Invalid byte '{c}' in header field parameter")
+            },
+            Self::InvalidQuotedPair(c) => {
+                write!(f, "Invalid escape '{c}' in header field value quote")
             },
         }
     }

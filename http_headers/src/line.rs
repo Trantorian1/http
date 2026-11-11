@@ -167,12 +167,6 @@ impl<'a> HeaderItem<'a> {
     /// [`MissingFieldName`]: error::Error::MissingFieldName
     /// [`InvalidFieldName`]: error::Error::InvalidFieldName
     pub fn new(line: &'a [u8]) -> Result<Self, error::Error> {
-        assert_eq!(
-            memchr::memmem::rfind(line, crate::constants::CRLF),
-            None,
-            "HeaderItem assumes CRLF sanitization has already taken place"
-        );
-
         if line.is_empty() {
             return Err(error::Error::EmptyLine);
         }
@@ -418,51 +412,65 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                         return None;
                     }
 
-                    // Quoted non-empty elements are returned as-is
-                    // FIXME: check for illegal characters
-                    if element[0] == b'"' && element[element.len() - 1] == b'"' {
-                        let immutable = *element;
+                    let immutable = if element[0] == b'"' && element[element.len() - 1] == b'"' {
+                        // Quoted non-empty elements are returned as-is
+                        let immutable = &element[1..element.len() - 1];
+
+                        if let Some(c) = validate::is_legal_header_quote(immutable) {
+                            self.state.clear();
+                            return Some(Err(error::ErrorValue::InvalidQuotedPair(c)));
+                        }
+
                         self.state.pop();
-                        return Some(Ok(Value::Element(&immutable[1..immutable.len() - 1])));
-                    }
+                        immutable
+                    } else {
+                        // Unquoted elements may still contain field parameters
+                        let mut parameters = memchr::memchr_iter(b';', element);
+                        match parameters.next() {
+                            // Element IS a field parameter
+                            Some(0) => {
+                                let delimiter_next = match parameters.next() {
+                                    Some(n) => n,
+                                    None => element.len(),
+                                };
 
-                    // Unquoted elements may still contain field parameters
-                    let mut parameters = memchr::memchr_iter(b';', element);
-                    match parameters.next() {
-                        // Element IS a field parameter
-                        Some(0) => {
-                            let delimiter_next = match parameters.next() {
-                                Some(n) => n,
-                                None => element.len(),
-                            };
+                                let parameter = ows::skip_ows_all(&element[1..delimiter_next]);
 
-                            let parameter = ows::skip_ows_all(&element[1..delimiter_next]);
+                                *element = &element[delimiter_next..];
+                                if element.is_empty() {
+                                    self.state.pop();
+                                }
 
-                            *element = &element[delimiter_next..];
-                            if element.is_empty() {
+                                if !parameter.is_empty() {
+                                    self.state.push(HeaderSegment::Parameter(parameter));
+                                }
+
+                                continue;
+                            },
+
+                            // There are some bytes left to consume before the next field parameter
+                            Some(n) => {
+                                let immutable = ows::skip_ows_trailing(&element[..n]);
+                                *element = &element[n..];
+                                immutable
+                            },
+
+                            // Element does not contain any field parameters and can be consumed in
+                            // its entirety.
+                            None => {
+                                let immutable = *element;
                                 self.state.pop();
-                            }
+                                immutable
+                            },
+                        }
+                    };
 
-                            if !parameter.is_empty() {
-                                self.state.push(HeaderSegment::Parameter(parameter));
-                            }
-                        },
-
-                        // There are some bytes left to consume before the next field parameter
-                        Some(n) => {
-                            let immutable = ows::skip_ows_trailing(&element[..n]);
-                            *element = &element[n..];
-                            return Some(Ok(Value::Element(immutable)));
-                        },
-
-                        // Element does not contain any field parameters and can be consumed in its
-                        // entirety.
-                        None => {
-                            let immutable = *element;
-                            self.state.pop();
-                            return Some(Ok(Value::Element(immutable)));
-                        },
+                    if let Some(c) = validate::is_legal_header_element(immutable) {
+                        self.state.clear();
+                        return Some(Err(error::ErrorValue::InvalidFieldElement(c)));
                     }
+
+                    return Some(Ok(Value::Element(immutable)));
                 },
 
                 HeaderSegment::Parameter(param) => {
@@ -481,6 +489,11 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                         },
                         Some(n) => {
                             let key = &param[..n];
+
+                            if let Some(c) = validate::is_legal_header_parameter(key) {
+                                self.state.clear();
+                                return Some(Err(error::ErrorValue::InvalidFieldParameter(c)));
+                            }
 
                             // Field parameter values may be quoted, but field parameter keys cannot.
                             let val = if param[n + 1] == b'"' {
@@ -501,9 +514,21 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                                     return Some(Err(error::ErrorValue::MissingParameterValue));
                                 }
 
+                                if let Some(err) = validate::is_legal_header_parameter_quote(val) {
+                                    self.state.clear();
+                                    return Some(Err(err));
+                                }
+
                                 val
                             } else {
-                                &param[n + 1..]
+                                let val = &param[n + 1..];
+
+                                if let Some(c) = validate::is_legal_header_parameter(val) {
+                                    self.state.clear();
+                                    return Some(Err(error::ErrorValue::InvalidFieldParameter(c)));
+                                }
+
+                                val
                             };
 
                             self.state.pop();
@@ -654,6 +679,55 @@ mod quote {
 }
 
 mod validate {
+    use super::error;
+
+    macro_rules! vchar {
+        () => {
+            0x21..=0x7E
+        };
+    }
+
+    macro_rules! obs_text {
+        () => {
+            0x80..=0xFF
+        };
+    }
+
+    macro_rules! field_vchar {
+        () => {
+            vchar!() | obs_text!()
+        };
+    }
+
+    macro_rules! quoted_pair {
+        () => {
+            b'\t' | b' ' | vchar!() | obs_text!()
+        };
+    }
+
+    macro_rules! tchar {
+        () => {
+            b'!'
+            | b'#'
+            | b'$'
+            | b'%'
+            | b'&'
+            | b'\''
+            | b'*'
+            | b'+'
+            | b'-'
+            | b'.'
+            | b'^'
+            | b'_'
+            | b'`'
+            | b'|'
+            | b'~'
+            | b'0'..=b'9'
+            | b'a'..=b'z'
+            | b'A'..=b'Z'
+        };
+    }
+
     /// HTTP header field names can be made up of any visible ASCII character (VCHAR), except for
     /// delimiters (DQUOTE and "(),/:;<=>?@[\]{}").
     ///
@@ -675,28 +749,80 @@ mod validate {
     /// [RFC9110]: https://www.rfc-editor.org/info/rfc9110/#section-5.6.2
     pub(super) fn is_legal_header_name(bytes: &[u8]) -> Option<u8> {
         for c in bytes {
-            if !matches!(
-                c,
-                b'!'
-                | b'#'
-                | b'$'
-                | b'%'
-                | b'&'
-                | b'\''
-                | b'*'
-                | b'+'
-                | b'-'
-                | b'.'
-                | b'^'
-                | b'_'
-                | b'`'
-                | b'|'
-                | b'~'
-                | b'0'..=b'9'
-                | b'a'..=b'z'
-                | b'A'..=b'Z',
-            ) {
+            if !matches!(c, tchar!(),) {
                 return Some(*c);
+            }
+        }
+
+        None
+    }
+
+    pub(super) fn is_legal_header_element(bytes: &[u8]) -> Option<u8> {
+        assert_ne!(bytes, &[]);
+
+        if !matches!(bytes[0], field_vchar!()) {
+            return Some(bytes[0]);
+        }
+
+        if bytes.len() > 1 {
+            for c in &bytes[1..bytes.len() - 1] {
+                if !matches!(c, field_vchar!() | b' ' | b'\t') {
+                    return Some(*c);
+                }
+            }
+        }
+
+        if !matches!(bytes[bytes.len() - 1], field_vchar!()) {
+            return Some(bytes[bytes.len() - 1]);
+        }
+
+        None
+    }
+
+    pub(super) fn is_legal_header_quote(bytes: &[u8]) -> Option<u8> {
+        let mut iter = bytes.iter();
+        while let Some(c) = iter.next() {
+            if c == &b'\\' {
+                match iter.next() {
+                    Some(quoted_pair!()) => (),
+                    Some(c) => return Some(*c),
+                    None => unreachable!(
+                        "empty quoted pairs are not possible as the parser does not count \\\" as \
+                         a quote delimiter"
+                    ),
+                }
+            }
+        }
+
+        None
+    }
+
+    pub(super) fn is_legal_header_parameter(bytes: &[u8]) -> Option<u8> {
+        for c in bytes {
+            if !matches!(c, tchar!()) {
+                return Some(*c);
+            }
+        }
+
+        None
+    }
+
+    pub(super) fn is_legal_header_parameter_quote(bytes: &[u8]) -> Option<error::ErrorValue> {
+        let mut iter = bytes.iter();
+        while let Some(c) = iter.next() {
+            if c == &b'\\' {
+                match iter.next() {
+                    Some(quoted_pair!()) => (),
+                    Some(c) => return Some(error::ErrorValue::InvalidQuotedPair(*c)),
+                    None => unreachable!(
+                        "empty quoted pairs are not possible as the parser does not count \\\" as \
+                         a quote delimiter"
+                    ),
+                }
+            }
+
+            if !matches!(c, tchar!()) {
+                return Some(error::ErrorValue::InvalidFieldParameter(*c));
             }
         }
 
@@ -827,7 +953,6 @@ mod test {
 
     #[test]
     fn header_line_parameters_simple() {
-        // TODO: add support for case-insensitivity
         const LINES: &str =
             "Content-Type: multipart/form-data; boundary=7MA4YWxkTrZu0gW; charset=utf-8\r\n\r\n";
 
@@ -1337,13 +1462,115 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "HeaderItem assumes CRLF sanitization has already taken place")]
-    fn header_item_panic_trailing_crlf() {
-        const LINE: &str = "Content=Type: text/plain\r\n";
+    fn header_value_err_invalid_field_element_any() {
+        const LINE: &str = "Content-Type: text\0plain";
 
-        let expected = Err(error::Error::InvalidFieldName(b'='));
+        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut values = header.values();
 
-        assert_eq!(HeaderItem::new(LINE.as_bytes()), expected);
+        assert_eq!(
+            values.next(),
+            Some(Err(error::ErrorValue::InvalidFieldElement(b'\0')))
+        );
+        assert_eq!(values.next(), None);
+    }
+
+    #[test]
+    fn header_value_err_invalid_field_element_crlf() {
+        const LINE: &str = "Content-Type: text/plain\r\n";
+
+        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut values = header.values();
+
+        assert_eq!(
+            values.next(),
+            Some(Err(error::ErrorValue::InvalidFieldElement(b'\r')))
+        );
+        assert_eq!(values.next(), None);
+    }
+
+    #[test]
+    fn header_value_err_invalid_field_element_start() {
+        const LINE: &str = "Content-Type: \" text/plain\"";
+
+        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut values = header.values();
+
+        assert_eq!(
+            values.next(),
+            Some(Err(error::ErrorValue::InvalidFieldElement(b' ')))
+        );
+        assert_eq!(values.next(), None);
+    }
+
+    #[test]
+    fn header_value_err_invalid_field_parameter_key() {
+        const LINE: &str = "Content-Type: ; bo\\undary=7MA4YWxkTrZu0gW";
+
+        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut values = header.values();
+
+        assert_eq!(
+            values.next(),
+            Some(Err(error::ErrorValue::InvalidFieldParameter(b'\\')))
+        );
+        assert_eq!(values.next(), None);
+    }
+
+    #[test]
+    fn header_value_err_invalid_field_parameter_val_unquoted() {
+        const LINE: &str = "Content-Type: ; boundary=7MA4Y\\WxkTrZu0gW";
+
+        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut values = header.values();
+
+        assert_eq!(
+            values.next(),
+            Some(Err(error::ErrorValue::InvalidFieldParameter(b'\\')))
+        );
+        assert_eq!(values.next(), None);
+    }
+
+    #[test]
+    fn header_value_field_element_quote_pair() {
+        const LINE: &str = "Content-Type: \"\\\"text/plain\\\"\"";
+
+        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut values = header.values();
+
+        assert_eq!(
+            values.next(),
+            Some(Ok(Value::Element(b"\\\"text/plain\\\"")))
+        );
+        assert_eq!(values.next(), None);
+    }
+
+    #[test]
+    fn header_value_err_invalid_field_quote_element() {
+        const LINE: &str = "Content-Type: \"text\\\0/plain\"";
+
+        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut values = header.values();
+
+        assert_eq!(
+            values.next(),
+            Some(Err(error::ErrorValue::InvalidQuotedPair(b'\0')))
+        );
+        assert_eq!(values.next(), None);
+    }
+
+    #[test]
+    fn header_value_err_invalid_field_quote_parameter() {
+        const LINE: &str = "Content-Type: ; boundary=\"7MA4Y\\\0WxkTrZu0gW\"";
+
+        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut values = header.values();
+
+        assert_eq!(
+            values.next(),
+            Some(Err(error::ErrorValue::InvalidQuotedPair(b'\0')))
+        );
+        assert_eq!(values.next(), None);
     }
 
     #[test]
