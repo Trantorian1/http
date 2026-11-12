@@ -10,7 +10,6 @@
 //! your specific use-case.
 //!
 //! [quoted-pair]: https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.4
-
 use macro_util::*;
 
 use super::error;
@@ -418,7 +417,7 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
 
                         if let Some(c) = validate::is_legal_header_quote(immutable) {
                             self.state.clear();
-                            return Some(Err(error::ErrorValue::InvalidQuotedPair(c)));
+                            return Some(Err(error::ErrorValue::InvalidEscapeSequence(c)));
                         }
 
                         self.state.pop();
@@ -467,7 +466,7 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
 
                     if let Some(c) = validate::is_legal_header_element(immutable) {
                         self.state.clear();
-                        return Some(Err(error::ErrorValue::InvalidFieldElement(c)));
+                        return Some(Err(error::ErrorValue::InvalidFieldValue(c)));
                     }
 
                     return Some(Ok(Value::Element(immutable)));
@@ -678,6 +677,7 @@ mod quote {
     }
 }
 
+/// Header field validation logic.
 mod validate {
     use super::error;
 
@@ -757,6 +757,18 @@ mod validate {
         None
     }
 
+    /// HTTP header single field value elements cannot start nor end with any OWS, even when quoted,
+    /// and their inner bodies can be any combination of OWS and VCHAR.
+    ///
+    /// # ABNF
+    ///
+    /// ```text
+    /// field-value    = *field-content
+    /// field-content  = field-vchar
+    ///                  [ 1*( SP / HTAB / field-vchar ) field-vchar ]
+    /// field-vchar    = VCHAR / obs-text
+    /// obs-text       = %x80-FF
+    /// ```
     pub(super) fn is_legal_header_element(bytes: &[u8]) -> Option<u8> {
         assert_ne!(bytes, &[]);
 
@@ -766,6 +778,7 @@ mod validate {
 
         if bytes.len() > 1 {
             for c in &bytes[1..bytes.len() - 1] {
+                #[allow(clippy::unnested_or_patterns)]
                 if !matches!(c, field_vchar!() | b' ' | b'\t') {
                     return Some(*c);
                 }
@@ -779,13 +792,17 @@ mod validate {
         None
     }
 
+    /// Checks for invalid quoted pairs.
+    ///
+    /// Since quotes are then checked against a field value element, we don't check the validity of
+    /// each individual character here since that will be done by [`is_legal_header_element`].
     pub(super) fn is_legal_header_quote(bytes: &[u8]) -> Option<u8> {
         let mut iter = bytes.iter();
         while let Some(c) = iter.next() {
             if c == &b'\\' {
                 match iter.next() {
                     Some(quoted_pair!()) => (),
-                    Some(c) => return Some(*c),
+                    Some(next) => return Some(*next),
                     None => unreachable!(
                         "empty quoted pairs are not possible as the parser does not count \\\" as \
                          a quote delimiter"
@@ -797,7 +814,11 @@ mod validate {
         None
     }
 
+    /// Header field value parameter keys and values can be composed of any combination of `tchar`s
+    /// (that is to say, any visible ASCII character except for delimiters), as long as they are non-empty.
     pub(super) fn is_legal_header_parameter(bytes: &[u8]) -> Option<u8> {
+        assert_ne!(bytes, []);
+
         for c in bytes {
             if !matches!(c, tchar!()) {
                 return Some(*c);
@@ -807,13 +828,16 @@ mod validate {
         None
     }
 
+    /// '\' is not a legal `tchar`, so we have to fuse field parameter checks and quote pair checks
+    /// into a single function so they don't interfere with each other, otherwise this would cause a
+    /// parsing error as `\` is not normally a valid character in a header parameter.
     pub(super) fn is_legal_header_parameter_quote(bytes: &[u8]) -> Option<error::ErrorValue> {
         let mut iter = bytes.iter();
         while let Some(c) = iter.next() {
             if c == &b'\\' {
                 match iter.next() {
                     Some(quoted_pair!()) => (),
-                    Some(c) => return Some(error::ErrorValue::InvalidQuotedPair(*c)),
+                    Some(next) => return Some(error::ErrorValue::InvalidEscapeSequence(*next)),
                     None => unreachable!(
                         "empty quoted pairs are not possible as the parser does not count \\\" as \
                          a quote delimiter"
@@ -1462,7 +1486,7 @@ mod test {
     }
 
     #[test]
-    fn header_value_err_invalid_field_element_any() {
+    fn header_value_err_invalid_field_value_any() {
         const LINE: &str = "Content-Type: text\0plain";
 
         let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
@@ -1470,13 +1494,13 @@ mod test {
 
         assert_eq!(
             values.next(),
-            Some(Err(error::ErrorValue::InvalidFieldElement(b'\0')))
+            Some(Err(error::ErrorValue::InvalidFieldValue(b'\0')))
         );
         assert_eq!(values.next(), None);
     }
 
     #[test]
-    fn header_value_err_invalid_field_element_crlf() {
+    fn header_value_err_invalid_field_value_crlf() {
         const LINE: &str = "Content-Type: text/plain\r\n";
 
         let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
@@ -1484,13 +1508,13 @@ mod test {
 
         assert_eq!(
             values.next(),
-            Some(Err(error::ErrorValue::InvalidFieldElement(b'\r')))
+            Some(Err(error::ErrorValue::InvalidFieldValue(b'\r')))
         );
         assert_eq!(values.next(), None);
     }
 
     #[test]
-    fn header_value_err_invalid_field_element_start() {
+    fn header_value_err_invalid_field_value_start() {
         const LINE: &str = "Content-Type: \" text/plain\"";
 
         let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
@@ -1498,7 +1522,7 @@ mod test {
 
         assert_eq!(
             values.next(),
-            Some(Err(error::ErrorValue::InvalidFieldElement(b' ')))
+            Some(Err(error::ErrorValue::InvalidFieldValue(b' ')))
         );
         assert_eq!(values.next(), None);
     }
@@ -1518,7 +1542,7 @@ mod test {
     }
 
     #[test]
-    fn header_value_err_invalid_field_parameter_val_unquoted() {
+    fn header_value_err_invalid_field_parameter_val() {
         const LINE: &str = "Content-Type: ; boundary=7MA4Y\\WxkTrZu0gW";
 
         let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
@@ -1554,7 +1578,7 @@ mod test {
 
         assert_eq!(
             values.next(),
-            Some(Err(error::ErrorValue::InvalidQuotedPair(b'\0')))
+            Some(Err(error::ErrorValue::InvalidEscapeSequence(b'\0')))
         );
         assert_eq!(values.next(), None);
     }
@@ -1568,7 +1592,7 @@ mod test {
 
         assert_eq!(
             values.next(),
-            Some(Err(error::ErrorValue::InvalidQuotedPair(b'\0')))
+            Some(Err(error::ErrorValue::InvalidEscapeSequence(b'\0')))
         );
         assert_eq!(values.next(), None);
     }
