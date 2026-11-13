@@ -26,14 +26,14 @@ use super::error;
 /// # fn main() -> Result<(), http_headers::Error> {
 /// use http_headers::prelude::*;
 ///
-/// const HEADERS: &str = "Content-Type: text/plain\r\nContent-Length: 3\r\n\r\n";
+/// let mut input = *b"Content-Type: text/plain\r\nContent-Length: 3\r\n\r\n";
 ///
 /// // While parsing is allocation-free your are free to use your own method
 /// // of collecting the results.
 /// let mut headers = std::collections::HashMap::<_, Vec<_>>::new();
 ///
 /// // Parsing is implemented as an iterator over header field lines...
-/// for res in line::HeaderLines::new(HEADERS.as_bytes()) {
+/// for res in line::HeaderLines::new(&mut input) {
 ///     let mut header = res?;
 ///     let values = headers.entry(header.name()).or_default();
 ///
@@ -69,16 +69,16 @@ use super::error;
 /// [section 5]: https://www.rfc-editor.org/rfc/rfc9110.html#name-fields
 /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
 /// [quoted-pair]: https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.4
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct HeaderLines<'a> {
-    input: &'a [u8],
+    input: Option<&'a mut [u8]>,
 }
 
 impl<'a> HeaderLines<'a> {
     /// Initializes a new parser with the input bytes to be processed.
     #[must_use]
-    pub fn new(input: &'a [u8]) -> Self {
-        Self { input }
+    pub fn new(input: &'a mut [u8]) -> Self {
+        Self { input: Some(input) }
     }
 }
 
@@ -86,21 +86,18 @@ impl<'a> Iterator for HeaderLines<'a> {
     type Item = Result<HeaderItem<'a>, error::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.input {
+        match self.input.take()? {
             // End of header section
-            [b'\r', b'\n', ..] => None,
+            [b'\r', b'\n'] => None,
 
-            _ => match memchr::memmem::find(self.input, crate::constants::CRLF) {
+            input => match memchr::memmem::find(input, crate::constants::CRLF) {
                 // Invalid header line end
-                None => {
-                    self.input = b"\r\n";
-                    Some(Err(error::Error::MissingCRLFDelimiter))
-                },
+                None => Some(Err(error::Error::MissingCRLFDelimiter)),
 
                 // Extract and parse header line
                 Some(n) => {
-                    let line = &self.input[..n];
-                    self.input = &self.input[n + crate::constants::CRLF.len()..];
+                    let (line, remaining) = input.split_at_mut(n);
+                    self.input = Some(&mut remaining[crate::constants::CRLF.len()..]);
                     Some(HeaderItem::new(line))
                 },
             },
@@ -121,9 +118,9 @@ impl<'a> Iterator for HeaderLines<'a> {
 /// # fn main() -> Result<(), http_headers::Error> {
 /// use http_headers::prelude::*;
 ///
-/// const HEADER: &str = "Content-Type: text/plain";
+/// let mut input = *b"Content-Type: text/plain";
 ///
-/// let mut header = line::HeaderItem::new(HEADER.as_bytes())?;
+/// let mut header = line::HeaderItem::new(&mut input)?;
 ///
 /// let field_name = header.name();
 /// let field_value = header.values().next().unwrap()?;
@@ -138,7 +135,7 @@ impl<'a> Iterator for HeaderLines<'a> {
 ///
 /// [section 5.2]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-lines-and-combined-fi
 /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct HeaderItem<'a> {
     field_name: &'a [u8],
     field_value: HeaderValues<'a>,
@@ -165,7 +162,7 @@ impl<'a> HeaderItem<'a> {
     /// [`MissingFieldDelimiter`]: error::Error::MissingFieldDelimiter
     /// [`MissingFieldName`]: error::Error::MissingFieldName
     /// [`InvalidFieldName`]: error::Error::InvalidFieldName
-    pub fn new(line: &'a [u8]) -> Result<Self, error::Error> {
+    pub fn new(line: &'a mut [u8]) -> Result<Self, error::Error> {
         if line.is_empty() {
             return Err(error::Error::EmptyLine);
         }
@@ -176,13 +173,13 @@ impl<'a> HeaderItem<'a> {
             Some(n) => n,
         };
 
-        let field_name = &line[..field_name_delimiter];
+        let (field_name, remaining) = line.split_at_mut(field_name_delimiter);
 
         if let Some(c) = validate::is_legal_header_name(field_name) {
             return Err(error::Error::InvalidFieldName(c));
         }
 
-        let field_value = HeaderValues::new(&line[field_name_delimiter + 1..]);
+        let field_value = HeaderValues::new(&mut remaining[1..]);
 
         Ok(Self {
             field_name,
@@ -219,21 +216,21 @@ impl<'a> HeaderItem<'a> {
 ///
 /// [section 5.5]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values
 /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct HeaderValues<'a> {
     state: ParsingStack<'a, 4>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum HeaderSegment<'a> {
-    Line(&'a [u8]),
-    List(&'a [u8], usize),
-    Element(&'a [u8]),
-    Parameter(&'a [u8]),
+    Line(&'a mut [u8]),
+    List(&'a mut [u8], usize),
+    Element(&'a mut [u8]),
+    Parameter(&'a mut [u8]),
 }
 
 /// A single HTTP header field value.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Value<'a> {
     /// Single element field value, can be part of a list.
     ///
@@ -243,12 +240,12 @@ pub enum Value<'a> {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADER: &str = "Content-Type: text/plain";
+    /// let mut input = *b"Content-Type: text/plain";
     ///
-    /// let mut header = line::HeaderItem::new(HEADER.as_bytes())?;
-    /// let field_value = header.values().next().unwrap()?;
+    /// let mut header = line::HeaderItem::new(&mut input)?;
+    /// let mut values = header.values();
     ///
-    /// assert_eq!(field_value, line::Value::Element(b"text/plain"));
+    /// assert_eq!(values.next(), Some(Ok(line::Value::Element(b"text/plain"))));
     /// # Ok(())
     /// # }
     /// ```
@@ -262,9 +259,9 @@ pub enum Value<'a> {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADER: &str = "Content-Type: multipart/form-data; boundary=7MA4YWxkTrZu0gW";
+    /// let mut input = *b"Content-Type: multipart/form-data; boundary=7MA4YWxkTrZu0gW";
     ///
-    /// let mut header = line::HeaderItem::new(HEADER.as_bytes())?;
+    /// let mut header = line::HeaderItem::new(&mut input)?;
     /// let mut values = header.values();
     ///
     /// // Header parameters are still typically associated to a field value element
@@ -293,7 +290,7 @@ pub enum Value<'a> {
 }
 
 impl<'a> HeaderValues<'a> {
-    pub(crate) fn new(field_value: &'a [u8]) -> Self {
+    pub(crate) fn new(field_value: &'a mut [u8]) -> Self {
         let mut state = ParsingStack::new();
         state.push(HeaderSegment::Line(field_value));
         Self { state }
@@ -305,15 +302,13 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match self.state.peek()? {
+            match self.state.pop()? {
                 HeaderSegment::Line(line) => {
                     if memchr::memchr(b',', line).is_some() {
-                        let list = &line[..];
-
-                        self.state.pop();
+                        let list = ows::skip_ows_leading(line);
                         self.state.push(HeaderSegment::List(list, 0));
                     } else {
-                        let element = ows::skip_ows_all(&line[..]);
+                        let element = ows::skip_ows_all(line);
 
                         // The element state itself does not perform any quote checks due to how
                         // specific to each parsing state those are. Here for example we don't have
@@ -324,30 +319,18 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                                 return Some(Err(error::ErrorValue::MissingClosingQuote));
                             };
 
-                            let leftover = &element[closing_quote + 1..];
-                            if !ows::skip_ows_leading(leftover).is_empty() {
+                            let leftover = ows::skip_ows_leading(&mut element[closing_quote + 1..]);
+                            if !leftover.is_empty() {
                                 self.state.clear();
                                 return Some(Err(error::ErrorValue::LeftoverBytes));
                             }
                         }
 
-                        self.state.pop();
                         self.state.push(HeaderSegment::Element(element));
                     }
                 },
 
-                HeaderSegment::List(list, size) => {
-                    *list = ows::skip_ows_leading(list);
-
-                    if list.is_empty() {
-                        if *size == 0 {
-                            self.state.clear();
-                            return Some(Err(error::ErrorValue::EmptyList));
-                        }
-                        self.state.pop();
-                        return None;
-                    }
-
+                HeaderSegment::List(mut list, mut size) => {
                     // Field elements can be quoted and may contain ',' delimiters, in which case
                     // those delimiters are considered as escaped and don't contribute to field
                     // value splitting.
@@ -359,55 +342,71 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
 
                         // Look for the next list field delimiter AFTER the quoted segment
                         let unquoted = closing_quote + 1;
+
+                        // CAUTION: `delimiter_next` is indexed relative to `list`, however `skip`
+                        // is indexed relative to `&list[unquoted..]`
                         let (delimiter_next, skip) = match memchr::memchr(b',', &list[unquoted..]) {
-                            Some(n) => (unquoted + n, unquoted + n + 1),
-                            None => (list.len(), list.len()),
+                            Some(n) => (unquoted + n, n + 1),
+                            None => (list.len(), 0),
                         };
 
                         // We can't guarantee zero-copy and support mixed quoted and unquoted field
                         // values. Besides which that is a really stupid idea anyway.
-                        let leftover = &list[unquoted..delimiter_next];
-                        if !ows::skip_ows_leading(leftover).is_empty() {
+                        let leftover = ows::skip_ows_leading(&mut list[unquoted..delimiter_next]);
+                        if !leftover.is_empty() {
                             self.state.clear();
                             return Some(Err(error::ErrorValue::LeftoverBytes));
                         }
 
-                        let element = &list[..=closing_quote];
-                        *list = &list[skip..];
+                        let (element, remaining) = list.split_at_mut(unquoted);
+                        list = &mut remaining[skip..];
 
                         element
                     } else {
+                        // CAUTION: `delimiter_next` is indexed relative to `list`, however `skip`
+                        // is indexed relative to `&list[delimiter_next..]`
                         let (delimiter_next, skip) = match memchr::memchr(b',', list) {
-                            Some(n) => (n, n + 1),
-                            None => (list.len(), list.len()),
+                            Some(n) => (n, 1),
+                            None => (list.len(), 0),
                         };
 
-                        let element = &list[..delimiter_next];
-                        *list = &list[skip..];
+                        let (element, remaining) = list.split_at_mut(delimiter_next);
+                        list = &mut remaining[skip..];
 
                         element
                     };
 
-                    // Element is non-empty
-                    if !element.is_empty() {
-                        // Element is not quoted empty
-                        if element[0] != b'"' || element.len() > 2 {
-                            *size += 1;
-                            self.state.push(HeaderSegment::Element(element));
+                    list = ows::skip_ows_leading(list);
+
+                    if !element.is_empty() && element[0] != b'"' || element.len() > 2 {
+                        // Element is non-empty nor quoted empty
+                        size += 1;
+
+                        if !list.is_empty() {
+                            self.state.push(HeaderSegment::List(list, size));
                         }
+
+                        self.state.push(HeaderSegment::Element(element));
+                    } else if list.is_empty() {
+                        // No more bytes left to consume, check if list was non-empty
+                        if size == 0 {
+                            self.state.clear();
+                            return Some(Err(error::ErrorValue::EmptyList));
+                        }
+                    } else {
+                        // Still some bytes left, put the list state back on top of the stack
+                        self.state.push(HeaderSegment::List(list, size));
                     }
                 },
 
                 HeaderSegment::Element(element) => {
                     // Empty element
                     if element.is_empty() {
-                        self.state.pop();
                         return None;
                     }
 
                     // Empty quoted element
                     if element[0] == b'"' && element.len() >= 2 && element[1] == b'"' {
-                        self.state.pop();
                         return None;
                     }
 
@@ -420,7 +419,6 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                             return Some(Err(error::ErrorValue::InvalidEscapeSequence(c)));
                         }
 
-                        self.state.pop();
                         immutable
                     } else {
                         // Unquoted elements may still contain field parameters
@@ -433,15 +431,15 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                                     None => element.len(),
                                 };
 
-                                let parameter = ows::skip_ows_all(&element[1..delimiter_next]);
+                                let (mut param, remaining) = element.split_at_mut(delimiter_next);
+                                param = ows::skip_ows_all(&mut param[1..]);
 
-                                *element = &element[delimiter_next..];
-                                if element.is_empty() {
-                                    self.state.pop();
+                                if !remaining.is_empty() {
+                                    self.state.push(HeaderSegment::Element(remaining));
                                 }
 
-                                if !parameter.is_empty() {
-                                    self.state.push(HeaderSegment::Parameter(parameter));
+                                if !param.is_empty() {
+                                    self.state.push(HeaderSegment::Parameter(param));
                                 }
 
                                 continue;
@@ -449,18 +447,18 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
 
                             // There are some bytes left to consume before the next field parameter
                             Some(n) => {
-                                let immutable = ows::skip_ows_trailing(&element[..n]);
-                                *element = &element[n..];
-                                immutable
+                                let (value, remaining) = element.split_at_mut(n);
+
+                                if !remaining.is_empty() {
+                                    self.state.push(HeaderSegment::Element(remaining));
+                                }
+
+                                ows::skip_ows_trailing(value)
                             },
 
                             // Element does not contain any field parameters and can be consumed in
                             // its entirety.
-                            None => {
-                                let immutable = *element;
-                                self.state.pop();
-                                immutable
-                            },
+                            None => element,
                         }
                     };
 
@@ -530,7 +528,6 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                                 val
                             };
 
-                            self.state.pop();
                             return Some(Ok(Value::Parameter { key, val }));
                         },
                     };
@@ -564,17 +561,13 @@ impl<'a, const SIZE: usize> ParsingStack<'a, SIZE> {
         self.index += 1;
     }
 
-    fn pop(&mut self) {
+    fn pop(&mut self) -> Option<HeaderSegment<'a>> {
         if self.index > 0 {
             self.index -= 1;
-        }
-    }
-
-    fn peek(&mut self) -> Option<&mut HeaderSegment<'a>> {
-        if self.index > 0 {
             // SAFETY: index is kept in sync with stack push/pop operations and therefore only
-            // points to initialized memory.
-            unsafe { Some(self.backing[self.index - 1].assume_init_mut()) }
+            // points to initialized memory. Moreover, once this value has been popped, the only way
+            // for it to be read again is if it is overwritten, which guards against double reads.
+            unsafe { Some(self.backing[self.index].assume_init_read()) }
         } else {
             None
         }
@@ -582,24 +575,6 @@ impl<'a, const SIZE: usize> ParsingStack<'a, SIZE> {
 
     fn clear(&mut self) {
         self.index = 0;
-    }
-}
-
-impl<const SIZE: usize> Clone for ParsingStack<'_, SIZE> {
-    fn clone(&self) -> Self {
-        Self {
-            backing: std::array::from_fn(|i| {
-                if i < self.index {
-                    // SAFETY: index is kept in sync with stack push/pop operations and therefore
-                    // only points to initialized memory. Where index - 1 points to the last written
-                    // slot, i < index guarantees that i points to initialized memory.
-                    std::mem::MaybeUninit::new(unsafe { self.backing[i].assume_init_ref().clone() })
-                } else {
-                    std::mem::MaybeUninit::uninit()
-                }
-            }),
-            index: self.index,
-        }
     }
 }
 
@@ -639,28 +614,28 @@ impl<const SIZE: usize> Eq for ParsingStack<'_, SIZE> {}
 
 mod ows {
     #[inline]
-    pub(super) fn skip_ows_all(bytes: &[u8]) -> &[u8] {
-        skip_ows_leading(skip_ows_trailing(bytes))
+    pub(super) fn skip_ows_all(bytes: &mut [u8]) -> &mut [u8] {
+        skip_ows_trailing(skip_ows_leading(bytes))
     }
 
     #[inline]
-    pub(super) fn skip_ows_leading(bytes: &[u8]) -> &[u8] {
+    pub(super) fn skip_ows_leading(bytes: &mut [u8]) -> &mut [u8] {
         let mut start = 0;
         while start < bytes.len() && crate::constants::OWS.contains(&bytes[start]) {
             start += 1;
         }
 
-        &bytes[start..]
+        &mut bytes[start..]
     }
 
     #[inline]
-    pub(super) fn skip_ows_trailing(bytes: &[u8]) -> &[u8] {
+    pub(super) fn skip_ows_trailing(bytes: &mut [u8]) -> &mut [u8] {
         let mut stop = bytes.len();
         while stop > 0 && crate::constants::OWS.contains(&bytes[stop - 1]) {
             stop -= 1;
         }
 
-        &bytes[..stop]
+        &mut bytes[..stop]
     }
 }
 
@@ -860,9 +835,8 @@ mod test {
 
     #[test]
     fn header_line_full() {
-        const LINES: &str = "Content-Type: text/plain\r\nContent-Length: 3\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Content-Type: text/plain\r\nContent-Length: 3\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Content-Type");
@@ -891,26 +865,23 @@ mod test {
 
     #[test]
     fn header_line_empty() {
-        const LINES: &str = "\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"\r\n";
+        let mut lines = HeaderLines::new(&mut input);
         assert_eq!(lines.next(), None);
     }
 
     #[test]
     fn header_line_err_missing_crlf_delimiter() {
-        const LINES: &str = "Content-Type: text/plain";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Content-Type: text/plain";
+        let mut lines = HeaderLines::new(&mut input);
         assert_eq!(lines.next(), Some(Err(error::Error::MissingCRLFDelimiter)));
         assert_eq!(lines.next(), None);
     }
 
     #[test]
     fn header_line_list() {
-        const LINES: &str = "Example-Dates: Sat 04 May 1996, Wed 14 Sep 2005\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Example-Dates: Sat 04 May 1996, Wed 14 Sep 2005\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Example-Dates");
@@ -935,9 +906,8 @@ mod test {
 
     #[test]
     fn header_line_err_empty_list_delimiter_single() {
-        const LINES: &str = "Example-List: ,\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Example-List: ,\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Example-List");
@@ -949,9 +919,8 @@ mod test {
 
     #[test]
     fn header_line_err_empty_list_delimiter_multiple() {
-        const LINES: &str = "Example-List: ,   ,\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Example-List: ,   ,\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Example-List");
@@ -963,9 +932,8 @@ mod test {
 
     #[test]
     fn header_line_err_empty_list_delimiter_quoted() {
-        const LINES: &str = "Example-List: \"\",  \"\"\t, \"\"   \r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Example-List: \"\",  \"\"\t, \"\"   \r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Example-List");
@@ -977,10 +945,9 @@ mod test {
 
     #[test]
     fn header_line_parameters_simple() {
-        const LINES: &str =
-            "Content-Type: multipart/form-data; boundary=7MA4YWxkTrZu0gW; charset=utf-8\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input =
+            *b"Content-Type: multipart/form-data; boundary=7MA4YWxkTrZu0gW; charset=utf-8\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Content-Type");
@@ -1022,11 +989,10 @@ mod test {
 
     #[test]
     fn header_line_parameters_fuck_me() {
-        const LINES: &str = "Accept:    text/*;q=0.3, text/plain;q=0.7;; \t  ;, text/plain;   \
+        let mut input = *b"Accept:    text/*;q=0.3, text/plain;q=0.7;; \t  ;, text/plain;   \
                              format=flowed,text/plain;   \tformat=fixed;q=0.4, */*  ;    \
                              q=0.5\t\t\t\t\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Accept");
@@ -1141,9 +1107,8 @@ mod test {
 
     #[test]
     fn header_line_parameters_err_missing_parameter_delimiter() {
-        const LINES: &str = "Content-Type: ;boundary7MA4YWxkTrZu0gW\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Content-Type: ;boundary7MA4YWxkTrZu0gW\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Content-Type");
@@ -1157,9 +1122,8 @@ mod test {
 
     #[test]
     fn header_line_parameters_err_missing_parameter_key() {
-        const LINES: &str = "Content-Type: ;=7MA4YWxkTrZu0gW\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Content-Type: ;=7MA4YWxkTrZu0gW\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Content-Type");
@@ -1170,9 +1134,8 @@ mod test {
 
     #[test]
     fn header_line_parameters_err_missing_parameter_value() {
-        const LINES: &str = "Content-Type: ;boundary=\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Content-Type: ;boundary=\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Content-Type");
@@ -1186,9 +1149,8 @@ mod test {
 
     #[test]
     fn header_line_quoted_element_simple() {
-        const LINES: &str = "Example-Dates: \"Sat, 04 May 1996\"\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Example-Dates: \"Sat, 04 May 1996\"\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Example-Dates");
@@ -1206,9 +1168,8 @@ mod test {
 
     #[test]
     fn header_line_quoted_element_empty() {
-        const LINES: &str = "Example-Dates: \"\"\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Example-Dates: \"\"\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Example-Dates");
@@ -1221,9 +1182,8 @@ mod test {
 
     #[test]
     fn header_line_quoted_list_simple() {
-        const LINES: &str = "Example-Dates: \"Sat, 04 May 1996\", \"Wed, 14 Sep 2005\"\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Example-Dates: \"Sat, 04 May 1996\", \"Wed, 14 Sep 2005\"\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Example-Dates");
@@ -1247,9 +1207,8 @@ mod test {
 
     #[test]
     fn header_line_quoted_list_empty_element() {
-        const LINES: &str = "Example-Dates: \"Sat, 04 May 1996\", \"\"\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Example-Dates: \"Sat, 04 May 1996\", \"\"\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Example-Dates");
@@ -1267,10 +1226,8 @@ mod test {
 
     #[test]
     fn header_line_quoted_parameter() {
-        const LINES: &str =
-            "Content-Type: multipart/form-data; boundary=\"7MA4YWxkTrZu0gW\"\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Content-Type: multipart/form-data; boundary=\"7MA4YWxkTrZu0gW\"\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Content-Type");
@@ -1299,9 +1256,8 @@ mod test {
 
     #[test]
     fn header_line_quoted_err_missing_closing_quote_element() {
-        const LINES: &str = "Content-Type: \"multipart/form-data\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Content-Type: \"multipart/form-data\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Content-Type");
@@ -1315,9 +1271,8 @@ mod test {
 
     #[test]
     fn header_line_quoted_err_missing_closing_quote_parameter() {
-        const LINES: &str = "Content-Type: multipart/form-data; boundary=\"7MA4YWxkTrZu0gW\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Content-Type: multipart/form-data; boundary=\"7MA4YWxkTrZu0gW\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Content-Type");
@@ -1337,9 +1292,8 @@ mod test {
 
     #[test]
     fn header_line_quoted_err_leftover_bytes_element() {
-        const LINES: &str = "Content-Type: \"multipart\"/form-data\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Content-Type: \"multipart\"/form-data\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Content-Type");
@@ -1353,10 +1307,8 @@ mod test {
 
     #[test]
     fn header_line_quoted_err_leftover_bytes_parameter() {
-        const LINES: &str =
-            "Content-Type: multipart/form-data; boundary=\"7MA4YWxkTr\"Zu0gW\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Content-Type: multipart/form-data; boundary=\"7MA4YWxkTr\"Zu0gW\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Content-Type");
@@ -1376,9 +1328,8 @@ mod test {
 
     #[test]
     fn header_line_quoted_err_missing_parameter_value() {
-        const LINES: &str = "Content-Type: multipart/form-data; boundary=\"\"\r\n\r\n";
-
-        let mut lines = HeaderLines::new(LINES.as_bytes());
+        let mut input = *b"Content-Type: multipart/form-data; boundary=\"\"\r\n\r\n";
+        let mut lines = HeaderLines::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
         assert_utf8_eq!(l1.name(), b"Content-Type");
@@ -1401,9 +1352,8 @@ mod test {
 
     #[test]
     fn header_item_full() {
-        const LINE: &str = "Content-Type:text/plain";
-
-        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut input = *b"Content-Type:text/plain";
+        let mut header = HeaderItem::new(&mut input).unwrap();
 
         assert_utf8_eq!(header.name(), b"Content-Type");
 
@@ -1414,9 +1364,8 @@ mod test {
 
     #[test]
     fn header_item_trim_ows() {
-        const LINE: &str = "Content-Type: \t text/plain\t\t  \t";
-
-        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut input = *b"Content-Type: \t text/plain\t\t  \t";
+        let mut header = HeaderItem::new(&mut input).unwrap();
 
         assert_utf8_eq!(header.name(), b"Content-Type");
 
@@ -1427,9 +1376,8 @@ mod test {
 
     #[test]
     fn header_item_empty_field_value_no_ows() {
-        const LINE: &str = "Content-Type:";
-
-        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut input = *b"Content-Type:";
+        let mut header = HeaderItem::new(&mut input).unwrap();
 
         assert_utf8_eq!(header.name(), b"Content-Type");
 
@@ -1439,9 +1387,8 @@ mod test {
 
     #[test]
     fn header_item_empty_field_value_ows() {
-        const LINE: &str = "Content-Type:  \t \t\t  \t";
-
-        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut input = *b"Content-Type:  \t \t\t  \t";
+        let mut header = HeaderItem::new(&mut input).unwrap();
 
         assert_utf8_eq!(header.name(), b"Content-Type");
 
@@ -1451,45 +1398,44 @@ mod test {
 
     #[test]
     fn header_item_err_empty_line() {
-        const LINE: &str = "";
+        let mut input = *b"";
 
         let expected = Err(error::Error::EmptyLine);
 
-        assert_eq!(HeaderItem::new(LINE.as_bytes()), expected);
+        assert_eq!(HeaderItem::new(&mut input), expected);
     }
 
     #[test]
     fn header_item_err_missing_field_delimiter() {
-        const LINE: &str = "Content-Type text/plain";
+        let mut input = *b"Content-Type text/plain";
 
         let expected = Err(error::Error::MissingFieldDelimiter);
 
-        assert_eq!(HeaderItem::new(LINE.as_bytes()), expected);
+        assert_eq!(HeaderItem::new(&mut input), expected);
     }
 
     #[test]
     fn header_item_err_missing_field_name() {
-        const LINE: &str = ": text/plain";
+        let mut input = *b": text/plain";
 
         let expected = Err(error::Error::MissingFieldName);
 
-        assert_eq!(HeaderItem::new(LINE.as_bytes()), expected);
+        assert_eq!(HeaderItem::new(&mut input), expected);
     }
 
     #[test]
     fn header_item_err_invalid_field_name() {
-        const LINE: &str = "Content=Type: text/plain";
+        let mut input = *b"Content=Type: text/plain";
 
         let expected = Err(error::Error::InvalidFieldName(b'='));
 
-        assert_eq!(HeaderItem::new(LINE.as_bytes()), expected);
+        assert_eq!(HeaderItem::new(&mut input), expected);
     }
 
     #[test]
     fn header_value_err_invalid_field_value_any() {
-        const LINE: &str = "Content-Type: text\0plain";
-
-        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut input = *b"Content-Type: text\0plain";
+        let mut header = HeaderItem::new(&mut input).unwrap();
         let mut values = header.values();
 
         assert_eq!(
@@ -1501,9 +1447,8 @@ mod test {
 
     #[test]
     fn header_value_err_invalid_field_value_crlf() {
-        const LINE: &str = "Content-Type: text/plain\r\n";
-
-        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut input = *b"Content-Type: text/plain\r\n";
+        let mut header = HeaderItem::new(&mut input).unwrap();
         let mut values = header.values();
 
         assert_eq!(
@@ -1515,9 +1460,8 @@ mod test {
 
     #[test]
     fn header_value_err_invalid_field_value_start() {
-        const LINE: &str = "Content-Type: \" text/plain\"";
-
-        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut input = *b"Content-Type: \" text/plain\"";
+        let mut header = HeaderItem::new(&mut input).unwrap();
         let mut values = header.values();
 
         assert_eq!(
@@ -1529,9 +1473,8 @@ mod test {
 
     #[test]
     fn header_value_err_invalid_field_parameter_key() {
-        const LINE: &str = "Content-Type: ; bo\\undary=7MA4YWxkTrZu0gW";
-
-        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut input = *b"Content-Type: ; bo\\undary=7MA4YWxkTrZu0gW";
+        let mut header = HeaderItem::new(&mut input).unwrap();
         let mut values = header.values();
 
         assert_eq!(
@@ -1543,9 +1486,8 @@ mod test {
 
     #[test]
     fn header_value_err_invalid_field_parameter_val() {
-        const LINE: &str = "Content-Type: ; boundary=7MA4Y\\WxkTrZu0gW";
-
-        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut input = *b"Content-Type: ; boundary=7MA4Y\\WxkTrZu0gW";
+        let mut header = HeaderItem::new(&mut input).unwrap();
         let mut values = header.values();
 
         assert_eq!(
@@ -1557,9 +1499,8 @@ mod test {
 
     #[test]
     fn header_value_field_element_quote_pair() {
-        const LINE: &str = "Content-Type: \"\\\"text/plain\\\"\"";
-
-        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut input = *b"Content-Type: \"\\\"text/plain\\\"\"";
+        let mut header = HeaderItem::new(&mut input).unwrap();
         let mut values = header.values();
 
         assert_eq!(
@@ -1571,9 +1512,8 @@ mod test {
 
     #[test]
     fn header_value_err_invalid_field_quote_element() {
-        const LINE: &str = "Content-Type: \"text\\\0/plain\"";
-
-        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut input = *b"Content-Type: \"text\\\0/plain\"";
+        let mut header = HeaderItem::new(&mut input).unwrap();
         let mut values = header.values();
 
         assert_eq!(
@@ -1585,9 +1525,8 @@ mod test {
 
     #[test]
     fn header_value_err_invalid_field_quote_parameter() {
-        const LINE: &str = "Content-Type: ; boundary=\"7MA4Y\\\0WxkTrZu0gW\"";
-
-        let mut header = HeaderItem::new(LINE.as_bytes()).unwrap();
+        let mut input = *b"Content-Type: ; boundary=\"7MA4Y\\\0WxkTrZu0gW\"";
+        let mut header = HeaderItem::new(&mut input).unwrap();
         let mut values = header.values();
 
         assert_eq!(
@@ -1601,7 +1540,11 @@ mod test {
     #[should_panic(expected = "Cannot push more than SIZE elements to a ParsingStack")]
     fn parsing_stack_push_over_size() {
         let mut stack = ParsingStack::<1>::new();
-        stack.push(HeaderSegment::Line(b""));
-        stack.push(HeaderSegment::Line(b""));
+
+        let mut input_1 = *b"";
+        let mut input_2 = *b"";
+
+        stack.push(HeaderSegment::Line(&mut input_1));
+        stack.push(HeaderSegment::Line(&mut input_2));
     }
 }

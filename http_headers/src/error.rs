@@ -12,12 +12,9 @@ pub enum Error {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADER: &str = "";
+    /// let mut input = *b"";
     ///
-    /// assert_eq!(
-    ///     line::HeaderItem::new(HEADER.as_bytes()),
-    ///     Err(Error::EmptyLine)
-    /// );
+    /// assert_eq!(line::HeaderItem::new(&mut input), Err(Error::EmptyLine));
     /// # Ok(())
     /// # }
     /// ```
@@ -31,9 +28,9 @@ pub enum Error {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADERS: &str = "Content-Type text/plain\r\n";
+    /// let mut input = *b"Content-Type text/plain\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// assert_eq!(headers.next(), Some(Err(Error::MissingFieldDelimiter)));
     /// # Ok(())
     /// # }
@@ -48,9 +45,9 @@ pub enum Error {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADERS: &str = ": text/plain\r\n";
+    /// let mut input = *b": text/plain\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// assert_eq!(headers.next(), Some(Err(Error::MissingFieldName)));
     /// # Ok(())
     /// # }
@@ -65,9 +62,9 @@ pub enum Error {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADERS: &str = "Content-Type: text/plain";
+    /// let mut input = *b"Content-Type: text/plain";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// assert_eq!(headers.next(), Some(Err(Error::MissingCRLFDelimiter)));
     /// # Ok(())
     /// # }
@@ -84,9 +81,9 @@ pub enum Error {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADERS: &str = "Content=Type: text/plain\r\n";
+    /// let mut input = *b"Content=Type: text/plain\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// assert_eq!(headers.next(), Some(Err(Error::InvalidFieldName(b'='))));
     /// # Ok(())
     /// # }
@@ -142,9 +139,9 @@ pub enum ErrorValue {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADERS: &str = "Example-List: ,  ,, ,\r\n\r\n";
+    /// let mut input = *b"Example-List: ,  ,, ,\r\n\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values();
     ///
@@ -169,9 +166,9 @@ pub enum ErrorValue {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADERS: &str = "Content-Type: \"multipart/form-data\r\n\r\n";
+    /// let mut input = *b"Content-Type: \"multipart/form-data\r\n\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values();
     ///
@@ -200,9 +197,9 @@ pub enum ErrorValue {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADERS: &str = "Content-Type: \"multipart\"/form-data\r\n\r\n";
+    /// let mut input = *b"Content-Type: \"multipart\"/form-data\r\n\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values();
     ///
@@ -227,9 +224,9 @@ pub enum ErrorValue {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADERS: &str = "Content-Type: ;boundary7MA4YWxkTrZu0gW\r\n\r\n";
+    /// let mut input = *b"Content-Type: ;boundary7MA4YWxkTrZu0gW\r\n\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values();
     ///
@@ -259,9 +256,9 @@ pub enum ErrorValue {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADERS: &str = "Content-Type: ;=7MA4YWxkTrZu0gW\r\n\r\n";
+    /// let mut input = *b"Content-Type: ;=7MA4YWxkTrZu0gW\r\n\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values();
     ///
@@ -288,9 +285,9 @@ pub enum ErrorValue {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADERS: &str = "Content-Type: ;boundary=\r\n\r\n";
+    /// let mut input = *b"Content-Type: ;boundary=\r\n\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values();
     ///
@@ -317,9 +314,9 @@ pub enum ErrorValue {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADERS: &str = "Content-Type: text\0plain\r\n";
+    /// let mut input = *b"Content-Type: text\0plain\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values();
     ///
@@ -357,9 +354,9 @@ pub enum ErrorValue {
     /// use http_headers::prelude::*;
     ///
     /// // "\" cannot be used in parameter keys.
-    /// const HEADERS: &str = "Content-Type: ; bo\\undary=7MA4YWxkTrZu0gW\r\n";
+    /// let mut input = *b"Content-Type: ; bo\\undary=7MA4YWxkTrZu0gW\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values();
     ///
@@ -380,9 +377,9 @@ pub enum ErrorValue {
     /// use http_headers::prelude::*;
     ///
     /// // This time the parameter *value* is invalid.
-    /// const HEADERS: &str = "Content-Type: ; boundary=7MA4Y\\WxkTrZu0gW\r\n";
+    /// let mut input = *b"Content-Type: ; boundary=7MA4Y\\WxkTrZu0gW\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values();
     ///
@@ -440,9 +437,9 @@ pub enum ErrorValue {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// const HEADERS: &str = "Content-Type: \"text\\\0/plain\"\r\n";
+    /// let mut input = *b"Content-Type: \"text\\\0/plain\"\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(HEADERS.as_bytes());
+    /// let mut headers = line::HeaderLines::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values();
     ///
