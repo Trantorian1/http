@@ -10,9 +10,8 @@
 //! your specific use-case.
 //!
 //! [quoted-pair]: https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.4
-use macro_util::*;
-
 use super::error;
+use super::stack;
 
 /// Header section parser.
 ///
@@ -218,7 +217,7 @@ impl<'a> HeaderItem<'a> {
 /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
 #[derive(Debug, PartialEq, Eq)]
 pub struct HeaderValues<'a> {
-    state: ParsingStack<'a, 4>,
+    state: stack::Stack<HeaderSegment<'a>, 4>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -291,7 +290,7 @@ pub enum Value<'a> {
 
 impl<'a> HeaderValues<'a> {
     pub(crate) fn new(field_value: &'a mut [u8]) -> Self {
-        let mut state = ParsingStack::new();
+        let mut state = stack::Stack::new();
         state.push(HeaderSegment::Line(field_value));
         Self { state }
     }
@@ -537,81 +536,6 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
     }
 }
 
-struct ParsingStack<'a, const SIZE: usize> {
-    backing: [std::mem::MaybeUninit<HeaderSegment<'a>>; SIZE],
-    index: usize,
-}
-
-impl<'a, const SIZE: usize> ParsingStack<'a, SIZE> {
-    fn new() -> Self {
-        Self {
-            backing: std::array::from_fn(|_| std::mem::MaybeUninit::uninit()),
-            index: 0,
-        }
-    }
-
-    fn push(&mut self, state: HeaderSegment<'a>) {
-        assert_le!(
-            self.index,
-            SIZE,
-            "Cannot push more than SIZE elements to a ParsingStack"
-        );
-
-        self.backing[self.index].write(state);
-        self.index += 1;
-    }
-
-    fn pop(&mut self) -> Option<HeaderSegment<'a>> {
-        if self.index > 0 {
-            self.index -= 1;
-            // SAFETY: index is kept in sync with stack push/pop operations and therefore only
-            // points to initialized memory. Moreover, once this value has been popped, the only way
-            // for it to be read again is if it is overwritten, which guards against double reads.
-            unsafe { Some(self.backing[self.index].assume_init_read()) }
-        } else {
-            None
-        }
-    }
-
-    fn clear(&mut self) {
-        self.index = 0;
-    }
-}
-
-impl<const SIZE: usize> std::fmt::Debug for ParsingStack<'_, SIZE> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ParsingStack")
-            .field("backing", &&self.backing[..self.index])
-            .field("index", &self.index)
-            .finish()
-    }
-}
-
-impl<const SIZE: usize> PartialEq for ParsingStack<'_, SIZE> {
-    fn eq(&self, other: &Self) -> bool {
-        if self.index == other.index {
-            for i in 0..self.index {
-                // SAFETY: index is kept in sync with stack push/pop operations and therefore only
-                // points to initialized memory. Where index - 1 points to the last written slot,
-                // i < index guarantees that i points to initialized memory.
-                unsafe {
-                    let left = self.backing[i].assume_init_ref();
-                    let right = other.backing[i].assume_init_ref();
-
-                    if left != right {
-                        return false;
-                    }
-                };
-            }
-            true
-        } else {
-            false
-        }
-    }
-}
-
-impl<const SIZE: usize> Eq for ParsingStack<'_, SIZE> {}
-
 mod ows {
     #[inline]
     pub(super) fn skip_ows_all(bytes: &mut [u8]) -> &mut [u8] {
@@ -831,6 +755,8 @@ mod validate {
 
 #[cfg(test)]
 mod test {
+    use macro_util::*;
+
     use super::*;
 
     #[test]
@@ -1534,17 +1460,5 @@ mod test {
             Some(Err(error::ErrorValue::InvalidEscapeSequence(b'\0')))
         );
         assert_eq!(values.next(), None);
-    }
-
-    #[test]
-    #[should_panic(expected = "Cannot push more than SIZE elements to a ParsingStack")]
-    fn parsing_stack_push_over_size() {
-        let mut stack = ParsingStack::<1>::new();
-
-        let mut input_1 = *b"";
-        let mut input_2 = *b"";
-
-        stack.push(HeaderSegment::Line(&mut input_1));
-        stack.push(HeaderSegment::Line(&mut input_2));
     }
 }

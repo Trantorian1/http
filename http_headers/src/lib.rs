@@ -4,6 +4,7 @@
 
 mod deserializer;
 mod error;
+mod stack;
 
 pub mod constants;
 pub mod line;
