@@ -13,6 +13,57 @@
 use super::error;
 use super::stack;
 
+/// Helper macro for generating an [`Element`] header field [`Value`]. Handles static string conversion into a
+/// mutable reference.
+///
+/// # Example
+///
+/// ```rust
+/// use http_headers::prelude::*;
+///
+/// let mut val = *b"text/plain";
+/// assert_eq!(Value::Element(&mut val), element!(b"text/plain"));
+/// ```
+///
+/// [`Element`]: Value::Element
+#[macro_export]
+macro_rules! element {
+    ($s:literal) => {
+        $crate::line::Value::Element(&mut $s.map(|b| b))
+    };
+}
+
+/// Helper macro for generating a [`Parameter`] header field [`Value`]. Handles static string
+/// conversion into a mutable reference.
+///
+/// # Example
+///
+/// ```rust
+/// use http_headers::prelude::*;
+///
+/// let mut key = *b"q";
+/// let mut val = *b"0.3";
+///
+/// assert_eq!(
+///     Value::Parameter {
+///         key: &mut key,
+///         val: &mut val
+///     },
+///     parameter!(b"q", b"0.3")
+/// );
+/// ```
+///
+/// [`Parameter`]: Value::Parameter
+#[macro_export]
+macro_rules! parameter {
+    ($k:literal, $v:literal) => {
+        $crate::line::Value::Parameter {
+            key: &mut $k.map(|b| b),
+            val: &mut $v.map(|b| b),
+        }
+    };
+}
+
 /// Header section parser.
 ///
 /// # Specs
@@ -32,12 +83,12 @@ use super::stack;
 /// let mut headers = std::collections::HashMap::<_, Vec<_>>::new();
 ///
 /// // Parsing is implemented as an iterator over header field lines...
-/// for res in line::HeaderLines::new(&mut input) {
-///     let mut header = res?;
-///     let values = headers.entry(header.name()).or_default();
+/// for res in Headers::new(&mut input) {
+///     let header = res?;
+///     let values = headers.entry(header.name).or_default();
 ///
 ///     // ...which themselves allow you to iterate over header field values
-///     for res in header.values() {
+///     for res in header.values {
 ///         let value = res?;
 ///         values.push(value);
 ///     }
@@ -45,12 +96,12 @@ use super::stack;
 ///
 /// assert_eq!(
 ///     headers.get(b"Content-Type" as &[u8]),
-///     Some(&vec![line::Value::Element(b"text/plain")])
+///     Some(&vec![element!(b"text/plain")])
 /// );
 ///
 /// assert_eq!(
 ///     headers.get(b"Content-Length" as &[u8]),
-///     Some(&vec![line::Value::Element(b"3")])
+///     Some(&vec![element!(b"3")])
 /// );
 /// # Ok(())
 /// # }
@@ -69,11 +120,11 @@ use super::stack;
 /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
 /// [quoted-pair]: https://www.rfc-editor.org/rfc/rfc9110.html#section-5.6.4
 #[derive(Debug, PartialEq, Eq)]
-pub struct HeaderLines<'a> {
+pub struct Headers<'a> {
     input: Option<&'a mut [u8]>,
 }
 
-impl<'a> HeaderLines<'a> {
+impl<'a> Headers<'a> {
     /// Initializes a new parser with the input bytes to be processed.
     #[must_use]
     pub fn new(input: &'a mut [u8]) -> Self {
@@ -81,8 +132,8 @@ impl<'a> HeaderLines<'a> {
     }
 }
 
-impl<'a> Iterator for HeaderLines<'a> {
-    type Item = Result<HeaderItem<'a>, error::Error>;
+impl<'a> Iterator for Headers<'a> {
+    type Item = Result<HeaderLine<'a>, error::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.input.take()? {
@@ -97,7 +148,7 @@ impl<'a> Iterator for HeaderLines<'a> {
                 Some(n) => {
                     let (line, remaining) = input.split_at_mut(n);
                     self.input = Some(&mut remaining[crate::constants::CRLF.len()..]);
-                    Some(HeaderItem::new(line))
+                    Some(HeaderLine::new(line))
                 },
             },
         }
@@ -119,38 +170,39 @@ impl<'a> Iterator for HeaderLines<'a> {
 ///
 /// let mut input = *b"Content-Type: text/plain";
 ///
-/// let mut header = line::HeaderItem::new(&mut input)?;
+/// let mut header = HeaderLine::new(&mut input)?;
+/// let mut values = header.values;
 ///
-/// let field_name = header.name();
-/// let field_value = header.values().next().unwrap()?;
-///
-/// assert_eq!(field_name, b"Content-Type");
-/// assert_eq!(field_value, line::Value::Element(b"text/plain"));
+/// assert_eq!(header.name, b"Content-Type");
+/// assert_eq!(values.next(), Some(Ok(element!(b"text/plain"))));
 /// # Ok(())
 /// # }
 /// ```
 ///
-/// Similar caution should be exercised when using this low-level API as with [`HeaderLines`].
+/// Similar caution should be exercised when using this low-level API as with [`Headers`].
 ///
 /// [section 5.2]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-lines-and-combined-fi
 /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
 #[derive(Debug, PartialEq, Eq)]
-pub struct HeaderItem<'a> {
-    field_name: &'a [u8],
-    field_value: HeaderValues<'a>,
+pub struct HeaderLine<'a> {
+    /// Header field name
+    pub name: &'a mut [u8],
+
+    /// Header field [`Value`]s.
+    pub values: HeaderValues<'a>,
 }
 
-impl<'a> HeaderItem<'a> {
+impl<'a> HeaderLine<'a> {
     /// Initializes a new header field parser.
     ///
-    /// This method is usually only called by [`HeaderLines`] during the parsing process but can
+    /// This method is usually only called by [`Headers`] during the parsing process but can
     /// also be manually invoked in the rare cases where it is necessary to parse only a _single_
     /// header field.
     ///
     /// # Panics
     ///
     /// If ever the input bytes end with a [`CRLF`]. This is guaranteed not to be the case when
-    /// invoked by [`HeaderLines`] during parsing and must also be upheld on manual calls.
+    /// invoked by [`Headers`] during parsing and must also be upheld on manual calls.
     ///
     /// # Errors
     ///
@@ -181,23 +233,9 @@ impl<'a> HeaderItem<'a> {
         let field_value = HeaderValues::new(&mut remaining[1..]);
 
         Ok(Self {
-            field_name,
-            field_value,
+            name: field_name,
+            values: field_value,
         })
-    }
-
-    /// Returns the header's field name.
-    #[must_use]
-    pub fn name(&self) -> &'a [u8] {
-        self.field_name
-    }
-
-    /// Returns an iterator over the header's [field value].
-    ///
-    /// [field value]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values
-    #[must_use]
-    pub fn values(&mut self) -> &mut HeaderValues<'a> {
-        &mut self.field_value
     }
 }
 
@@ -211,7 +249,7 @@ impl<'a> HeaderItem<'a> {
 /// # Usage
 ///
 /// This parser is not meant to be constructed manually and is instead only returned by
-/// [`HeaderItem::values`].
+/// [`HeaderLine::values`].
 ///
 /// [section 5.5]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values
 /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
@@ -229,7 +267,7 @@ enum HeaderSegment<'a> {
 }
 
 /// A single HTTP header field value.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub enum Value<'a> {
     /// Single element field value, can be part of a list.
     ///
@@ -241,14 +279,14 @@ pub enum Value<'a> {
     ///
     /// let mut input = *b"Content-Type: text/plain";
     ///
-    /// let mut header = line::HeaderItem::new(&mut input)?;
-    /// let mut values = header.values();
+    /// let mut header = HeaderLine::new(&mut input)?;
+    /// let mut values = header.values;
     ///
-    /// assert_eq!(values.next(), Some(Ok(line::Value::Element(b"text/plain"))));
+    /// assert_eq!(values.next(), Some(Ok(element!(b"text/plain"))));
     /// # Ok(())
     /// # }
     /// ```
-    Element(&'a [u8]),
+    Element(&'a mut [u8]),
 
     /// Dictionary-like field value, can also be part of a list.
     ///
@@ -258,34 +296,44 @@ pub enum Value<'a> {
     /// # fn main() -> Result<(), http_headers::Error> {
     /// use http_headers::prelude::*;
     ///
-    /// let mut input = *b"Content-Type: multipart/form-data; boundary=7MA4YWxkTrZu0gW";
+    /// let mut input = *b"Content-Type: multipart/form-data; boundary=7MA4YWxk";
     ///
-    /// let mut header = line::HeaderItem::new(&mut input)?;
-    /// let mut values = header.values();
+    /// let mut header = HeaderLine::new(&mut input)?;
+    /// let mut values = header.values;
     ///
     /// // Header parameters are still typically associated to a field value element
-    /// assert_eq!(
-    ///     values.next().unwrap()?,
-    ///     line::Value::Element(b"multipart/form-data")
-    /// );
+    /// assert_eq!(values.next(), Some(Ok(element!(b"multipart/form-data"))));
     ///
     /// // Header parameters come in key-value pairs, separated by a single '=' delimiter
     /// assert_eq!(
-    ///     values.next().unwrap()?,
-    ///     line::Value::Parameter {
-    ///         key: b"boundary",
-    ///         val: b"7MA4YWxkTrZu0gW"
-    ///     }
+    ///     values.next(),
+    ///     Some(Ok(parameter!(b"boundary", b"7MA4YWxk")))
     /// );
     /// # Ok(())
     /// # }
     /// ```
     Parameter {
         /// Parameter key.
-        key: &'a [u8],
+        key: &'a mut [u8],
         /// Parameter value.
-        val: &'a [u8],
+        val: &'a mut [u8],
     },
+}
+
+impl std::fmt::Debug for Value<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Element(val) => f
+                .debug_tuple("Element")
+                .field(&std::str::from_utf8(val).unwrap_or_default())
+                .finish(),
+            Self::Parameter { key, val } => f
+                .debug_struct("Parameter")
+                .field("key", &std::str::from_utf8(key).unwrap_or_default())
+                .field("val", &std::str::from_utf8(val).unwrap_or_default())
+                .finish(),
+        }
+    }
 }
 
 impl<'a> HeaderValues<'a> {
@@ -296,7 +344,7 @@ impl<'a> HeaderValues<'a> {
     }
 }
 
-impl<'a> Iterator for &mut HeaderValues<'a> {
+impl<'a> Iterator for HeaderValues<'a> {
     type Item = Result<Value<'a>, error::ErrorValue>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -409,16 +457,17 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                         return None;
                     }
 
-                    let immutable = if element[0] == b'"' && element[element.len() - 1] == b'"' {
+                    let value = if element[0] == b'"' && element[element.len() - 1] == b'"' {
                         // Quoted non-empty elements are returned as-is
-                        let immutable = &element[1..element.len() - 1];
+                        let len = element.len();
+                        let value = &mut element[1..len - 1];
 
-                        if let Some(c) = validate::is_legal_header_quote(immutable) {
+                        if let Some(c) = validate::is_legal_header_quote(value) {
                             self.state.clear();
                             return Some(Err(error::ErrorValue::InvalidEscapeSequence(c)));
                         }
 
-                        immutable
+                        value
                     } else {
                         // Unquoted elements may still contain field parameters
                         let mut parameters = memchr::memchr_iter(b';', element);
@@ -461,12 +510,12 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                         }
                     };
 
-                    if let Some(c) = validate::is_legal_header_element(immutable) {
+                    if let Some(c) = validate::is_legal_header_element(value) {
                         self.state.clear();
                         return Some(Err(error::ErrorValue::InvalidFieldValue(c)));
                     }
 
-                    return Some(Ok(Value::Element(immutable)));
+                    return Some(Ok(Value::Element(value)));
                 },
 
                 HeaderSegment::Parameter(param) => {
@@ -484,7 +533,7 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                             return Some(Err(error::ErrorValue::MissingParameterValue));
                         },
                         Some(n) => {
-                            let key = &param[..n];
+                            let (key, remaining) = param.split_at_mut(n);
 
                             if let Some(c) = validate::is_legal_header_parameter(key) {
                                 self.state.clear();
@@ -492,19 +541,19 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
                             }
 
                             // Field parameter values may be quoted, but field parameter keys cannot.
-                            let val = if param[n + 1] == b'"' {
-                                let Some(closing_quote) = quote::closing_quote(param, n + 2) else {
+                            let val = if remaining[1] == b'"' {
+                                let Some(closing_quote) = quote::closing_quote(remaining, 2) else {
                                     self.state.clear();
                                     return Some(Err(error::ErrorValue::MissingClosingQuote));
                                 };
 
-                                if closing_quote != param.len() - 1 {
+                                if closing_quote != remaining.len() - 1 {
                                     self.state.clear();
                                     return Some(Err(error::ErrorValue::LeftoverBytes));
                                 }
 
                                 // Value can once again be empty after unquoting
-                                let val = &param[n + 2..closing_quote];
+                                let val = &mut remaining[2..closing_quote];
                                 if val.is_empty() {
                                     self.state.clear();
                                     return Some(Err(error::ErrorValue::MissingParameterValue));
@@ -517,7 +566,7 @@ impl<'a> Iterator for &mut HeaderValues<'a> {
 
                                 val
                             } else {
-                                let val = &param[n + 1..];
+                                let val = &mut remaining[1..];
 
                                 if let Some(c) = validate::is_legal_header_parameter(val) {
                                     self.state.clear();
@@ -759,158 +808,116 @@ mod test {
 
     use super::*;
 
+    macro_rules! assert_next {
+        ($values:expr, $expr:expr) => {
+            assert_eq!($values.next(), $expr);
+        };
+    }
+
     #[test]
     fn header_line_full() {
         let mut input = *b"Content-Type: text/plain\r\nContent-Length: 3\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Content-Type");
 
-        let mut v1 = l1.values();
-        let Some(Ok(Value::Element(value1))) = v1.next() else {
-            panic!();
-        };
-
-        assert_utf8_eq!(value1, b"text/plain");
-        assert_eq!(v1.next(), None);
+        assert_utf8_eq!(l1.name, b"Content-Type");
+        assert_next!(l1.values, Some(Ok(element!(b"text/plain"))));
+        assert_next!(l1.values, None);
 
         let mut l2 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l2.name(), b"Content-Length");
 
-        let mut v2 = l2.values();
-        let Some(Ok(Value::Element(value2))) = v2.next() else {
-            panic!();
-        };
+        assert_utf8_eq!(l2.name, b"Content-Length");
+        assert_next!(l2.values, Some(Ok(element!(b"3"))));
+        assert_next!(l2.values, None);
 
-        assert_utf8_eq!(value2, b"3");
-        assert_eq!(v2.next(), None);
-
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_empty() {
         let mut input = *b"\r\n";
-        let mut lines = HeaderLines::new(&mut input);
-        assert_eq!(lines.next(), None);
+        let mut lines = Headers::new(&mut input);
+
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_err_missing_crlf_delimiter() {
         let mut input = *b"Content-Type: text/plain";
-        let mut lines = HeaderLines::new(&mut input);
-        assert_eq!(lines.next(), Some(Err(error::Error::MissingCRLFDelimiter)));
-        assert_eq!(lines.next(), None);
+        let mut lines = Headers::new(&mut input);
+
+        assert_next!(lines, Some(Err(error::Error::MissingCRLFDelimiter)));
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_list() {
         let mut input = *b"Example-Dates: Sat 04 May 1996, Wed 14 Sep 2005\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Example-Dates");
 
-        let mut v1 = l1.values();
-        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
-            panic!();
-        };
+        assert_utf8_eq!(l1.name, b"Example-Dates");
 
-        assert_utf8_eq!(value1_1, b"Sat 04 May 1996");
+        assert_next!(l1.values, Some(Ok(element!(b"Sat 04 May 1996"))));
+        assert_next!(l1.values, Some(Ok(element!(b"Wed 14 Sep 2005"))));
+        assert_next!(l1.values, None);
 
-        let Some(Ok(Value::Element(value1_2))) = v1.next() else {
-            panic!();
-        };
-
-        assert_utf8_eq!(value1_2, b"Wed 14 Sep 2005");
-
-        assert_eq!(v1.next(), None);
-
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_err_empty_list_delimiter_single() {
         let mut input = *b"Example-List: ,\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Example-List");
 
-        let mut v1 = l1.values();
-        assert_eq!(v1.next(), Some(Err(error::ErrorValue::EmptyList)));
-        assert_eq!(v1.next(), None);
+        assert_utf8_eq!(l1.name, b"Example-List");
+        assert_next!(l1.values, Some(Err(error::ErrorValue::EmptyList)));
+        assert_next!(l1.values, None);
     }
 
     #[test]
     fn header_line_err_empty_list_delimiter_multiple() {
         let mut input = *b"Example-List: ,   ,\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Example-List");
+        assert_utf8_eq!(l1.name, b"Example-List");
 
-        let mut v1 = l1.values();
-        assert_eq!(v1.next(), Some(Err(error::ErrorValue::EmptyList)));
-        assert_eq!(v1.next(), None);
+        assert_next!(l1.values, Some(Err(error::ErrorValue::EmptyList)));
+        assert_next!(l1.values, None);
     }
 
     #[test]
     fn header_line_err_empty_list_delimiter_quoted() {
         let mut input = *b"Example-List: \"\",  \"\"\t, \"\"   \r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Example-List");
+        assert_utf8_eq!(l1.name, b"Example-List");
 
-        let mut v1 = l1.values();
-        assert_eq!(v1.next(), Some(Err(error::ErrorValue::EmptyList)));
-        assert_eq!(v1.next(), None);
+        assert_next!(l1.values, Some(Err(error::ErrorValue::EmptyList)));
+        assert_next!(l1.values, None);
     }
 
     #[test]
     fn header_line_parameters_simple() {
         let mut input =
-            *b"Content-Type: multipart/form-data; boundary=7MA4YWxkTrZu0gW; charset=utf-8\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+            *b"Content-Type: multipart/form-data; boundary=7MA4YWxk; charset=utf-8\r\n\r\n";
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Content-Type");
+        assert_utf8_eq!(l1.name, b"Content-Type");
 
-        let mut v1 = l1.values();
-        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
-            panic!();
-        };
+        assert_next!(l1.values, Some(Ok(element!(b"multipart/form-data"))));
+        assert_next!(l1.values, Some(Ok(parameter!(b"boundary", b"7MA4YWxk"))));
+        assert_next!(l1.values, Some(Ok(parameter!(b"charset", b"utf-8"))));
+        assert_next!(l1.values, None);
 
-        assert_utf8_eq!(value1_1, b"multipart/form-data");
-
-        let (key1_2, val1_2) = match v1.next() {
-            Some(Ok(Value::Parameter { key, val })) => (key, val),
-            Some(Ok(Value::Element(bytes))) => {
-                let element = std::str::from_utf8(bytes).unwrap();
-                panic!("{element}");
-            },
-            other => panic!("{other:?}"),
-        };
-
-        assert_utf8_eq!(key1_2, b"boundary");
-        assert_utf8_eq!(val1_2, b"7MA4YWxkTrZu0gW");
-
-        let (key1_3, val1_3) = match v1.next() {
-            Some(Ok(Value::Parameter { key, val })) => (key, val),
-            Some(Ok(Value::Element(bytes))) => {
-                let element = std::str::from_utf8(bytes).unwrap();
-                panic!("{element}");
-            },
-            other => panic!("{other:?}"),
-        };
-
-        assert_utf8_eq!(key1_3, b"charset");
-        assert_utf8_eq!(val1_3, b"utf-8");
-
-        assert_eq!(v1.next(), None);
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
@@ -918,157 +925,67 @@ mod test {
         let mut input = *b"Accept:    text/*;q=0.3, text/plain;q=0.7;; \t  ;, text/plain;   \
                              format=flowed,text/plain;   \tformat=fixed;q=0.4, */*  ;    \
                              q=0.5\t\t\t\t\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Accept");
+        assert_utf8_eq!(l1.name, b"Accept");
 
-        let mut v1 = l1.values();
+        assert_next!(l1.values, Some(Ok(element!(b"text/*"))));
+        assert_next!(l1.values, Some(Ok(parameter!(b"q", b"0.3"))));
 
-        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
-            panic!();
-        };
+        assert_next!(l1.values, Some(Ok(element!(b"text/plain"))));
+        assert_next!(l1.values, Some(Ok(parameter!(b"q", b"0.7"))));
 
-        assert_utf8_eq!(value1_1, b"text/*");
+        assert_next!(l1.values, Some(Ok(element!(b"text/plain"))));
+        assert_next!(l1.values, Some(Ok(parameter!(b"format", b"flowed"))));
 
-        let (key1_2, val1_2) = match v1.next() {
-            Some(Ok(Value::Parameter { key, val })) => (key, val),
-            Some(Ok(Value::Element(bytes))) => {
-                let element = std::str::from_utf8(bytes).unwrap();
-                panic!("{element}");
-            },
-            other => panic!("{other:?}"),
-        };
+        assert_next!(l1.values, Some(Ok(element!(b"text/plain"))));
+        assert_next!(l1.values, Some(Ok(parameter!(b"format", b"fixed"))));
+        assert_next!(l1.values, Some(Ok(parameter!(b"q", b"0.4"))));
 
-        assert_utf8_eq!(key1_2, b"q");
-        assert_utf8_eq!(val1_2, b"0.3");
+        assert_next!(l1.values, Some(Ok(element!(b"*/*"))));
+        assert_next!(l1.values, Some(Ok(parameter!(b"q", b"0.5"))));
 
-        let Some(Ok(Value::Element(value1_3))) = v1.next() else {
-            panic!();
-        };
-
-        assert_utf8_eq!(value1_3, b"text/plain");
-
-        let (key1_4, val1_4) = match v1.next() {
-            Some(Ok(Value::Parameter { key, val })) => (key, val),
-            Some(Ok(Value::Element(bytes))) => {
-                let element = std::str::from_utf8(bytes).unwrap();
-                panic!("{element}");
-            },
-            other => panic!("{other:?}"),
-        };
-
-        assert_utf8_eq!(key1_4, b"q");
-        assert_utf8_eq!(val1_4, b"0.7");
-
-        let Some(Ok(Value::Element(value1_5))) = v1.next() else {
-            panic!();
-        };
-
-        assert_utf8_eq!(value1_5, b"text/plain");
-
-        let (key1_6, val1_6) = match v1.next() {
-            Some(Ok(Value::Parameter { key, val })) => (key, val),
-            Some(Ok(Value::Element(bytes))) => {
-                let element = std::str::from_utf8(bytes).unwrap();
-                panic!("{element}");
-            },
-            other => panic!("{other:?}"),
-        };
-
-        assert_utf8_eq!(key1_6, b"format");
-        assert_utf8_eq!(val1_6, b"flowed");
-
-        let Some(Ok(Value::Element(value1_7))) = v1.next() else {
-            panic!();
-        };
-
-        assert_utf8_eq!(value1_7, b"text/plain");
-
-        let (key1_8, val1_8) = match v1.next() {
-            Some(Ok(Value::Parameter { key, val })) => (key, val),
-            Some(Ok(Value::Element(bytes))) => {
-                let element = std::str::from_utf8(bytes).unwrap();
-                panic!("{element}");
-            },
-            other => panic!("{other:?}"),
-        };
-
-        assert_utf8_eq!(key1_8, b"format");
-        assert_utf8_eq!(val1_8, b"fixed");
-
-        let (key1_9, val1_9) = match v1.next() {
-            Some(Ok(Value::Parameter { key, val })) => (key, val),
-            Some(Ok(Value::Element(bytes))) => {
-                let element = std::str::from_utf8(bytes).unwrap();
-                panic!("{element}");
-            },
-            other => panic!("{other:?}"),
-        };
-
-        assert_utf8_eq!(key1_9, b"q");
-        assert_utf8_eq!(val1_9, b"0.4");
-
-        let Some(Ok(Value::Element(value1_10))) = v1.next() else {
-            panic!();
-        };
-
-        assert_utf8_eq!(value1_10, b"*/*");
-
-        let (key1_11, val1_11) = match v1.next() {
-            Some(Ok(Value::Parameter { key, val })) => (key, val),
-            Some(Ok(Value::Element(bytes))) => {
-                let element = std::str::from_utf8(bytes).unwrap();
-                panic!("{element}");
-            },
-            other => panic!("{other:?}"),
-        };
-
-        assert_utf8_eq!(key1_11, b"q");
-        assert_utf8_eq!(val1_11, b"0.5");
-
-        assert_eq!(v1.next(), None);
-        assert_eq!(lines.next(), None);
+        assert_next!(l1.values, None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_parameters_err_missing_parameter_delimiter() {
-        let mut input = *b"Content-Type: ;boundary7MA4YWxkTrZu0gW\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut input = *b"Content-Type: ;boundary7MA4YWxk\r\n\r\n";
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Content-Type");
+        assert_utf8_eq!(l1.name, b"Content-Type");
 
-        let mut v1 = l1.values();
-        assert_eq!(
-            v1.next(),
+        assert_next!(
+            l1.values,
             Some(Err(error::ErrorValue::MissingParameterDelimiter))
         );
     }
 
     #[test]
     fn header_line_parameters_err_missing_parameter_key() {
-        let mut input = *b"Content-Type: ;=7MA4YWxkTrZu0gW\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut input = *b"Content-Type: ;=7MA4YWxk\r\n\r\n";
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Content-Type");
+        assert_utf8_eq!(l1.name, b"Content-Type");
 
-        let mut v1 = l1.values();
-        assert_eq!(v1.next(), Some(Err(error::ErrorValue::MissingParameterKey)));
+        assert_next!(l1.values, Some(Err(error::ErrorValue::MissingParameterKey)));
     }
 
     #[test]
     fn header_line_parameters_err_missing_parameter_value() {
         let mut input = *b"Content-Type: ;boundary=\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Content-Type");
+        assert_utf8_eq!(l1.name, b"Content-Type");
 
-        let mut v1 = l1.values();
-        assert_eq!(
-            v1.next(),
+        assert_next!(
+            l1.values,
             Some(Err(error::ErrorValue::MissingParameterValue))
         );
     }
@@ -1076,250 +993,188 @@ mod test {
     #[test]
     fn header_line_quoted_element_simple() {
         let mut input = *b"Example-Dates: \"Sat, 04 May 1996\"\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Example-Dates");
+        assert_utf8_eq!(l1.name, b"Example-Dates");
 
-        let mut v1 = l1.values();
-        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
-            panic!();
-        };
+        assert_next!(l1.values, Some(Ok(element!(b"Sat, 04 May 1996"))));
+        assert_next!(l1.values, None);
 
-        assert_utf8_eq!(value1_1, b"Sat, 04 May 1996");
-
-        assert_eq!(v1.next(), None);
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_quoted_element_empty() {
         let mut input = *b"Example-Dates: \"\"\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Example-Dates");
+        assert_utf8_eq!(l1.name, b"Example-Dates");
 
-        let mut v1 = l1.values();
+        assert_next!(l1.values, None);
 
-        assert_eq!(v1.next(), None);
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_quoted_list_simple() {
         let mut input = *b"Example-Dates: \"Sat, 04 May 1996\", \"Wed, 14 Sep 2005\"\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Example-Dates");
+        assert_utf8_eq!(l1.name, b"Example-Dates");
 
-        let mut v1 = l1.values();
-        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
-            panic!();
-        };
+        assert_next!(l1.values, Some(Ok(element!(b"Sat, 04 May 1996"))));
+        assert_next!(l1.values, Some(Ok(element!(b"Wed, 14 Sep 2005"))));
+        assert_next!(l1.values, None);
 
-        assert_utf8_eq!(value1_1, b"Sat, 04 May 1996");
-
-        let Some(Ok(Value::Element(value1_2))) = v1.next() else {
-            panic!();
-        };
-
-        assert_utf8_eq!(value1_2, b"Wed, 14 Sep 2005");
-
-        assert_eq!(v1.next(), None);
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_quoted_list_empty_element() {
         let mut input = *b"Example-Dates: \"Sat, 04 May 1996\", \"\"\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Example-Dates");
+        assert_utf8_eq!(l1.name, b"Example-Dates");
 
-        let mut v1 = l1.values();
-        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
-            panic!();
-        };
+        assert_next!(l1.values, Some(Ok(element!(b"Sat, 04 May 1996"))));
+        assert_next!(l1.values, None);
 
-        assert_utf8_eq!(value1_1, b"Sat, 04 May 1996");
-
-        assert_eq!(v1.next(), None);
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_quoted_parameter() {
-        let mut input = *b"Content-Type: multipart/form-data; boundary=\"7MA4YWxkTrZu0gW\"\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut input = *b"Content-Type: multipart/form-data; boundary=\"7MA4YWxk\"\r\n\r\n";
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Content-Type");
+        assert_utf8_eq!(l1.name, b"Content-Type");
 
-        let mut v1 = l1.values();
-        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
-            panic!();
-        };
+        assert_next!(l1.values, Some(Ok(element!(b"multipart/form-data"))));
+        assert_next!(l1.values, Some(Ok(parameter!(b"boundary", b"7MA4YWxk"))));
+        assert_next!(l1.values, None);
 
-        assert_utf8_eq!(value1_1, b"multipart/form-data");
-
-        let Some(Ok(Value::Parameter {
-            key: key1_2,
-            val: val1_2,
-        })) = v1.next()
-        else {
-            panic!();
-        };
-
-        assert_utf8_eq!(key1_2, b"boundary");
-        assert_utf8_eq!(val1_2, b"7MA4YWxkTrZu0gW");
-
-        assert_eq!(v1.next(), None);
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_quoted_err_missing_closing_quote_element() {
         let mut input = *b"Content-Type: \"multipart/form-data\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Content-Type");
+        assert_utf8_eq!(l1.name, b"Content-Type");
 
-        let mut v1 = l1.values();
-        assert_eq!(v1.next(), Some(Err(error::ErrorValue::MissingClosingQuote)));
+        assert_next!(l1.values, Some(Err(error::ErrorValue::MissingClosingQuote)));
+        assert_next!(l1.values, None);
 
-        assert_eq!(v1.next(), None);
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_quoted_err_missing_closing_quote_parameter() {
-        let mut input = *b"Content-Type: multipart/form-data; boundary=\"7MA4YWxkTrZu0gW\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut input = *b"Content-Type: multipart/form-data; boundary=\"7MA4YWxk\r\n\r\n";
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Content-Type");
+        assert_utf8_eq!(l1.name, b"Content-Type");
 
-        let mut v1 = l1.values();
-        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
-            panic!();
-        };
+        assert_next!(l1.values, Some(Ok(element!(b"multipart/form-data"))));
+        assert_next!(l1.values, Some(Err(error::ErrorValue::MissingClosingQuote)));
+        assert_next!(l1.values, None);
 
-        assert_utf8_eq!(value1_1, b"multipart/form-data");
-
-        assert_eq!(v1.next(), Some(Err(error::ErrorValue::MissingClosingQuote)));
-
-        assert_eq!(v1.next(), None);
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_quoted_err_leftover_bytes_element() {
         let mut input = *b"Content-Type: \"multipart\"/form-data\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Content-Type");
+        assert_utf8_eq!(l1.name, b"Content-Type");
 
-        let mut v1 = l1.values();
-        assert_eq!(v1.next(), Some(Err(error::ErrorValue::LeftoverBytes)));
+        assert_next!(l1.values, Some(Err(error::ErrorValue::LeftoverBytes)));
+        assert_next!(l1.values, None);
 
-        assert_eq!(v1.next(), None);
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_quoted_err_leftover_bytes_parameter() {
         let mut input = *b"Content-Type: multipart/form-data; boundary=\"7MA4YWxkTr\"Zu0gW\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Content-Type");
+        assert_utf8_eq!(l1.name, b"Content-Type");
 
-        let mut v1 = l1.values();
-        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
-            panic!();
-        };
+        assert_next!(l1.values, Some(Ok(element!(b"multipart/form-data"))));
+        assert_next!(l1.values, Some(Err(error::ErrorValue::LeftoverBytes)));
+        assert_next!(l1.values, None);
 
-        assert_utf8_eq!(value1_1, b"multipart/form-data");
-
-        assert_eq!(v1.next(), Some(Err(error::ErrorValue::LeftoverBytes)));
-
-        assert_eq!(v1.next(), None);
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_line_quoted_err_missing_parameter_value() {
         let mut input = *b"Content-Type: multipart/form-data; boundary=\"\"\r\n\r\n";
-        let mut lines = HeaderLines::new(&mut input);
+        let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name(), b"Content-Type");
+        assert_utf8_eq!(l1.name, b"Content-Type");
 
-        let mut v1 = l1.values();
-        let Some(Ok(Value::Element(value1_1))) = v1.next() else {
-            panic!();
-        };
-
-        assert_utf8_eq!(value1_1, b"multipart/form-data");
-
-        assert_eq!(
-            v1.next(),
+        assert_next!(l1.values, Some(Ok(element!(b"multipart/form-data"))));
+        assert_next!(
+            l1.values,
             Some(Err(error::ErrorValue::MissingParameterValue))
         );
+        assert_next!(l1.values, None);
 
-        assert_eq!(v1.next(), None);
-        assert_eq!(lines.next(), None);
+        assert_next!(lines, None);
     }
 
     #[test]
     fn header_item_full() {
         let mut input = *b"Content-Type:text/plain";
-        let mut header = HeaderItem::new(&mut input).unwrap();
+        let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_utf8_eq!(header.name(), b"Content-Type");
+        assert_utf8_eq!(header.name, b"Content-Type");
 
-        let mut values = header.values();
-        assert_eq!(values.next(), Some(Ok(Value::Element(b"text/plain"))));
-        assert_eq!(values.next(), None);
+        assert_next!(header.values, Some(Ok(element!(b"text/plain"))));
+        assert_next!(header.values, None);
     }
 
     #[test]
     fn header_item_trim_ows() {
         let mut input = *b"Content-Type: \t text/plain\t\t  \t";
-        let mut header = HeaderItem::new(&mut input).unwrap();
+        let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_utf8_eq!(header.name(), b"Content-Type");
+        assert_utf8_eq!(header.name, b"Content-Type");
 
-        let mut values = header.values();
-        assert_eq!(values.next(), Some(Ok(Value::Element(b"text/plain"))));
-        assert_eq!(values.next(), None);
+        assert_next!(header.values, Some(Ok(element!(b"text/plain"))));
+        assert_next!(header.values, None);
     }
 
     #[test]
     fn header_item_empty_field_value_no_ows() {
         let mut input = *b"Content-Type:";
-        let mut header = HeaderItem::new(&mut input).unwrap();
+        let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_utf8_eq!(header.name(), b"Content-Type");
-
-        let mut values = header.values();
-        assert_eq!(values.next(), None);
+        assert_utf8_eq!(header.name, b"Content-Type");
+        assert_next!(header.values, None);
     }
 
     #[test]
     fn header_item_empty_field_value_ows() {
         let mut input = *b"Content-Type:  \t \t\t  \t";
-        let mut header = HeaderItem::new(&mut input).unwrap();
+        let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_utf8_eq!(header.name(), b"Content-Type");
-
-        let mut values = header.values();
-        assert_eq!(values.next(), None);
+        assert_utf8_eq!(header.name, b"Content-Type");
+        assert_next!(header.values, None);
     }
 
     #[test]
@@ -1328,7 +1183,7 @@ mod test {
 
         let expected = Err(error::Error::EmptyLine);
 
-        assert_eq!(HeaderItem::new(&mut input), expected);
+        assert_eq!(HeaderLine::new(&mut input), expected);
     }
 
     #[test]
@@ -1337,7 +1192,7 @@ mod test {
 
         let expected = Err(error::Error::MissingFieldDelimiter);
 
-        assert_eq!(HeaderItem::new(&mut input), expected);
+        assert_eq!(HeaderLine::new(&mut input), expected);
     }
 
     #[test]
@@ -1346,7 +1201,7 @@ mod test {
 
         let expected = Err(error::Error::MissingFieldName);
 
-        assert_eq!(HeaderItem::new(&mut input), expected);
+        assert_eq!(HeaderLine::new(&mut input), expected);
     }
 
     #[test]
@@ -1355,110 +1210,99 @@ mod test {
 
         let expected = Err(error::Error::InvalidFieldName(b'='));
 
-        assert_eq!(HeaderItem::new(&mut input), expected);
+        assert_eq!(HeaderLine::new(&mut input), expected);
     }
 
     #[test]
     fn header_value_err_invalid_field_value_any() {
         let mut input = *b"Content-Type: text\0plain";
-        let mut header = HeaderItem::new(&mut input).unwrap();
-        let mut values = header.values();
+        let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_eq!(
-            values.next(),
+        assert_next!(
+            header.values,
             Some(Err(error::ErrorValue::InvalidFieldValue(b'\0')))
         );
-        assert_eq!(values.next(), None);
+        assert_next!(header.values, None);
     }
 
     #[test]
     fn header_value_err_invalid_field_value_crlf() {
         let mut input = *b"Content-Type: text/plain\r\n";
-        let mut header = HeaderItem::new(&mut input).unwrap();
-        let mut values = header.values();
+        let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_eq!(
-            values.next(),
+        assert_next!(
+            header.values,
             Some(Err(error::ErrorValue::InvalidFieldValue(b'\r')))
         );
-        assert_eq!(values.next(), None);
+        assert_next!(header.values, None);
     }
 
     #[test]
     fn header_value_err_invalid_field_value_start() {
         let mut input = *b"Content-Type: \" text/plain\"";
-        let mut header = HeaderItem::new(&mut input).unwrap();
-        let mut values = header.values();
+        let mut header = HeaderLine::new(&mut input).unwrap();
 
         assert_eq!(
-            values.next(),
+            header.values.next(),
             Some(Err(error::ErrorValue::InvalidFieldValue(b' ')))
         );
-        assert_eq!(values.next(), None);
+        assert_next!(header.values, None);
     }
 
     #[test]
     fn header_value_err_invalid_field_parameter_key() {
-        let mut input = *b"Content-Type: ; bo\\undary=7MA4YWxkTrZu0gW";
-        let mut header = HeaderItem::new(&mut input).unwrap();
-        let mut values = header.values();
+        let mut input = *b"Content-Type: ; bo\\undary=7MA4YWxk";
+        let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_eq!(
-            values.next(),
+        assert_next!(
+            header.values,
             Some(Err(error::ErrorValue::InvalidFieldParameter(b'\\')))
         );
-        assert_eq!(values.next(), None);
+        assert_next!(header.values, None);
     }
 
     #[test]
     fn header_value_err_invalid_field_parameter_val() {
         let mut input = *b"Content-Type: ; boundary=7MA4Y\\WxkTrZu0gW";
-        let mut header = HeaderItem::new(&mut input).unwrap();
-        let mut values = header.values();
+        let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_eq!(
-            values.next(),
+        assert_next!(
+            header.values,
             Some(Err(error::ErrorValue::InvalidFieldParameter(b'\\')))
         );
-        assert_eq!(values.next(), None);
+        assert_next!(header.values, None);
     }
 
     #[test]
     fn header_value_field_element_quote_pair() {
         let mut input = *b"Content-Type: \"\\\"text/plain\\\"\"";
-        let mut header = HeaderItem::new(&mut input).unwrap();
-        let mut values = header.values();
+        let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_eq!(
-            values.next(),
-            Some(Ok(Value::Element(b"\\\"text/plain\\\"")))
-        );
-        assert_eq!(values.next(), None);
+        assert_next!(header.values, Some(Ok(element!(b"\\\"text/plain\\\""))));
+        assert_next!(header.values, None);
     }
 
     #[test]
     fn header_value_err_invalid_field_quote_element() {
         let mut input = *b"Content-Type: \"text\\\0/plain\"";
-        let mut header = HeaderItem::new(&mut input).unwrap();
-        let mut values = header.values();
+        let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_eq!(
-            values.next(),
+        assert_next!(
+            header.values,
             Some(Err(error::ErrorValue::InvalidEscapeSequence(b'\0')))
         );
-        assert_eq!(values.next(), None);
+        assert_next!(header.values, None);
     }
 
     #[test]
     fn header_value_err_invalid_field_quote_parameter() {
         let mut input = *b"Content-Type: ; boundary=\"7MA4Y\\\0WxkTrZu0gW\"";
-        let mut header = HeaderItem::new(&mut input).unwrap();
-        let mut values = header.values();
+        let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_eq!(
-            values.next(),
+        assert_next!(
+            header.values,
             Some(Err(error::ErrorValue::InvalidEscapeSequence(b'\0')))
         );
-        assert_eq!(values.next(), None);
+        assert_next!(header.values, None);
     }
 }

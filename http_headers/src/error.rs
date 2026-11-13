@@ -14,7 +14,7 @@ pub enum Error {
     ///
     /// let mut input = *b"";
     ///
-    /// assert_eq!(line::HeaderItem::new(&mut input), Err(Error::EmptyLine));
+    /// assert_eq!(line::HeaderLine::new(&mut input), Err(Error::EmptyLine));
     /// # Ok(())
     /// # }
     /// ```
@@ -30,7 +30,7 @@ pub enum Error {
     ///
     /// let mut input = *b"Content-Type text/plain\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// assert_eq!(headers.next(), Some(Err(Error::MissingFieldDelimiter)));
     /// # Ok(())
     /// # }
@@ -47,7 +47,7 @@ pub enum Error {
     ///
     /// let mut input = *b": text/plain\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// assert_eq!(headers.next(), Some(Err(Error::MissingFieldName)));
     /// # Ok(())
     /// # }
@@ -64,7 +64,7 @@ pub enum Error {
     ///
     /// let mut input = *b"Content-Type: text/plain";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// assert_eq!(headers.next(), Some(Err(Error::MissingCRLFDelimiter)));
     /// # Ok(())
     /// # }
@@ -83,7 +83,7 @@ pub enum Error {
     ///
     /// let mut input = *b"Content=Type: text/plain\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// assert_eq!(headers.next(), Some(Err(Error::InvalidFieldName(b'='))));
     /// # Ok(())
     /// # }
@@ -141,9 +141,9 @@ pub enum ErrorValue {
     ///
     /// let mut input = *b"Example-List: ,  ,, ,\r\n\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values();
+    /// let mut values = header.values;
     ///
     /// assert_eq!(values.next(), Some(Err(ErrorValue::EmptyList)));
     /// # Ok(())
@@ -168,9 +168,9 @@ pub enum ErrorValue {
     ///
     /// let mut input = *b"Content-Type: \"multipart/form-data\r\n\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values();
+    /// let mut values = header.values;
     ///
     /// assert_eq!(values.next(), Some(Err(ErrorValue::MissingClosingQuote)));
     /// # Ok(())
@@ -199,9 +199,9 @@ pub enum ErrorValue {
     ///
     /// let mut input = *b"Content-Type: \"multipart\"/form-data\r\n\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values();
+    /// let mut values = header.values;
     ///
     /// assert_eq!(values.next(), Some(Err(ErrorValue::LeftoverBytes)));
     /// # Ok(())
@@ -226,9 +226,9 @@ pub enum ErrorValue {
     ///
     /// let mut input = *b"Content-Type: ;boundary7MA4YWxkTrZu0gW\r\n\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values();
+    /// let mut values = header.values;
     ///
     /// assert_eq!(
     ///     values.next(),
@@ -258,9 +258,9 @@ pub enum ErrorValue {
     ///
     /// let mut input = *b"Content-Type: ;=7MA4YWxkTrZu0gW\r\n\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values();
+    /// let mut values = header.values;
     ///
     /// assert_eq!(values.next(), Some(Err(ErrorValue::MissingParameterKey)));
     /// # Ok(())
@@ -287,9 +287,9 @@ pub enum ErrorValue {
     ///
     /// let mut input = *b"Content-Type: ;boundary=\r\n\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values();
+    /// let mut values = header.values;
     ///
     /// assert_eq!(values.next(), Some(Err(ErrorValue::MissingParameterValue)));
     /// # Ok(())
@@ -316,9 +316,9 @@ pub enum ErrorValue {
     ///
     /// let mut input = *b"Content-Type: text\0plain\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values();
+    /// let mut values = header.values;
     ///
     /// assert_eq!(
     ///     values.next(),
@@ -356,9 +356,9 @@ pub enum ErrorValue {
     /// // "\" cannot be used in parameter keys.
     /// let mut input = *b"Content-Type: ; bo\\undary=7MA4YWxkTrZu0gW\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values();
+    /// let mut values = header.values;
     ///
     /// assert_eq!(
     ///     values.next(),
@@ -379,9 +379,9 @@ pub enum ErrorValue {
     /// // This time the parameter *value* is invalid.
     /// let mut input = *b"Content-Type: ; boundary=7MA4Y\\WxkTrZu0gW\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values();
+    /// let mut values = header.values;
     ///
     /// assert_eq!(
     ///     values.next(),
@@ -439,9 +439,9 @@ pub enum ErrorValue {
     ///
     /// let mut input = *b"Content-Type: \"text\\\0/plain\"\r\n";
     ///
-    /// let mut headers = line::HeaderLines::new(&mut input);
+    /// let mut headers = line::Headers::new(&mut input);
     /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values();
+    /// let mut values = header.values;
     ///
     /// assert_eq!(
     ///     values.next(),

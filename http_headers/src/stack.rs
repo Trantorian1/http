@@ -107,7 +107,7 @@ mod test {
     fn stack_drop() {
         struct DropTester<'a>(&'a std::cell::RefCell<usize>);
 
-        impl<'a> Drop for DropTester<'a> {
+        impl Drop for DropTester<'_> {
             fn drop(&mut self) {
                 *self.0.borrow_mut() += 1;
             }

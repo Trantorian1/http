@@ -24,6 +24,11 @@ pub mod prelude {
     //!
     //! The prelude may grow over time as additional items see ubiquitous use.
 
+    pub use super::element;
     pub use super::error::*;
     pub use super::line;
+    pub use super::line::HeaderLine;
+    pub use super::line::Headers;
+    pub use super::line::Value;
+    pub use super::parameter;
 }
