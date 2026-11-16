@@ -29,8 +29,9 @@ pub(crate) enum ErrorParsing {
 
     /// An element did not normalize-match the expected name of a struct or variant.
     NameMismatch {
-        /// The name expected by the target type.
-        expected: &'static str,
+        /// The name expected by the target type (owned: serde hands the name out as a plain
+        /// `&str`, so it cannot be stored borrowed).
+        expected: String,
         /// The element bytes as found on the wire.
         found: Vec<u8>,
     },
@@ -397,6 +398,26 @@ macro_rules! integer_hint {
     };
 }
 
+/// The [`integer_hint!`] counterpart for [`SliceDeserializer`]: the slice is already a single
+/// value, so it is parsed directly.
+macro_rules! slice_integer_hint {
+    ($method:ident, $ty:ty, $visit:ident, $signed:literal) => {
+        fn $method<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where
+            V: de::Visitor<'de>,
+        {
+            let value = parse_integer(self.bytes, $signed)?;
+            let value = <$ty>::try_from(value).map_err(|_| {
+                Error::ErrorParsing(ErrorParsing::InvalidInteger {
+                    found: self.bytes.to_vec(),
+                })
+            })?;
+
+            visitor.$visit(value)
+        }
+    };
+}
+
 /// Sequence access over the deserializer's item stream: each element seed deserializes one list
 /// item, with the item-scope flag set for the duration of the seed call so that item-scoped
 /// drains stop at the next element boundary.
@@ -436,10 +457,13 @@ impl<'de> de::SeqAccess<'de> for SeqAccess<'_, 'de> {
     }
 }
 
-/// A deserializer over a single borrowed byte slice, emitting only string/bytes data. Used by
-/// [`MapAccess`] to serve the key and value halves of a parameter pair.
+/// A deserializer over a single borrowed byte slice, emitting string/bytes data and identifiers.
+/// Used by [`MapAccess`] to serve the key and value halves of a parameter pair.
 struct SliceDeserializer<'de> {
     bytes: &'de [u8],
+
+    /// The expected-name list for identifier matching, if any; `None` serves raw bytes.
+    names: Option<&'static [&'static str]>,
 }
 
 impl<'de> de::Deserializer<'de> for SliceDeserializer<'de> {
@@ -489,33 +513,13 @@ impl<'de> de::Deserializer<'de> for SliceDeserializer<'de> {
         unsupported_hint!("bool")
     }
 
-    fn deserialize_i8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("i8")
-    }
+    slice_integer_hint!(deserialize_i8, i8, visit_i8, true);
 
-    fn deserialize_i16<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("i16")
-    }
+    slice_integer_hint!(deserialize_i16, i16, visit_i16, true);
 
-    fn deserialize_i32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("i32")
-    }
+    slice_integer_hint!(deserialize_i32, i32, visit_i32, true);
 
-    fn deserialize_i64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("i64")
-    }
+    slice_integer_hint!(deserialize_i64, i64, visit_i64, true);
 
     fn deserialize_i128<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -524,33 +528,13 @@ impl<'de> de::Deserializer<'de> for SliceDeserializer<'de> {
         unsupported_hint!("i128")
     }
 
-    fn deserialize_u8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("u8")
-    }
+    slice_integer_hint!(deserialize_u8, u8, visit_u8, false);
 
-    fn deserialize_u16<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("u16")
-    }
+    slice_integer_hint!(deserialize_u16, u16, visit_u16, false);
 
-    fn deserialize_u32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("u32")
-    }
+    slice_integer_hint!(deserialize_u32, u32, visit_u32, false);
 
-    fn deserialize_u64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("u64")
-    }
+    slice_integer_hint!(deserialize_u64, u64, visit_u64, false);
 
     fn deserialize_u128<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -580,18 +564,20 @@ impl<'de> de::Deserializer<'de> for SliceDeserializer<'de> {
         unsupported_hint!("char")
     }
 
-    fn deserialize_option<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("option")
+        // A parameter value is always present (even when empty); absence is the missing-key case,
+        // which serde's map semantics resolve before any value deserialization.
+        visitor.visit_some(self)
     }
 
-    fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("unit")
+        visitor.visit_unit()
     }
 
     fn deserialize_unit_struct<V>(self, _name: &str, _visitor: V) -> Result<V::Value, Self::Error>
@@ -669,11 +655,21 @@ impl<'de> de::Deserializer<'de> for SliceDeserializer<'de> {
         unsupported_hint!("enum")
     }
 
-    fn deserialize_identifier<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("identifier")
+        // A normalized match feeds the exact expected name so the target's own identifier
+        // visitor recognizes it.
+        if let Some(name) = match_identifier(self.bytes, self.names) {
+            return visitor.visit_borrowed_str(name);
+        }
+
+        // No list, or no match: feed the raw wire bytes (rename/alias fallback).
+        let s = std::str::from_utf8(self.bytes)
+            .map_err(|_| Error::ErrorParsing(ErrorParsing::InvalidUtf8))?;
+
+        visitor.visit_borrowed_str(s)
     }
 
     fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -713,7 +709,12 @@ impl<'de> de::MapAccess<'de> for MapAccess<'_, 'de> {
                 let val_bytes = shared_bytes(val);
                 self.pending_value = Some(val_bytes);
 
-                let pair_key = seed.deserialize(SliceDeserializer { bytes: key_bytes })?;
+                // Keys are identifier-matched against the pending expected-name list (struct and
+                // enum-variant fields); with no list set they pass through raw (plain maps).
+                let pair_key = seed.deserialize(SliceDeserializer {
+                    bytes: key_bytes,
+                    names: self.de.pending_names,
+                })?;
                 Ok(Some(pair_key))
             },
             // An element mid-drain: a hard error at value position (mixed list), or the end of
@@ -736,7 +737,10 @@ impl<'de> de::MapAccess<'de> for MapAccess<'_, 'de> {
             )));
         };
 
-        seed.deserialize(SliceDeserializer { bytes: val })
+        seed.deserialize(SliceDeserializer {
+            bytes: val,
+            names: None,
+        })
     }
 }
 
@@ -989,14 +993,70 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
 
     fn deserialize_struct<V>(
         self,
-        _name: &str,
-        _fields: &'static [&'static str],
-        _visitor: V,
+        name: &str,
+        fields: &'static [&'static str],
+        visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("struct")
+        let shape = self.classify_shape()?;
+
+        if shape == Shape::Empty {
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected an element, found an empty field value",
+            )));
+        }
+
+        // The head names the item: validate it against the struct name. A params-only item
+        // carries no name and skips the check.
+        let Some(head) = self.next_value()? else {
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected an element, found an empty field value",
+            )));
+        };
+
+        match head {
+            Value::Element(element) => {
+                let wire = shared_bytes(element);
+
+                if normalize(wire) != normalize(name.as_bytes()) {
+                    return Err(Error::ErrorParsing(ErrorParsing::NameMismatch {
+                        expected: name.to_owned(),
+                        found: wire.to_vec(),
+                    }));
+                }
+            },
+            // A params-only item carries no name: buffer the head back so the map serves it.
+            Value::Parameter { .. } => self.head = Some(head),
+        }
+
+        // Stream the item's parameters as a map, with keys identifier-matched against the
+        // fields. Item scope makes the drain stop at the next item boundary (buffered back);
+        // both slots are saved and restored so nested uses (e.g. an enum variant payload) keep
+        // their own expectations.
+        let prev_names = self.pending_names;
+        let prev_scope = self.in_item_scope;
+        self.pending_names = Some(fields);
+        self.in_item_scope = true;
+
+        let result = visitor.visit_map(MapAccess {
+            de: &mut *self,
+            pending_value: None,
+        });
+
+        self.in_item_scope = prev_scope;
+        self.pending_names = prev_names;
+
+        // A struct is a single item: at value position nothing may follow the item. Inside a
+        // sequence item the trailing boundary element belongs to the next seed.
+        if !prev_scope && (self.head.is_some() || self.lookahead.is_some()) {
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected a single item",
+            )));
+        }
+
+        result
     }
 
     fn deserialize_enum<V>(
@@ -1027,17 +1087,11 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             Value::Parameter { key, .. } => shared_bytes(key),
         };
 
-        // A normalized match feeds the exact expected name so the target's own identifier
-        // visitor recognizes it.
-        if let Some(name) = match_identifier(wire, self.pending_names) {
-            return visitor.visit_borrowed_str(name);
+        SliceDeserializer {
+            bytes: wire,
+            names: self.pending_names,
         }
-
-        // No list, or no match: feed the raw wire bytes (rename/alias fallback).
-        let s = std::str::from_utf8(wire)
-            .map_err(|_| Error::ErrorParsing(ErrorParsing::InvalidUtf8))?;
-
-        visitor.visit_borrowed_str(s)
+        .deserialize_identifier(visitor)
     }
 
     fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -1162,7 +1216,7 @@ mod test {
     #[test]
     fn display_name_mismatch() {
         let err = Error::ErrorParsing(ErrorParsing::NameMismatch {
-            expected: "TextPlain",
+            expected: "TextPlain".to_owned(),
             found: b"text/html".to_vec(),
         });
 
@@ -2200,7 +2254,10 @@ mod test {
     fn slice_deserializer_ignored_any() {
         // A single parameter value is ignored in place; there is nothing to advance past.
         let bytes = *b"value";
-        let slice = SliceDeserializer { bytes: &bytes };
+        let slice = SliceDeserializer {
+            bytes: &bytes,
+            names: None,
+        };
 
         let value: serde::de::IgnoredAny = serde::Deserialize::deserialize(slice).unwrap();
 
@@ -2396,5 +2453,219 @@ mod test {
         let value: Identifier = serde::Deserialize::deserialize(&mut de).unwrap();
 
         assert_eq!(value, Identifier("charset".to_owned()));
+    }
+
+    /// A struct target whose name normalizes to `textplain` (test-only).
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    struct TextPlain {
+        charset: Option<String>,
+    }
+
+    /// A struct target with a `snake_case` field bridged from a hyphenated wire key.
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    struct NoCache {
+        max_age: Option<String>,
+    }
+
+    /// Same as [`NoCache`] but rejecting unknown fields (serde error path). The container rename
+    /// stands in for a type name that would normalize to `nocache`.
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    #[serde(rename = "no-cache", deny_unknown_fields)]
+    struct StrictNoCache {
+        max_age: Option<String>,
+    }
+
+    /// A struct target with a required field (missing-field error path).
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    struct ApplicationJson {
+        boundary: String,
+    }
+
+    #[test]
+    fn deserialize_struct_element_with_params() {
+        let mut input = *b"Example-X: text/plain; charset=utf-8";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: TextPlain = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(
+            value,
+            TextPlain {
+                charset: Some("utf-8".to_owned())
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_struct_bare_element_is_zero_entry_map() {
+        let mut input = *b"Example-X: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: TextPlain = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, TextPlain { charset: None });
+    }
+
+    #[test]
+    fn deserialize_struct_name_mismatch() {
+        // `NoCache` normalizes to `nocache`, not `textplain`.
+        let mut input = *b"Example-X: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<NoCache, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::NameMismatch {
+                expected: "NoCache".to_owned(),
+                found: b"text/plain".to_vec()
+            }))
+        );
+    }
+
+    #[test]
+    fn deserialize_struct_params_only_skips_name_check() {
+        let mut input = *b"Example-X: ;charset=utf-8";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: TextPlain = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(
+            value,
+            TextPlain {
+                charset: Some("utf-8".to_owned())
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_struct_identifier_matches_field_key() {
+        // The hyphenated wire key `max-age` bridges to the snake_case field `max_age`.
+        let mut input = *b"Example-X: no-cache; max-age=3600";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: NoCache = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(
+            value,
+            NoCache {
+                max_age: Some("3600".to_owned())
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_struct_rejects_multi_item_list() {
+        let mut input = *b"Example-X: text/plain, text/html";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<TextPlain, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected a single item"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_struct_rejects_empty_field_value() {
+        let mut input = *b"Example-X:";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<TextPlain, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected an element, found an empty field value"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_struct_unknown_field_ignored_by_default() {
+        // Plain serde semantics: without `deny_unknown_fields`, unknown keys are ignored.
+        let mut input = *b"Example-X: no-cache; bogus=1";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: NoCache = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, NoCache { max_age: None });
+    }
+
+    #[test]
+    fn deserialize_struct_denied_unknown_field_is_serde_error() {
+        let mut input = *b"Example-X: no-cache; bogus=1";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<StrictNoCache, Error> = serde::Deserialize::deserialize(&mut de);
+
+        let Err(Error::ErrorParsing(ErrorParsing::Custom(message))) = &result else {
+            panic!("expected a serde custom error, got {result:?}");
+        };
+
+        assert!(
+            message.contains("unknown field"),
+            "unexpected message: {message}"
+        );
+    }
+
+    #[test]
+    fn deserialize_struct_missing_required_field() {
+        let mut input = *b"Example-X: application/json";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<ApplicationJson, Error> = serde::Deserialize::deserialize(&mut de);
+
+        let Err(Error::ErrorParsing(ErrorParsing::Custom(message))) = &result else {
+            panic!("expected a serde custom error, got {result:?}");
+        };
+
+        assert!(
+            message.contains("missing field"),
+            "unexpected message: {message}"
+        );
+    }
+
+    #[test]
+    fn deserialize_struct_list_of_items() {
+        let mut input = *b"Example-X: text/plain, text/plain; charset=utf-8";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Vec<TextPlain> = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(
+            value,
+            vec![
+                TextPlain { charset: None },
+                TextPlain {
+                    charset: Some("utf-8".to_owned())
+                }
+            ]
+        );
     }
 }
