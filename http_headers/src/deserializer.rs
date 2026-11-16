@@ -135,6 +135,17 @@ pub(crate) enum Shape {
     List,
 }
 
+/// A consumed bare-element scope: either a borrowed view of a single element or an owned
+/// `", "`-rejoin of a list of elements (the one documented allocation).
+#[derive(Debug)]
+enum BareScope<'a> {
+    /// A single bare element, borrowed from the backing buffer.
+    Borrowed(&'a [u8]),
+
+    /// A list of bare elements, rejoined with `", "`.
+    Rejoined(Vec<u8>),
+}
+
 /// Serde deserializer for a single header field value.
 ///
 /// Wraps the zero-copy [`HeaderValues`] iterator together with at most two buffered values (the
@@ -205,6 +216,334 @@ impl<'a> Deserializer<'a> {
                 Ok(Shape::List)
             },
         }
+    }
+
+    /// Consumes a bare-element scope: a single bare element yields a borrowed view of it; a list
+    /// of bare elements yields an owned `", "`-rejoin (the one documented allocation). Any
+    /// parameter in scope is a hard error, as is an empty field value.
+    fn bare_element_scope(&mut self) -> Result<BareScope<'a>, Error> {
+        let shape = self.classify_shape()?;
+
+        if shape == Shape::Empty {
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected a bare element, found an empty field value",
+            )));
+        }
+
+        // Consume the head buffered by the classification. A `Parameter` head means a params-only
+        // scope, which cannot satisfy a bare-element hint.
+        let Some(Value::Element(head)) = self.next_value()? else {
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected a bare element, found parameters",
+            )));
+        };
+
+        if shape == Shape::Single {
+            return Ok(BareScope::Borrowed(shared_bytes(head)));
+        }
+
+        // The shape is `List`: drain the remaining values, rejecting any parameter.
+        let mut rejoined: Vec<u8> = Vec::new();
+        rejoined.extend_from_slice(shared_bytes(head));
+
+        while let Some(value) = self.next_value()? {
+            match value {
+                Value::Element(element) => {
+                    rejoined.extend_from_slice(b", ");
+                    rejoined.extend_from_slice(shared_bytes(element));
+                },
+                Value::Parameter { .. } => {
+                    return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                        "expected bare elements, found parameters",
+                    )));
+                },
+            }
+        }
+
+        Ok(BareScope::Rejoined(rejoined))
+    }
+
+    /// Emits a consumed bare-element scope to a string visitor: a single bare element is borrowed
+    /// from the buffer (zero-copy); a list of bare elements is rejoined with `", "` and handed
+    /// over as an owned string.
+    fn visit_bare_element_as_string<V>(&mut self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: de::Visitor<'a>,
+    {
+        match self.bare_element_scope()? {
+            BareScope::Borrowed(bytes) => {
+                let s = std::str::from_utf8(bytes)
+                    .map_err(|_| Error::ErrorParsing(ErrorParsing::InvalidUtf8))?;
+                visitor.visit_borrowed_str(s)
+            },
+            // The rejoined string is owned, so it is handed over through `visit_str` (the
+            // no-alloc-compatible path; the visitor copies it).
+            BareScope::Rejoined(bytes) => {
+                let s = String::from_utf8(bytes)
+                    .map_err(|_| Error::ErrorParsing(ErrorParsing::InvalidUtf8))?;
+                visitor.visit_str(&s)
+            },
+        }
+    }
+
+    /// Emits a consumed bare-element scope to a bytes visitor. See
+    /// [`Self::visit_bare_element_as_string`] for the borrowing rules.
+    fn visit_bare_element_as_bytes<V>(&mut self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: de::Visitor<'a>,
+    {
+        match self.bare_element_scope()? {
+            BareScope::Borrowed(bytes) => visitor.visit_borrowed_bytes(bytes),
+            // The rejoined buffer is owned, so it is handed over through `visit_bytes` (the
+            // no-alloc-compatible path; the visitor copies it).
+            BareScope::Rejoined(bytes) => visitor.visit_bytes(&bytes),
+        }
+    }
+}
+
+macro_rules! unsupported_hint {
+    ($hint:literal) => {
+        Err(Error::ErrorParsing(ErrorParsing::UnsupportedHint($hint)))
+    };
+}
+
+impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
+    type Error = Error;
+
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.visit_bare_element_as_string(visitor)
+    }
+
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.visit_bare_element_as_string(visitor)
+    }
+
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.visit_bare_element_as_bytes(visitor)
+    }
+
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.visit_bare_element_as_bytes(visitor)
+    }
+
+    fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("any")
+    }
+
+    fn deserialize_bool<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("bool")
+    }
+
+    fn deserialize_i8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i8")
+    }
+
+    fn deserialize_i16<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i16")
+    }
+
+    fn deserialize_i32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i32")
+    }
+
+    fn deserialize_i64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i64")
+    }
+
+    fn deserialize_i128<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i128")
+    }
+
+    fn deserialize_u8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u8")
+    }
+
+    fn deserialize_u16<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u16")
+    }
+
+    fn deserialize_u32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u32")
+    }
+
+    fn deserialize_u64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u64")
+    }
+
+    fn deserialize_u128<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u128")
+    }
+
+    fn deserialize_f32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("f32")
+    }
+
+    fn deserialize_f64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("f64")
+    }
+
+    fn deserialize_char<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("char")
+    }
+
+    fn deserialize_option<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("option")
+    }
+
+    fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("unit")
+    }
+
+    fn deserialize_unit_struct<V>(self, _name: &str, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("unit struct")
+    }
+
+    fn deserialize_newtype_struct<V>(
+        self,
+        _name: &str,
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("newtype struct")
+    }
+
+    fn deserialize_seq<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("seq")
+    }
+
+    fn deserialize_tuple<V>(self, _len: usize, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("tuple")
+    }
+
+    fn deserialize_tuple_struct<V>(
+        self,
+        _name: &str,
+        _len: usize,
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("tuple struct")
+    }
+
+    fn deserialize_map<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("map")
+    }
+
+    fn deserialize_struct<V>(
+        self,
+        _name: &str,
+        _fields: &'static [&'static str],
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("struct")
+    }
+
+    fn deserialize_enum<V>(
+        self,
+        _name: &str,
+        _variants: &'static [&'static str],
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("enum")
+    }
+
+    fn deserialize_identifier<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("identifier")
+    }
+
+    fn deserialize_ignored_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("ignored any")
     }
 }
 
@@ -516,5 +855,171 @@ mod test {
             shared_str(element),
             Err(Error::ErrorParsing(ErrorParsing::InvalidUtf8))
         ));
+    }
+
+    #[test]
+    fn deserialize_str_borrows_single_bare_element() {
+        let mut input = *b"Content-Type: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: &str = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, "text/plain");
+    }
+
+    #[test]
+    fn deserialize_string_borrows_single_bare_element() {
+        let mut input = *b"Content-Type: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: String = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, "text/plain");
+    }
+
+    #[test]
+    fn deserialize_string_rejoins_bare_element_list() {
+        let mut input = *b"Example-List: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: String = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, "a, b");
+    }
+
+    #[test]
+    fn deserialize_bytes_borrows_single_bare_element() {
+        let mut input = *b"Content-Type: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: &[u8] = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, b"text/plain");
+    }
+
+    /// A byte-buffer target which explicitly requests `deserialize_byte_buf`, since serde's own
+    /// `Vec<u8>` impl deserializes as a sequence instead.
+    #[derive(Debug, PartialEq)]
+    struct ByteBuf(Vec<u8>);
+
+    impl<'de> serde::Deserialize<'de> for ByteBuf {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct Visitor;
+
+            impl serde::de::Visitor<'_> for Visitor {
+                type Value = ByteBuf;
+
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("a byte buffer")
+                }
+
+                fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(ByteBuf(v.to_vec()))
+                }
+            }
+
+            deserializer.deserialize_byte_buf(Visitor)
+        }
+    }
+
+    #[test]
+    fn deserialize_byte_buf_single_bare_element() {
+        let mut input = *b"Content-Type: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: ByteBuf = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, ByteBuf(b"text/plain".to_vec()));
+    }
+
+    #[test]
+    fn deserialize_byte_buf_rejoins_bare_element_list() {
+        let mut input = *b"Example-List: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: ByteBuf = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, ByteBuf(b"a, b".to_vec()));
+    }
+
+    #[test]
+    fn deserialize_str_rejects_element_with_params() {
+        let mut input = *b"Content-Type: text/plain; charset=utf-8";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<String, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected bare elements, found parameters"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_str_rejects_params_only() {
+        let mut input = *b"Example-Params: ;a=1";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<String, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected a bare element, found parameters"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_str_rejects_empty_field_value() {
+        let mut input = *b"Example-X:";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<String, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected a bare element, found an empty field value"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_str_rejects_invalid_utf8() {
+        let mut input = *b"Example-X: te\xffxt";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<String, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(result, Err(Error::ErrorParsing(ErrorParsing::InvalidUtf8)));
     }
 }
