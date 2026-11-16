@@ -165,6 +165,12 @@ pub(crate) struct Deserializer<'a> {
 
     /// Whether the current position is inside a list item (set by the sequence access).
     in_item_scope: bool,
+
+    /// The expected-name list for identifier matching, if any. Set by `deserialize_struct` /
+    /// `deserialize_enum`, consumed by `deserialize_identifier`: a normalized match against one
+    /// of these names is fed back as that exact name; otherwise the raw wire bytes pass through
+    /// (rename/alias fallback).
+    pending_names: Option<&'static [&'static str]>,
 }
 
 impl<'a> Deserializer<'a> {
@@ -176,6 +182,7 @@ impl<'a> Deserializer<'a> {
             head: None,
             lookahead: None,
             in_item_scope: false,
+            pending_names: None,
         }
     }
 
@@ -2240,5 +2247,20 @@ mod test {
     fn normalize_drops_non_ascii_bytes() {
         // `obs-text` (0x80-FF) is legal on the wire but carries no identifier content.
         assert_eq!(normalize(b"a\xffb"), b"ab");
+    }
+
+    #[test]
+    fn pending_names_slot_roundtrip() {
+        let mut input = *b"Content-Type: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        assert_eq!(de.pending_names, None);
+
+        // Simulates what `deserialize_struct` / `deserialize_enum` will do.
+        de.pending_names = Some(&["a", "b"][..]);
+
+        assert_eq!(de.pending_names, Some(&["a", "b"][..]));
     }
 }
