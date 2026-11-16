@@ -669,11 +669,12 @@ impl<'de> de::Deserializer<'de> for SliceDeserializer<'de> {
         unsupported_hint!("identifier")
     }
 
-    fn deserialize_ignored_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("ignored any")
+        // The slice is a single value; there is nothing to advance past.
+        visitor.visit_unit()
     }
 }
 
@@ -1010,11 +1011,22 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         unsupported_hint!("identifier")
     }
 
-    fn deserialize_ignored_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("ignored any")
+        // Consume the head value first so that in item scope exactly one list item is skipped:
+        // the head is this item's own element (or its first parameter), and the subsequent drain
+        // stops at the next item boundary, which `next_value_in_scope` buffers back for the
+        // following seed. At value position the drain consumes the whole remaining stream. The
+        // value carried nothing of interest, so the visitor is completed as unit.
+        if self.next_value()?.is_none() {
+            return visitor.visit_unit();
+        }
+
+        while self.next_value_in_scope()?.is_some() {}
+
+        visitor.visit_unit()
     }
 }
 
@@ -2082,5 +2094,57 @@ mod test {
                 "element with parameters"
             )))
         );
+    }
+
+    #[test]
+    fn deserialize_ignored_any_drains_value_position() {
+        let mut input = *b"Example-Mixed: text/plain; charset=utf-8, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: serde::de::IgnoredAny = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, serde::de::IgnoredAny);
+
+        // The whole stream was consumed.
+        assert_eq!(de.next_value(), Ok(None));
+    }
+
+    #[test]
+    fn deserialize_ignored_any_empty_field_value() {
+        let mut input = *b"Example-X:";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: serde::de::IgnoredAny = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, serde::de::IgnoredAny);
+    }
+
+    #[test]
+    fn deserialize_ignored_any_skips_one_item_in_seq() {
+        // In item scope the drain stops at the next item boundary: each seq element skips exactly
+        // one item.
+        let mut input = *b"Example-List: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Vec<serde::de::IgnoredAny> = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value.len(), 2);
+    }
+
+    #[test]
+    fn slice_deserializer_ignored_any() {
+        // A single parameter value is ignored in place; there is nothing to advance past.
+        let bytes = *b"value";
+        let slice = SliceDeserializer { bytes: &bytes };
+
+        let value: serde::de::IgnoredAny = serde::Deserialize::deserialize(slice).unwrap();
+
+        assert_eq!(value, serde::de::IgnoredAny);
     }
 }
