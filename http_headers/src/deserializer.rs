@@ -443,11 +443,16 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         unsupported_hint!("char")
     }
 
-    fn deserialize_option<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("option")
+        // The classification only buffers values (it never consumes them), so handing `self` to
+        // the inner deserialization re-serves the same stream from the same position.
+        match self.classify_shape()? {
+            Shape::Empty => visitor.visit_none(),
+            _ => visitor.visit_some(self),
+        }
     }
 
     fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
@@ -1021,5 +1026,54 @@ mod test {
         let result: Result<String, Error> = serde::Deserialize::deserialize(&mut de);
 
         assert_eq!(result, Err(Error::ErrorParsing(ErrorParsing::InvalidUtf8)));
+    }
+
+    #[test]
+    fn deserialize_option_some_single_bare_element() {
+        let mut input = *b"Content-Type: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Option<&str> = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, Some("text/plain"));
+    }
+
+    #[test]
+    fn deserialize_option_some_rejoins_bare_element_list() {
+        let mut input = *b"Example-List: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Option<String> = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, Some("a, b".to_owned()));
+    }
+
+    #[test]
+    fn deserialize_option_none_empty_field_value() {
+        let mut input = *b"Example-X:";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Option<String> = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, None);
+    }
+
+    #[test]
+    fn deserialize_option_none_bare_parameter_delimiter() {
+        // A lone leading `;` parses to zero values, just like an empty field value.
+        let mut input = *b"Example-X: ;";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Option<String> = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, None);
     }
 }
