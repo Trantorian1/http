@@ -50,7 +50,7 @@ Rev 2 (feedback incorporated):
 ### Errors
 - A **new standalone error type** for the deserializer layer (name/location to be settled with the prelude work; suggested home: the deserializer module). It is the deserializer's `type Error` and implements `Display`, `Debug`, `std::error::Error`, and `serde::de::Error` (the latter supplying `custom`/`invalid_*` for serde-side failures such as unknown variants).
   - A variant wrapping parser errors (`error::Error`), with `From<error::Error>` — parsing errors surfaced while driving `HeaderValues` still propagate out of deserialization.
-  - An **`ErrorParsing`** variant grouping the deserialization-specific failures: `MissingElement`, element/name mismatch, invalid UTF-8, unsupported shape (parameterized value where a bare element is required; `any` × element+params), unsupported hint (bool/float in v1).
+  - An **`ErrorParsing`** variant grouping the deserialization-specific failures: `MissingElement`, element/name mismatch, invalid UTF-8, unsupported shape (parameterized value where a bare element is required; `any` × element+params), unsupported hint (bool/float in v1), invalid integer (numeric hint on a non-numeric element), and a `Custom` catch-all for serde-reported failures (`de::Error::custom`, e.g. unknown variant).
 - `error.rs` / `ErrorValue` are **not modified** — low-level parser consumers never see serde-specific variants.
 
 ### Borrowing / lifetime model
@@ -74,9 +74,10 @@ Rev 2 (feedback incorporated):
 
 ## Phase 0 — Foundations & scaffolding
 
-- [ ] Add `mod deserializer;` to `src/lib.rs` (visibility settled later alongside the prelude work).
-- [ ] New standalone error type per the Errors section: parser-error wrapper variant + `From<error::Error>`; `ErrorParsing` grouping the serde-specific failures; `Display`/`Debug`/`std::error::Error`/`serde::de::Error` impls. **No changes to `error.rs`.**
-- [ ] Confirm `serde` is a normal dependency (it is: `serde.workspace = true`); `derive` stays dev-only. No `Cargo.toml` change expected — verify.
+- [x] Add `mod deserializer;` to `src/lib.rs` (visibility settled later alongside the prelude work). *(Verified pre-existing: declaration at lib.rs:5, placeholder file present.)*
+- [x] New standalone error type per the Errors section: parser-error wrapper variant + `From<error::Error>`; `ErrorParsing` grouping the serde-specific failures; `Display`/`Debug`/`std::error::Error`/`serde::de::Error` impls. **No changes to `error.rs`.**
+  - Findings: (1) two variants beyond the original list were required — `InvalidInteger` (numeric hints need a content failure distinct from shape failures) and `Custom(String)` (`de::Error::custom` must return `Self`; serde-generated code calls it for unknown variants / invalid values); (2) types are declared `pub(crate)` (matches the `stack.rs` precedent, avoids `unreachable_pub` warnings) pending the prelude visibility work; (3) two transient `dead_code` warnings on the enums remain in the non-test lib build until Phase 1a references them.
+- [x] Confirm `serde` is a normal dependency (it is: `serde.workspace = true`); `derive` stays dev-only. No `Cargo.toml` change expected — verify. *(Verified: compiles with `default-features = false`; no Cargo.toml changes made.)*
 
 ## Phase 1 — Value-level deserializer
 
