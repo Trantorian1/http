@@ -307,6 +307,53 @@ macro_rules! unsupported_hint {
     };
 }
 
+/// Strictly parses element bytes as an integer, returned wide enough (`i128`) to hold any 64-bit
+/// target. Only ASCII digits are accepted, with an optional leading `-` for signed values — no
+/// `+`, whitespace, or other sign forms. The digit-count guard keeps the accumulation overflow-free.
+fn parse_integer(bytes: &[u8], signed: bool) -> Result<i128, Error> {
+    let (negative, digits) = match (signed, bytes.first()) {
+        (true, Some(b'-')) => (true, &bytes[1..]),
+        _ => (false, bytes),
+    };
+
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) || digits.len() > 19 {
+        return Err(Error::ErrorParsing(ErrorParsing::InvalidInteger {
+            found: bytes.to_vec(),
+        }));
+    }
+
+    let mut magnitude: i128 = 0;
+    for c in digits {
+        magnitude = magnitude * 10 + i128::from(*c - b'0');
+    }
+
+    Ok(if negative { -magnitude } else { magnitude })
+}
+
+macro_rules! integer_hint {
+    ($method:ident, $ty:ty, $visit:ident, $signed:literal) => {
+        fn $method<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where
+            V: de::Visitor<'de>,
+        {
+            match self.bare_element_scope()? {
+                BareScope::Borrowed(bytes) => {
+                    let value = parse_integer(bytes, $signed)?;
+                    let value = <$ty>::try_from(value).map_err(|_| {
+                        Error::ErrorParsing(ErrorParsing::InvalidInteger {
+                            found: bytes.to_vec(),
+                        })
+                    })?;
+                    visitor.$visit(value)
+                },
+                BareScope::Rejoined(_) => Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                    "expected a single bare element",
+                ))),
+            }
+        }
+    };
+}
+
 impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     type Error = Error;
 
@@ -352,33 +399,13 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         unsupported_hint!("bool")
     }
 
-    fn deserialize_i8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("i8")
-    }
+    integer_hint!(deserialize_i8, i8, visit_i8, true);
 
-    fn deserialize_i16<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("i16")
-    }
+    integer_hint!(deserialize_i16, i16, visit_i16, true);
 
-    fn deserialize_i32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("i32")
-    }
+    integer_hint!(deserialize_i32, i32, visit_i32, true);
 
-    fn deserialize_i64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("i64")
-    }
+    integer_hint!(deserialize_i64, i64, visit_i64, true);
 
     fn deserialize_i128<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -387,33 +414,13 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         unsupported_hint!("i128")
     }
 
-    fn deserialize_u8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("u8")
-    }
+    integer_hint!(deserialize_u8, u8, visit_u8, false);
 
-    fn deserialize_u16<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("u16")
-    }
+    integer_hint!(deserialize_u16, u16, visit_u16, false);
 
-    fn deserialize_u32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("u32")
-    }
+    integer_hint!(deserialize_u32, u32, visit_u32, false);
 
-    fn deserialize_u64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("u64")
-    }
+    integer_hint!(deserialize_u64, u64, visit_u64, false);
 
     fn deserialize_u128<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -1075,5 +1082,158 @@ mod test {
         let value: Option<String> = serde::Deserialize::deserialize(&mut de).unwrap();
 
         assert_eq!(value, None);
+    }
+
+    #[test]
+    fn parse_integer_accepts_digits_and_optional_minus() {
+        assert_eq!(parse_integer(b"0", false), Ok(0));
+        assert_eq!(parse_integer(b"007", false), Ok(7));
+        assert_eq!(parse_integer(b"12345", true), Ok(12345));
+        assert_eq!(parse_integer(b"-42", true), Ok(-42));
+        assert_eq!(
+            parse_integer(b"9223372036854775807", false),
+            Ok(i128::from(i64::MAX))
+        );
+        assert_eq!(
+            parse_integer(b"-9223372036854775808", true),
+            Ok(i128::from(i64::MIN))
+        );
+    }
+
+    #[test]
+    fn parse_integer_rejects_non_digit_bytes() {
+        for (bytes, signed) in [
+            (b"" as &[u8], false),
+            (b"-" as &[u8], true),
+            (b"+5" as &[u8], true),
+            (b"1.5" as &[u8], false),
+            (b"-1" as &[u8], false),
+            (b"a" as &[u8], true),
+            (b"92233720368547758078" as &[u8], false),
+        ] {
+            assert!(
+                matches!(
+                    parse_integer(bytes, signed),
+                    Err(Error::ErrorParsing(ErrorParsing::InvalidInteger { .. }))
+                ),
+                "expected {bytes:?} (signed: {signed}) to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn deserialize_i64_single_bare_element() {
+        let mut input = *b"Content-Length: 3";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: i64 = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, 3);
+    }
+
+    #[test]
+    fn deserialize_i8_max() {
+        let mut input = *b"Example-Range: 127";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: i8 = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, 127);
+    }
+
+    #[test]
+    fn deserialize_i8_min() {
+        let mut input = *b"Example-Range: -128";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: i8 = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, -128);
+    }
+
+    #[test]
+    fn deserialize_i8_rejects_out_of_range() {
+        let mut input = *b"Example-Range: 300";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<i8, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::InvalidInteger {
+                found: b"300".to_vec()
+            }))
+        );
+    }
+
+    #[test]
+    fn deserialize_u8_rejects_negative() {
+        let mut input = *b"Example-Range: -1";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<u8, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::InvalidInteger {
+                found: b"-1".to_vec()
+            }))
+        );
+    }
+
+    #[test]
+    fn deserialize_u64_single_bare_element() {
+        let mut input = *b"Example-Range: 255";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: u64 = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, 255);
+    }
+
+    #[test]
+    fn deserialize_i64_rejects_list() {
+        let mut input = *b"Example-List: 1, 2";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<i64, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected a single bare element"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_i64_rejects_params_only() {
+        let mut input = *b"Example-Params: ;a=1";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<i64, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected a bare element, found parameters"
+            )))
+        );
     }
 }
