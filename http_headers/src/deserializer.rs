@@ -1616,6 +1616,10 @@ impl<'de> de::Deserializer<'de> for &mut SectionDeserializer<'de> {
 
 #[cfg(test)]
 mod test {
+    use std::marker::PhantomData;
+
+    use de::MapAccess as _;
+
     use super::*;
     use crate::element;
     use crate::error;
@@ -4061,5 +4065,234 @@ mod test {
 
         assert!(!value.borrowed, "a rejoin must be owned");
         assert_eq!(value.content, b"a, b".to_vec());
+    }
+
+    #[test]
+    fn error_path_invalid_utf8_str() {
+        // `obs-text` (0x80-FF) is legal on the wire but fails UTF-8 validation on str paths.
+        let mut input = *b"Example-X: a\xff";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<String, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(result, Err(Error::ErrorParsing(ErrorParsing::InvalidUtf8)));
+    }
+
+    #[test]
+    fn error_path_invalid_utf8_identifier_fallback() {
+        // The rename/alias fallback requires valid UTF-8; matching itself is byte-level.
+        let mut input = *b"Example-X: a\xff";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<Identifier, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(result, Err(Error::ErrorParsing(ErrorParsing::InvalidUtf8)));
+    }
+
+    #[test]
+    fn error_path_identifier_empty_stream() {
+        let mut input = *b"Example-X:";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<Identifier, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected an identifier"
+            )))
+        );
+    }
+
+    #[test]
+    fn error_path_map_access_value_before_key() {
+        // Defensive ordering check: the map serves keys before values strictly.
+        let mut input = *b"Example-X: ;k=v";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let mut map = MapAccess {
+            de: &mut de,
+            pending_value: None,
+        };
+
+        let result: Result<String, Error> = map.next_value_seed(PhantomData::<String>);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "parameter value requested before its key"
+            )))
+        );
+    }
+
+    #[test]
+    fn error_path_section_map_access_value_before_name() {
+        // Defensive ordering check: the section serves names before values strictly.
+        let mut input = *b"Content-Type: x\r\n\r\n";
+
+        let mut headers = line::Headers::new(&mut input);
+        let mut map = SectionMapAccess {
+            headers: &mut headers,
+            names: None,
+            pending_values: None,
+        };
+
+        let result: Result<String, Error> = map.next_value_seed(PhantomData::<String>);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "header value requested before its name"
+            )))
+        );
+    }
+
+    #[test]
+    fn error_path_parser_missing_crlf_at_section_level() {
+        // A section without a terminating CRLF is a parser error, surfaced through the wrapper.
+        let mut input = *b"Content-Type: x";
+
+        let headers = line::Headers::new(&mut input);
+        let result: Result<Section, Error> = crate::de::from_headers(headers);
+
+        assert_eq!(
+            result,
+            Err(Error::Parser(error::Error::MissingCRLFDelimiter))
+        );
+    }
+
+    #[test]
+    fn error_path_parser_missing_field_delimiter_at_section_level() {
+        let mut input = *b"NoColon\r\n\r\n";
+
+        let headers = line::Headers::new(&mut input);
+        let result: Result<Section, Error> = crate::de::from_headers(headers);
+
+        assert_eq!(
+            result,
+            Err(Error::Parser(error::Error::MissingFieldDelimiter))
+        );
+    }
+
+    #[test]
+    fn error_path_parser_missing_field_name_at_section_level() {
+        let mut input = *b": x\r\n\r\n";
+
+        let headers = line::Headers::new(&mut input);
+        let result: Result<Section, Error> = crate::de::from_headers(headers);
+
+        assert_eq!(result, Err(Error::Parser(error::Error::MissingFieldName)));
+    }
+
+    #[test]
+    fn error_path_value_empty_list() {
+        // A list of only empty elements is a value-level parser error.
+        let mut input = *b"Example-X: ,  ,, ,";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<String, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::Parser(error::Error::Value(
+                error::ErrorValue::EmptyList
+            )))
+        );
+    }
+
+    #[test]
+    fn error_path_value_missing_closing_quote() {
+        let mut input = *b"Example-X: \"abc";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<String, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::Parser(error::Error::Value(
+                error::ErrorValue::MissingClosingQuote
+            )))
+        );
+    }
+
+    #[test]
+    fn error_path_value_leftover_bytes() {
+        let mut input = *b"Example-X: \"ab\"/cd";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<String, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::Parser(error::Error::Value(
+                error::ErrorValue::LeftoverBytes
+            )))
+        );
+    }
+
+    #[test]
+    fn error_path_value_missing_parameter_delimiter() {
+        // A parameter key without its `=` delimiter.
+        let mut input = *b"Example-X: ;abc123";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<String, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::Parser(error::Error::Value(
+                error::ErrorValue::MissingParameterDelimiter
+            )))
+        );
+    }
+
+    #[test]
+    fn error_path_value_missing_parameter_key() {
+        let mut input = *b"Example-X: ;=v";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<String, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::Parser(error::Error::Value(
+                error::ErrorValue::MissingParameterKey
+            )))
+        );
+    }
+
+    #[test]
+    fn error_path_value_missing_parameter_value() {
+        let mut input = *b"Example-X: ;k=";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<String, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::Parser(error::Error::Value(
+                error::ErrorValue::MissingParameterValue
+            )))
+        );
     }
 }
