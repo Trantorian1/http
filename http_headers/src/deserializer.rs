@@ -2919,4 +2919,32 @@ mod test {
             )))
         );
     }
+
+    /// A single-variant enum whose field is optional: the Option-field discipline target.
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    enum MimeItem {
+        TextPlain { charset: Option<String> },
+    }
+
+    #[test]
+    fn deserialize_enum_mixed_bare_and_parameterized_list() {
+        // A bare and a parameterized occurrence of the same element both land in the one
+        // variant; the `Option` field is what distinguishes them.
+        let mut input = *b"Example-X: text/plain, text/plain; charset=utf-8";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Vec<MimeItem> = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(
+            value,
+            vec![
+                MimeItem::TextPlain { charset: None },
+                MimeItem::TextPlain {
+                    charset: Some("utf-8".to_owned())
+                }
+            ]
+        );
+    }
 }
