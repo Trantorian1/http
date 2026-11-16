@@ -12,7 +12,7 @@ use super::line::Value;
 ///
 /// This is deliberately separate from [`crate::error::Error`] so that consumers of the low-level
 /// parser in [`crate::line`] never have to handle deserialization-specific variants.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Error {
     /// A parser error surfaced while driving the header value iterator.
     Parser(crate::error::Error),
@@ -22,7 +22,7 @@ pub(crate) enum Error {
 }
 
 /// Deserialization-specific failures which are not raised by the low-level parser.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ErrorParsing {
     /// A params-only field value was encountered where an element is required.
     MissingElement,
@@ -108,6 +108,12 @@ impl From<crate::error::Error> for Error {
     }
 }
 
+impl From<crate::error::ErrorValue> for Error {
+    fn from(err: crate::error::ErrorValue) -> Self {
+        Self::Parser(crate::error::Error::from(err))
+    }
+}
+
 impl From<ErrorParsing> for Error {
     fn from(err: ErrorParsing) -> Self {
         Self::ErrorParsing(err)
@@ -141,11 +147,38 @@ impl<'a> Deserializer<'a> {
             in_item_scope: false,
         }
     }
+
+    /// Pulls the next value out of the lookahead buffer or, if that is empty, the underlying
+    /// iterator.
+    fn next_value(&mut self) -> Result<Option<Value<'a>>, Error> {
+        if let Some(value) = self.lookahead.take() {
+            return Ok(Some(value));
+        }
+
+        Ok(self.values.next().transpose()?)
+    }
+}
+
+/// Coerces an owned element of the backing buffer into a shared view.
+///
+/// Forward-only invariant: taking the mutable slice by value is what enforces this — once a
+/// region has been coerced and yielded, no mutable handle to it remains, so it can never be
+/// mutated again for the lifetime of the buffer.
+fn shared_bytes(element: &mut [u8]) -> &[u8] {
+    element
+}
+
+/// Coerces an owned element of the backing buffer into a shared string view, validating UTF-8.
+///
+/// See [`shared_bytes`] for the forward-only invariant this coercion relies on.
+fn shared_str(element: &mut [u8]) -> Result<&str, Error> {
+    std::str::from_utf8(element).map_err(|_| Error::ErrorParsing(ErrorParsing::InvalidUtf8))
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::element;
     use crate::error;
     use crate::line;
 
@@ -157,6 +190,16 @@ mod test {
             err,
             Error::Parser(error::Error::MissingFieldDelimiter)
         ));
+    }
+
+    #[test]
+    fn error_value_conversion() {
+        let err = Error::from(error::ErrorValue::EmptyList);
+
+        assert_eq!(
+            err,
+            Error::Parser(error::Error::Value(error::ErrorValue::EmptyList))
+        );
     }
 
     #[test]
@@ -253,5 +296,83 @@ mod test {
         let de_b = Deserializer::from_header_values(header_b.values);
 
         assert_ne!(format!("{de_a:?}"), format!("{de_b:?}"));
+    }
+
+    #[test]
+    fn next_value_pulls_in_order() {
+        let mut input = *b"Example-List: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        assert_eq!(de.next_value(), Ok(Some(element!(b"a"))));
+        assert_eq!(de.next_value(), Ok(Some(element!(b"b"))));
+        assert_eq!(de.next_value(), Ok(None));
+    }
+
+    #[test]
+    fn next_value_lookahead_takes_priority() {
+        let mut input = *b"Example-List: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        // Pull both values so the underlying iterator is exhausted...
+        assert_eq!(de.next_value(), Ok(Some(element!(b"a"))));
+        let pulled = de.next_value().unwrap();
+        assert_eq!(pulled, Some(element!(b"b")));
+
+        // ...then buffer the last one in the lookahead. It must be served before any further pull.
+        de.lookahead = pulled;
+        assert_eq!(de.next_value(), Ok(Some(element!(b"b"))));
+
+        // The lookahead pull did not advance the iterator: it is still exhausted.
+        assert_eq!(de.next_value(), Ok(None));
+    }
+
+    #[test]
+    fn shared_bytes_borrows_element() {
+        let mut input = *b"Content-Length: 3";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let Some(Value::Element(element)) = de.next_value().unwrap() else {
+            panic!("expected a single element");
+        };
+
+        assert_eq!(shared_bytes(element), b"3".as_slice());
+    }
+
+    #[test]
+    fn shared_str_borrows_element() {
+        let mut input = *b"Content-Type: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let Some(Value::Element(element)) = de.next_value().unwrap() else {
+            panic!("expected a single element");
+        };
+
+        assert_eq!(shared_str(element), Ok("text/plain"));
+    }
+
+    #[test]
+    fn shared_str_invalid_utf8() {
+        // `obs-text` (0x80-FF) is legal per the parser, so non-UTF-8 elements do reach this layer.
+        let mut input = *b"Example-X: te\xffxt";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let Some(Value::Element(element)) = de.next_value().unwrap() else {
+            panic!("expected a single element");
+        };
+
+        assert!(matches!(
+            shared_str(element),
+            Err(Error::ErrorParsing(ErrorParsing::InvalidUtf8))
+        ));
     }
 }
