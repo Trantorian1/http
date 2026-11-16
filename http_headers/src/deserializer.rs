@@ -321,6 +321,20 @@ impl<'a> Deserializer<'a> {
             BareScope::Rejoined(bytes) => visitor.visit_bytes(&bytes),
         }
     }
+
+    /// Consumes the buffered head element and emits it to a visitor as a borrowed string.
+    fn visit_head_as_string<V>(&mut self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: de::Visitor<'a>,
+    {
+        let Some(Value::Element(head)) = self.next_value()? else {
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected a bare element",
+            )));
+        };
+
+        visitor.visit_borrowed_str(shared_str(head)?)
+    }
 }
 
 macro_rules! unsupported_hint {
@@ -721,6 +735,55 @@ impl<'de> de::MapAccess<'de> for MapAccess<'_, 'de> {
 impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     type Error = Error;
 
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.classify_shape()?;
+
+        if self.head.is_none() {
+            // An empty field value is the unit value.
+            return visitor.visit_unit();
+        }
+
+        match (&self.head, &self.lookahead) {
+            // A single bare element: a borrowed string.
+            (Some(Value::Element(..)), None) => self.visit_head_as_string(visitor),
+
+            // An element carrying parameters: no data model can express a name plus fields under
+            // `any`.
+            (Some(Value::Element(..)), Some(Value::Parameter { .. })) => Err(Error::ErrorParsing(
+                ErrorParsing::UnsupportedShape("element with parameters"),
+            )),
+
+            // A list of bare elements at value position: a sequence re-dispatching each item
+            // through `any`. Inside an item scope the second element is the next item's head
+            // (boundary), so the item itself is a single bare element.
+            (Some(Value::Element(..)), Some(Value::Element(..))) => {
+                if self.in_item_scope {
+                    self.visit_head_as_string(visitor)
+                } else {
+                    visitor.visit_seq(SeqAccess {
+                        de: self,
+                        len: None,
+                        seen: 0,
+                    })
+                }
+            },
+
+            // A params-only scope (single or list): a map; list boundaries flatten.
+            (Some(Value::Parameter { .. }), _) => visitor.visit_map(MapAccess {
+                de: self,
+                pending_value: None,
+            }),
+
+            // An `Empty` classification cannot leave a head behind.
+            (None, _) => Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "unexpected field value shape",
+            ))),
+        }
+    }
+
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
@@ -747,13 +810,6 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         V: de::Visitor<'de>,
     {
         self.visit_bare_element_as_bytes(visitor)
-    }
-
-    fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        unsupported_hint!("any")
     }
 
     fn deserialize_bool<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
@@ -1835,5 +1891,196 @@ mod test {
             serde::Deserialize::deserialize(&mut de).unwrap();
 
         assert_eq!(value.len(), 0);
+    }
+
+    /// A dynamic value capturing whatever `deserialize_any` emits (test-only).
+    #[derive(Debug, PartialEq)]
+    enum AnyValue {
+        Unit,
+        Str(String),
+        Seq(Vec<AnyValue>),
+        Map(std::collections::HashMap<String, String>),
+    }
+
+    impl<'de> serde::Deserialize<'de> for AnyValue {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct Visitor;
+
+            impl<'v> serde::de::Visitor<'v> for Visitor {
+                type Value = AnyValue;
+
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("any value")
+                }
+
+                fn visit_unit<E>(self) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(AnyValue::Unit)
+                }
+
+                fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(AnyValue::Str(v.to_owned()))
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                where
+                    A: serde::de::SeqAccess<'v>,
+                {
+                    let mut items = Vec::new();
+                    while let Some(item) = seq.next_element::<AnyValue>()? {
+                        items.push(item);
+                    }
+                    Ok(AnyValue::Seq(items))
+                }
+
+                fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+                where
+                    A: serde::de::MapAccess<'v>,
+                {
+                    let mut entries = std::collections::HashMap::new();
+                    while let Some(key) = map.next_key::<String>()? {
+                        let value: String = map.next_value()?;
+                        entries.insert(key, value);
+                    }
+                    Ok(AnyValue::Map(entries))
+                }
+            }
+
+            deserializer.deserialize_any(Visitor)
+        }
+    }
+
+    #[test]
+    fn deserialize_any_bare_element_is_str() {
+        let mut input = *b"Content-Type: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: AnyValue = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, AnyValue::Str("text/plain".to_owned()));
+    }
+
+    #[test]
+    fn deserialize_any_list_is_seq() {
+        let mut input = *b"Example-List: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: AnyValue = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(
+            value,
+            AnyValue::Seq(vec![
+                AnyValue::Str("a".to_owned()),
+                AnyValue::Str("b".to_owned())
+            ])
+        );
+    }
+
+    #[test]
+    fn deserialize_any_params_only_is_map() {
+        let mut input = *b"Example-Params: ;a=1";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: AnyValue = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        let mut expected = std::collections::HashMap::new();
+        expected.insert("a".to_owned(), "1".to_owned());
+
+        assert_eq!(value, AnyValue::Map(expected));
+    }
+
+    #[test]
+    fn deserialize_any_params_only_list_flattens() {
+        let mut input = *b"Example-Params: ;a=1, ;b=2";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: AnyValue = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        let mut expected = std::collections::HashMap::new();
+        expected.insert("a".to_owned(), "1".to_owned());
+        expected.insert("b".to_owned(), "2".to_owned());
+
+        assert_eq!(value, AnyValue::Map(expected));
+    }
+
+    #[test]
+    fn deserialize_any_empty_field_value_is_unit() {
+        let mut input = *b"Example-X:";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: AnyValue = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, AnyValue::Unit);
+    }
+
+    #[test]
+    fn deserialize_any_rejects_list_item_with_params() {
+        let mut input = *b"Example-Mixed: text/plain; charset=utf-8, application/json";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<AnyValue, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "element with parameters"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_any_rejects_single_element_with_params() {
+        // No comma: a single element+params item, which `any` cannot express.
+        let mut input = *b"Content-Type: text/plain; charset=utf-8";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<AnyValue, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "element with parameters"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_any_rejects_parameterized_list_item() {
+        // The second item carries parameters, which `any` cannot express inside a seq.
+        let mut input = *b"Example-Mixed: a, b;c=1";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<AnyValue, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "element with parameters"
+            )))
+        );
     }
 }
