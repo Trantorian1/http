@@ -154,8 +154,11 @@ Rev 2 (feedback incorporated):
 
 ## Phase 4 — Section-level deserializer
 
-- [ ] Section deserializer wrapping `Headers<'a>` (the line iterator), presenting a map of name → value.
-- [ ] Its `MapAccess`: keys = lower-cased header names, identifier-matched against the target's struct fields; each value delegates to a fresh value-level deserializer for that line.
+- [x] Section deserializer wrapping `Headers<'a>` (the line iterator), presenting a map of name → value.
+  - Implemented as `SectionDeserializer { headers: Headers<'a> }` with `from_headers()` ctor and a full trait impl on `&mut Self`: `deserialize_map`/`deserialize_struct` are real (streaming via `SectionMapAccess`); every other hint is `unsupported_hint!` (a section is not a scalar, list, or enum).
+- [x] Its `MapAccess`: keys = lower-cased header names, identifier-matched against the target's struct fields; each value delegates to a fresh value-level deserializer for that line.
+  - Implemented as `SectionMapAccess { headers: &mut Headers<'de>, names, pending_values }`: `next_key_seed` pulls one line, serves its lower-cased name through `SliceDeserializer { names }` (identifier-matched for struct targets via the slot, raw for plain maps — same slot-control as value-level maps); `next_value_seed` hands the line's `HeaderValues` to a fresh value-level `Deserializer::from_header_values`.
+  - Findings: (1) **Soundness**: each parsed line is a *disjoint slice* of the input buffer (`Headers::next` uses `split_at_mut`), so holding a line's `HeaderValues` while continuing to iterate `Headers` never aliases a mutable region — no copy, no index tracking needed. (2) Duplicate field names are plain serde semantics, verified by tests rather than implemented: maps last-wins, derived structs error with "duplicate field". (3) Parser errors surface through the `Parser` wrapper unchanged (tested: an illegal field-name byte yields `Error::Parser(InvalidFieldName)`).
 - [ ] Public entry point to deserialize a whole header section into a typed struct or a map. (Duplicate-name behavior is plain serde semantics — derived structs error, maps last-wins — nothing to implement.)
 
 ## Phase 5 — Test hardening & edge cases

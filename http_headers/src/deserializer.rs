@@ -6,6 +6,7 @@
 use serde::de;
 
 use super::line::HeaderValues;
+use super::line::Headers;
 use super::line::Value;
 
 /// Error type for the serde deserialization layer.
@@ -1293,6 +1294,324 @@ fn match_identifier(wire: &[u8], names: Option<&'static [&'static str]>) -> Opti
         .iter()
         .copied()
         .find(|name| normalize(name.as_bytes()) == needle)
+}
+
+/// Serde deserializer for a whole header section: presents the run of lines as a map from
+/// lower-cased field name to field value, with each value served by a fresh value-level
+/// [`Deserializer`] over that line.
+pub(crate) struct SectionDeserializer<'a> {
+    /// The underlying line iterator driving the parser in [`super::line`].
+    headers: Headers<'a>,
+}
+
+impl<'a> SectionDeserializer<'a> {
+    /// Initializes a new section deserializer over a parsed header section.
+    #[must_use]
+    pub(crate) fn from_headers(headers: Headers<'a>) -> Self {
+        Self { headers }
+    }
+}
+
+/// Map access over a header section: each pair is one line — the lower-cased field name as key,
+/// the line's values (served by a fresh value-level deserializer) as value. Holding a line's
+/// values while iterating is sound: every line is a disjoint slice of the input buffer.
+struct SectionMapAccess<'b, 'de> {
+    headers: &'b mut Headers<'de>,
+
+    /// The expected field-name list for identifier matching (struct targets); `None` serves raw
+    /// names (plain map targets).
+    names: Option<&'static [&'static str]>,
+
+    /// The current line's values, pending their value seed.
+    pending_values: Option<HeaderValues<'de>>,
+}
+
+impl<'de> de::MapAccess<'de> for SectionMapAccess<'_, 'de> {
+    type Error = Error;
+
+    fn next_key_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        debug_assert!(self.pending_values.is_none());
+
+        let Some(line_result) = self.headers.next() else {
+            return Ok(None);
+        };
+
+        let line = line_result?;
+
+        let name = shared_bytes(line.name);
+        self.pending_values = Some(line.values);
+
+        seed.deserialize(SliceDeserializer {
+            bytes: name,
+            names: self.names,
+        })
+        .map(Some)
+    }
+
+    fn next_value_seed<T>(&mut self, seed: T) -> Result<T::Value, Self::Error>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        let Some(values) = self.pending_values.take() else {
+            // Unreachable: serde alternates key and value seeds strictly.
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "header value requested before its name",
+            )));
+        };
+
+        seed.deserialize(&mut Deserializer::from_header_values(values))
+    }
+}
+
+impl<'de> de::Deserializer<'de> for &mut SectionDeserializer<'de> {
+    type Error = Error;
+
+    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_map(SectionMapAccess {
+            headers: &mut self.headers,
+            names: None,
+            pending_values: None,
+        })
+    }
+
+    fn deserialize_struct<V>(
+        self,
+        _name: &str,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_map(SectionMapAccess {
+            headers: &mut self.headers,
+            names: Some(fields),
+            pending_values: None,
+        })
+    }
+
+    fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("any")
+    }
+
+    fn deserialize_bool<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("bool")
+    }
+
+    fn deserialize_i8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i8")
+    }
+
+    fn deserialize_i16<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i16")
+    }
+
+    fn deserialize_i32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i32")
+    }
+
+    fn deserialize_i64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i64")
+    }
+
+    fn deserialize_i128<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i128")
+    }
+
+    fn deserialize_u8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u8")
+    }
+
+    fn deserialize_u16<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u16")
+    }
+
+    fn deserialize_u32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u32")
+    }
+
+    fn deserialize_u64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u64")
+    }
+
+    fn deserialize_u128<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u128")
+    }
+
+    fn deserialize_f32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("f32")
+    }
+
+    fn deserialize_f64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("f64")
+    }
+
+    fn deserialize_char<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("char")
+    }
+
+    fn deserialize_str<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("str")
+    }
+
+    fn deserialize_string<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("string")
+    }
+
+    fn deserialize_bytes<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("bytes")
+    }
+
+    fn deserialize_byte_buf<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("byte buf")
+    }
+
+    fn deserialize_option<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("option")
+    }
+
+    fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("unit")
+    }
+
+    fn deserialize_unit_struct<V>(self, _name: &str, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("unit struct")
+    }
+
+    fn deserialize_newtype_struct<V>(
+        self,
+        _name: &str,
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("newtype struct")
+    }
+
+    fn deserialize_seq<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("seq")
+    }
+
+    fn deserialize_tuple<V>(self, _len: usize, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("tuple")
+    }
+
+    fn deserialize_tuple_struct<V>(
+        self,
+        _name: &str,
+        _len: usize,
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("tuple struct")
+    }
+
+    fn deserialize_enum<V>(
+        self,
+        _name: &str,
+        _variants: &'static [&'static str],
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("enum")
+    }
+
+    fn deserialize_identifier<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("identifier")
+    }
+
+    fn deserialize_ignored_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("ignored any")
+    }
 }
 
 #[cfg(test)]
@@ -2945,6 +3264,133 @@ mod test {
                     charset: Some("utf-8".to_owned())
                 }
             ]
+        );
+    }
+
+    /// A section target with hyphenated header names bridged to `snake_case` fields (test-only).
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    struct Section {
+        content_type: Option<String>,
+        content_length: Option<u64>,
+    }
+
+    #[test]
+    fn deserialize_section_map() {
+        let mut input = *b"Content-Type: text/plain\r\nContent-Length: 3\r\n\r\n";
+
+        let headers = line::Headers::new(&mut input);
+        let mut de = SectionDeserializer::from_headers(headers);
+
+        let value: std::collections::HashMap<String, String> =
+            serde::Deserialize::deserialize(&mut de).unwrap();
+
+        let mut expected = std::collections::HashMap::new();
+        expected.insert("content-type".to_owned(), "text/plain".to_owned());
+        expected.insert("content-length".to_owned(), "3".to_owned());
+
+        assert_eq!(value, expected);
+    }
+
+    #[test]
+    fn deserialize_section_struct() {
+        let mut input = *b"Content-Type: text/plain\r\nContent-Length: 3\r\n\r\n";
+
+        let headers = line::Headers::new(&mut input);
+        let mut de = SectionDeserializer::from_headers(headers);
+
+        let value: Section = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(
+            value,
+            Section {
+                content_type: Some("text/plain".to_owned()),
+                content_length: Some(3)
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_section_struct_missing_header_is_none() {
+        let mut input = *b"Content-Type: text/plain\r\n\r\n";
+
+        let headers = line::Headers::new(&mut input);
+        let mut de = SectionDeserializer::from_headers(headers);
+
+        let value: Section = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(
+            value,
+            Section {
+                content_type: Some("text/plain".to_owned()),
+                content_length: None
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_section_empty() {
+        let mut input = *b"\r\n";
+
+        let headers = line::Headers::new(&mut input);
+        let mut de = SectionDeserializer::from_headers(headers);
+
+        let value: std::collections::HashMap<String, String> =
+            serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value.len(), 0);
+    }
+
+    #[test]
+    fn deserialize_section_duplicate_field_map_last_wins() {
+        // Plain serde map semantics: the last occurrence wins.
+        let mut input = *b"Content-Length: 1\r\nContent-Length: 2\r\n\r\n";
+
+        let headers = line::Headers::new(&mut input);
+        let mut de = SectionDeserializer::from_headers(headers);
+
+        let value: std::collections::HashMap<String, String> =
+            serde::Deserialize::deserialize(&mut de).unwrap();
+
+        let mut expected = std::collections::HashMap::new();
+        expected.insert("content-length".to_owned(), "2".to_owned());
+
+        assert_eq!(value, expected);
+    }
+
+    #[test]
+    fn deserialize_section_duplicate_field_struct_errors() {
+        // Plain serde struct semantics: a repeated field is an error.
+        let mut input = *b"Content-Length: 1\r\nContent-Length: 2\r\n\r\n";
+
+        let headers = line::Headers::new(&mut input);
+        let mut de = SectionDeserializer::from_headers(headers);
+
+        let result: Result<Section, Error> = serde::Deserialize::deserialize(&mut de);
+
+        let Err(Error::ErrorParsing(ErrorParsing::Custom(message))) = result else {
+            panic!("expected a serde custom error");
+        };
+
+        assert!(
+            message.contains("duplicate field"),
+            "unexpected message: {message}"
+        );
+    }
+
+    #[test]
+    fn deserialize_section_parser_error_surfaces() {
+        // A space is not a legal header field name byte; the parser error surfaces through the
+        // `Parser` wrapper.
+        let mut input = *b"Bad Name: x\r\n\r\n";
+
+        let headers = line::Headers::new(&mut input);
+        let mut de = SectionDeserializer::from_headers(headers);
+
+        let result: Result<Section, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::Parser(error::Error::InvalidFieldName(b' ')))
         );
     }
 }
