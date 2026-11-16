@@ -2147,4 +2147,53 @@ mod test {
 
         assert_eq!(value, serde::de::IgnoredAny);
     }
+
+    /// Unit-struct target for the unsupported-hint tests (the derive needs a named type).
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    struct UnitStructTarget;
+
+    /// Newtype-struct target for the unsupported-hint tests.
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    struct NewtypeStructTarget(String);
+
+    macro_rules! assert_unsupported_hint {
+        ($test:ident, $input:literal, $ty:ty, $hint:literal) => {
+            #[test]
+            fn $test() {
+                let mut input = *$input;
+
+                let header = line::HeaderLine::new(&mut input).unwrap();
+                let mut de = Deserializer::from_header_values(header.values);
+
+                let result: Result<$ty, Error> = serde::Deserialize::deserialize(&mut de);
+
+                assert_eq!(
+                    result,
+                    Err(Error::ErrorParsing(ErrorParsing::UnsupportedHint($hint)))
+                );
+            }
+        };
+    }
+
+    // The v1-rejected hints fail at the hint level with a clear error, before any content is
+    // inspected — even when the field value would look plausible for the target type.
+    assert_unsupported_hint!(deserialize_bool_rejected, b"Example-X: true", bool, "bool");
+    assert_unsupported_hint!(deserialize_f32_rejected, b"Example-X: 1.5", f32, "f32");
+    assert_unsupported_hint!(deserialize_f64_rejected, b"Example-X: 1.5", f64, "f64");
+    assert_unsupported_hint!(deserialize_char_rejected, b"Example-X: a", char, "char");
+    assert_unsupported_hint!(deserialize_i128_rejected, b"Example-X: 1", i128, "i128");
+    assert_unsupported_hint!(deserialize_u128_rejected, b"Example-X: 1", u128, "u128");
+    assert_unsupported_hint!(deserialize_unit_rejected, b"Example-X: a", (), "unit");
+    assert_unsupported_hint!(
+        deserialize_unit_struct_rejected,
+        b"Example-X: a",
+        UnitStructTarget,
+        "unit struct"
+    );
+    assert_unsupported_hint!(
+        deserialize_newtype_struct_rejected,
+        b"Example-X: a",
+        NewtypeStructTarget,
+        "newtype struct"
+    );
 }
