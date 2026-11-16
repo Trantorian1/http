@@ -415,6 +415,309 @@ impl<'de> de::SeqAccess<'de> for SeqAccess<'_, 'de> {
     }
 }
 
+/// A deserializer over a single borrowed byte slice, emitting only string/bytes data. Used by
+/// [`MapAccess`] to serve the key and value halves of a parameter pair.
+struct SliceDeserializer<'de> {
+    bytes: &'de [u8],
+}
+
+impl<'de> de::Deserializer<'de> for SliceDeserializer<'de> {
+    type Error = Error;
+
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        let s = std::str::from_utf8(self.bytes)
+            .map_err(|_| Error::ErrorParsing(ErrorParsing::InvalidUtf8))?;
+        visitor.visit_borrowed_str(s)
+    }
+
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.deserialize_str(visitor)
+    }
+
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_borrowed_bytes(self.bytes)
+    }
+
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.deserialize_bytes(visitor)
+    }
+
+    fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("any")
+    }
+
+    fn deserialize_bool<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("bool")
+    }
+
+    fn deserialize_i8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i8")
+    }
+
+    fn deserialize_i16<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i16")
+    }
+
+    fn deserialize_i32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i32")
+    }
+
+    fn deserialize_i64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i64")
+    }
+
+    fn deserialize_i128<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("i128")
+    }
+
+    fn deserialize_u8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u8")
+    }
+
+    fn deserialize_u16<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u16")
+    }
+
+    fn deserialize_u32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u32")
+    }
+
+    fn deserialize_u64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u64")
+    }
+
+    fn deserialize_u128<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("u128")
+    }
+
+    fn deserialize_f32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("f32")
+    }
+
+    fn deserialize_f64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("f64")
+    }
+
+    fn deserialize_char<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("char")
+    }
+
+    fn deserialize_option<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("option")
+    }
+
+    fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("unit")
+    }
+
+    fn deserialize_unit_struct<V>(self, _name: &str, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("unit struct")
+    }
+
+    fn deserialize_newtype_struct<V>(
+        self,
+        _name: &str,
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("newtype struct")
+    }
+
+    fn deserialize_seq<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("seq")
+    }
+
+    fn deserialize_tuple<V>(self, _len: usize, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("tuple")
+    }
+
+    fn deserialize_tuple_struct<V>(
+        self,
+        _name: &str,
+        _len: usize,
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("tuple struct")
+    }
+
+    fn deserialize_map<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("map")
+    }
+
+    fn deserialize_struct<V>(
+        self,
+        _name: &str,
+        _fields: &'static [&'static str],
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("struct")
+    }
+
+    fn deserialize_enum<V>(
+        self,
+        _name: &str,
+        _variants: &'static [&'static str],
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("enum")
+    }
+
+    fn deserialize_identifier<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("identifier")
+    }
+
+    fn deserialize_ignored_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("ignored any")
+    }
+}
+
+/// Map access over the deserializer's parameter stream: each pair is one `Parameter` value split
+/// into its key and value halves, served to seeds through [`SliceDeserializer`]. An `Element`
+/// encountered mid-drain ends the map in item scope (next-item boundary) or is a hard error at
+/// value position.
+struct MapAccess<'a, 'de> {
+    de: &'a mut Deserializer<'de>,
+
+    /// The value half of the parameter whose key half was just served; `None` before a key pull.
+    pending_value: Option<&'de [u8]>,
+}
+
+impl<'de> de::MapAccess<'de> for MapAccess<'_, 'de> {
+    type Error = Error;
+
+    fn next_key_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        debug_assert!(self.pending_value.is_none());
+
+        match self.de.next_value_in_scope()? {
+            Some(Value::Parameter { key, val }) => {
+                // Coerce both halves to shared views (forward-only) and hold the value half until
+                // its seed is served.
+                let key_bytes = shared_bytes(key);
+                let val_bytes = shared_bytes(val);
+                self.pending_value = Some(val_bytes);
+
+                let pair_key = seed.deserialize(SliceDeserializer { bytes: key_bytes })?;
+                Ok(Some(pair_key))
+            },
+            // An element mid-drain: a hard error at value position (mixed list), or the end of
+            // this item in item scope (already buffered back by `next_value_in_scope`).
+            Some(Value::Element(..)) => Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected parameters, found an element",
+            ))),
+            None => Ok(None),
+        }
+    }
+
+    fn next_value_seed<T>(&mut self, seed: T) -> Result<T::Value, Self::Error>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        let Some(val) = self.pending_value.take() else {
+            // Unreachable: serde alternates key and value seeds strictly.
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "parameter value requested before its key",
+            )));
+        };
+
+        seed.deserialize(SliceDeserializer { bytes: val })
+    }
+}
+
 impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     type Error = Error;
 
@@ -591,11 +894,33 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         })
     }
 
-    fn deserialize_map<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("map")
+        let shape = self.classify_shape()?;
+
+        // An empty field value is an empty map.
+        if shape == Shape::Empty {
+            return visitor.visit_map(MapAccess {
+                de: self,
+                pending_value: None,
+            });
+        }
+
+        // Only a params-only scope (a `Parameter` head) can satisfy a map hint; an element head —
+        // bare or parameterized — carries a name, not key-value data. The head stays buffered for
+        // the map access to pull as its first pair.
+        if !matches!(self.head, Some(Value::Parameter { .. })) {
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected parameters, found an element",
+            )));
+        }
+
+        visitor.visit_map(MapAccess {
+            de: self,
+            pending_value: None,
+        })
     }
 
     fn deserialize_struct<V>(
@@ -1389,5 +1714,126 @@ mod test {
         let value: Pair = serde::Deserialize::deserialize(&mut de).unwrap();
 
         assert_eq!(value, Pair("a".to_owned(), "b".to_owned()));
+    }
+
+    #[test]
+    fn deserialize_map_params_only() {
+        let mut input = *b"Example-Params: ;a=1";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: std::collections::HashMap<String, String> =
+            serde::Deserialize::deserialize(&mut de).unwrap();
+
+        let mut expected = std::collections::HashMap::new();
+        expected.insert("a".to_owned(), "1".to_owned());
+
+        assert_eq!(value, expected);
+    }
+
+    #[test]
+    fn deserialize_map_flattens_params_only_list() {
+        // List boundaries between consecutive params-only items are lost in the value stream.
+        let mut input = *b"Example-Params: ;a=1, ;b=2";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: std::collections::HashMap<String, String> =
+            serde::Deserialize::deserialize(&mut de).unwrap();
+
+        let mut expected = std::collections::HashMap::new();
+        expected.insert("a".to_owned(), "1".to_owned());
+        expected.insert("b".to_owned(), "2".to_owned());
+
+        assert_eq!(value, expected);
+    }
+
+    #[test]
+    fn deserialize_seq_flattens_params_only_items_into_one_map() {
+        // The seq params-only clause: one list of params-only items is a 1-element seq holding a
+        // single map with all the parameters.
+        let mut input = *b"Example-Params: ;a=1, ;b=2";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Vec<std::collections::HashMap<String, String>> =
+            serde::Deserialize::deserialize(&mut de).unwrap();
+
+        let mut expected_item = std::collections::HashMap::new();
+        expected_item.insert("a".to_owned(), "1".to_owned());
+        expected_item.insert("b".to_owned(), "2".to_owned());
+
+        assert_eq!(value, vec![expected_item]);
+    }
+
+    #[test]
+    fn deserialize_map_rejects_bare_element() {
+        let mut input = *b"Content-Type: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<std::collections::HashMap<String, String>, Error> =
+            serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected parameters, found an element"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_map_rejects_element_with_params() {
+        let mut input = *b"Content-Type: text/plain; charset=utf-8";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<std::collections::HashMap<String, String>, Error> =
+            serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected parameters, found an element"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_map_rejects_element_mid_drain() {
+        // A mixed list (params-only item followed by a bare element) at value position.
+        let mut input = *b"Example-Mixed: ;a=1, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<std::collections::HashMap<String, String>, Error> =
+            serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected parameters, found an element"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_map_empty_field_value() {
+        let mut input = *b"Example-X:";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: std::collections::HashMap<String, String> =
+            serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value.len(), 0);
     }
 }

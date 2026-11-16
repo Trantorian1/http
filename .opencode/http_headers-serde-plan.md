@@ -103,14 +103,16 @@ Rev 2 (feedback incorporated):
 - [x] `deserialize_seq` / `deserialize_tuple` / `deserialize_tuple_struct`: 1-element leniency for bare values; per-item grouping; params-only → 1-element seq of the flattened map.
   - Implemented as: `classify_shape()` at entry + `visitor.visit_seq(SeqAccess { de, len, seen })`; tuple/tuple_struct pass `len` (advisory stop), plain seq passes `None`. **Note:** this required Phase 1c's `SeqAccess` sub-item as a hard dependency — it was implemented here and is marked done below.
   - Findings: (1) item-boundary discipline lives in `Deserializer::next_value_in_scope()`: while `in_item_scope`, an `Element` is buffered back into `head` and reported as end-of-drain, so each item's drain always terminates either at stream end or with the next item's head buffered — which makes "an item exists" decidable as *any buffer non-empty* in `next_element_seed`. (2) Single-element items stay zero-copy: when no continuation is consumed within an item the rejoin buffer stays empty and the element is emitted borrowed (`Vec<String>` over `a, b` → two borrowed visits, no allocation). (3) The params-only clause ("1-element seq of the flattened map") is verified in the `map` sub-item, where `MapAccess` lands.
-- [ ] `deserialize_map` (params-only path): drain parameter pairs into a map; list of params-only items flattens; an `Element` mid-drain (mixed list) → hard error.
+- [x] `deserialize_map` (params-only path): drain parameter pairs into a map; list of params-only items flattens; an `Element` mid-drain (mixed list) → hard error.
+  - Implemented as: `classify_shape()` + head-kind gate (`Parameter` head required — element heads, bare or parameterized, are a name not key-value data → hard error; empty → zero-entry map) + `visitor.visit_map(MapAccess)`. **Note:** required Phase 1c's `MapAccess` sub-item (marked done below), plus a new `SliceDeserializer` over a single borrowed `&[u8]` so each parameter's key/value halves can be served to seeds.
+  - Findings: (1) `SliceDeserializer` implements only str/string/bytes/byte_buf in v1 (borrowed, UTF-8 validated); all other hints are `UnsupportedHint` — e.g. numeric map keys are not supported yet. (2) The mid-drain `Element` case is handled by the shared `next_value_in_scope()`: hard error at value position (mixed list), clean item boundary under seq — one mechanism, both behaviors. (3) The deferred seq params-only clause from the previous step is verified here: `Vec<HashMap>` over `;a=1, ;b=2` → one 1-element seq holding a single flattened map.
 - [ ] `deserialize_any`: bare→str, list→seq, params-only→map, element+params→hard error, empty→unit.
 - [ ] `deserialize_ignored_any`: drain without visiting.
 - [ ] v1-rejected hints (bool, floats, anything else not implemented): clear unsupported error via `ErrorParsing`.
 
 ### 1c. Access objects
 - [x] `SeqAccess` over `&mut D`; sets/clears the item-scope flag around each element seed call. *(Pulled forward by the seq hints, which cannot be expressed without it — implemented in that step.)*
-- [ ] `MapAccess` over `&mut D` for parameter key→value pairs (keys emitted raw for now; identifier matching wires in at Phase 2).
+- [x] `MapAccess` over `&mut D` for parameter key→value pairs (keys emitted raw for now; identifier matching wires in at Phase 2). *(Pulled forward by the map hint, which cannot be expressed without it — implemented in that step.)*
 
 ## Phase 2 — Identifier matching machinery
 
