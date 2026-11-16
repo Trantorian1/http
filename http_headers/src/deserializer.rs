@@ -207,8 +207,10 @@ impl<'a> Deserializer<'a> {
     /// returned instead, ending the current item's drain.
     fn next_value_in_scope(&mut self) -> Result<Option<Value<'a>>, Error> {
         match self.next_value()? {
-            Some(Value::Element(element)) if self.in_item_scope => {
-                self.head = Some(Value::Element(element));
+            Some(value) if self.in_item_scope && starts_new_item(&value) => {
+                // An element inside an item scope is the next item's head: buffer it back and
+                // end the current item's drain.
+                self.head = Some(value);
                 Ok(None)
             },
             other => Ok(other),
