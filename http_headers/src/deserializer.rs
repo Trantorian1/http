@@ -4295,4 +4295,54 @@ mod test {
             )))
         );
     }
+
+    /// A per-item target holding a *borrowed* parameter value (test-only): pins the forward-only
+    /// invariant across continued iteration.
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    struct FrozenItem<'a> {
+        note: Option<&'a str>,
+    }
+
+    #[test]
+    fn forward_only_yielded_regions_stay_frozen() {
+        // The parser mutates later regions in place (lowercasing parameter keys, decoding quoted
+        // pairs). A region already yielded as a borrowed view must be untouched by that work:
+        // item 1's value is borrowed before the parser rewrites item 2's key and value.
+        let mut input = *b"Example-X: Frozen-Item; note=alpha, Frozen-Item; Note=\"bet\\\"a\"";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let items: Vec<FrozenItem<'_>> = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        // Item 1's borrowed view is byte-identical to the wire, despite item 2's in-place
+        // mutations happening after it was yielded.
+        assert_eq!(
+            items[0],
+            FrozenItem {
+                note: Some("alpha")
+            }
+        );
+
+        // Item 2 shows the parser did mutate its own region: the key was lower-cased and the
+        // quoted pair decoded in place.
+        assert_eq!(
+            items[1],
+            FrozenItem {
+                note: Some("bet\"a")
+            }
+        );
+    }
+
+    #[test]
+    fn forward_only_shared_coercion_moves_mutable_borrow() {
+        // `shared_bytes` takes the mutable borrow by value: once a region has been shared, no
+        // mutable handle to it remains — the compile-time half of the forward-only invariant.
+        let mut buffer = *b"abc";
+
+        let owned: &mut [u8] = &mut buffer;
+        let shared = shared_bytes(owned);
+
+        assert_eq!(shared, b"abc");
+    }
 }
