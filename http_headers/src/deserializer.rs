@@ -14,7 +14,7 @@ use super::line::Value;
 /// This is deliberately separate from [`crate::error::Error`] so that consumers of the low-level
 /// parser in [`crate::line`] never have to handle deserialization-specific variants.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Error {
+pub enum Error {
     /// A parser error surfaced while driving the header value iterator.
     Parser(crate::error::Error),
 
@@ -24,7 +24,7 @@ pub(crate) enum Error {
 
 /// Deserialization-specific failures which are not raised by the low-level parser.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ErrorParsing {
+pub enum ErrorParsing {
     /// A params-only field value was encountered where an element is required.
     MissingElement,
 
@@ -3391,6 +3391,52 @@ mod test {
         assert_eq!(
             result,
             Err(Error::Parser(error::Error::InvalidFieldName(b' ')))
+        );
+    }
+
+    #[test]
+    fn public_entry_point_deserializes_struct() {
+        // The public API drives the section deserializer end to end.
+        let mut input = *b"Content-Type: text/plain\r\nContent-Length: 3\r\n\r\n";
+
+        let headers = line::Headers::new(&mut input);
+        let value: Section = crate::de::from_headers(headers).unwrap();
+
+        assert_eq!(
+            value,
+            Section {
+                content_type: Some("text/plain".to_owned()),
+                content_length: Some(3)
+            }
+        );
+    }
+
+    #[test]
+    fn public_entry_point_deserializes_map() {
+        let mut input = *b"Content-Type: text/plain\r\nContent-Length: 3\r\n\r\n";
+
+        let headers = line::Headers::new(&mut input);
+        let value: std::collections::HashMap<String, String> =
+            crate::de::from_headers(headers).unwrap();
+
+        assert_eq!(value.len(), 2);
+        assert_eq!(value.get("content-type"), Some(&"text/plain".to_owned()));
+        assert_eq!(value.get("content-length"), Some(&"3".to_owned()));
+    }
+
+    #[test]
+    fn public_entry_point_propagates_parser_error() {
+        // The error type is public and carries the parser error through the `Parser` wrapper.
+        let mut input = *b"Bad Name: x\r\n\r\n";
+
+        let headers = line::Headers::new(&mut input);
+        let result: Result<Section, crate::de::Error> = crate::de::from_headers(headers);
+
+        assert_eq!(
+            result,
+            Err(crate::de::Error::Parser(error::Error::InvalidFieldName(
+                b' '
+            )))
         );
     }
 }
