@@ -744,6 +744,111 @@ impl<'de> de::MapAccess<'de> for MapAccess<'_, 'de> {
     }
 }
 
+/// Enum access for externally-tagged enums: each list item is one variant occurrence — the head
+/// element names the variant (identifier-matched against the pending variant-name list) and the
+/// item's parameters, if any, are the variant's payload.
+struct EnumAccess<'a, 'de> {
+    de: &'a mut Deserializer<'de>,
+}
+
+impl<'a, 'de> de::EnumAccess<'de> for EnumAccess<'a, 'de> {
+    type Error = Error;
+    type Variant = EnumVariantAccess<'a, 'de>;
+
+    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        // The head element names the variant; a params-only item has no name.
+        let Some(head) = self.de.next_value()? else {
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected an element, found an empty field value",
+            )));
+        };
+
+        let Value::Element(element) = head else {
+            return Err(Error::ErrorParsing(ErrorParsing::MissingElement));
+        };
+
+        let wire = shared_bytes(element);
+        let variant = seed.deserialize(SliceDeserializer {
+            bytes: wire,
+            names: self.de.pending_names,
+        })?;
+
+        Ok((variant, EnumVariantAccess { de: self.de }))
+    }
+}
+
+/// Variant access for externally-tagged enum variants: a unit variant is a bare element (nothing
+/// more); newtype and struct variants stream the item's parameters as a map.
+struct EnumVariantAccess<'a, 'de> {
+    de: &'a mut Deserializer<'de>,
+}
+
+impl<'de> de::VariantAccess<'de> for EnumVariantAccess<'_, 'de> {
+    type Error = Error;
+
+    fn unit_variant(self) -> Result<(), Self::Error> {
+        // A unit variant is a bare element: nothing may follow within the item. Item scope makes
+        // the pull stop at the next item boundary (buffered back for the following seed).
+        let prev_scope = self.de.in_item_scope;
+        self.de.in_item_scope = true;
+
+        let result = match self.de.next_value_in_scope()? {
+            Some(Value::Parameter { .. }) => Err(Error::ErrorParsing(
+                ErrorParsing::UnsupportedShape("expected a bare element, found parameters"),
+            )),
+            _ => Ok(()),
+        };
+
+        self.de.in_item_scope = prev_scope;
+        result
+    }
+
+    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value, Self::Error>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        // The payload is the item's parameters: forward to the main deserializer, which now sees
+        // a params-only scope (the element was consumed as the variant name) and skips the name
+        // check.
+        seed.deserialize(&mut *self.de)
+    }
+
+    fn tuple_variant<V>(self, _len: usize, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        unsupported_hint!("tuple variant")
+    }
+
+    fn struct_variant<V>(
+        self,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        // Stream the item's parameters as a map with keys matched against the variant's fields.
+        // Both slots are saved and restored so following items keep matching variants.
+        let prev_names = self.de.pending_names;
+        let prev_scope = self.de.in_item_scope;
+        self.de.pending_names = Some(fields);
+        self.de.in_item_scope = true;
+
+        let result = visitor.visit_map(MapAccess {
+            de: &mut *self.de,
+            pending_value: None,
+        });
+
+        self.de.in_item_scope = prev_scope;
+        self.de.pending_names = prev_names;
+        result
+    }
+}
+
 impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     type Error = Error;
 
@@ -1062,13 +1167,38 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     fn deserialize_enum<V>(
         self,
         _name: &str,
-        _variants: &'static [&'static str],
-        _visitor: V,
+        variants: &'static [&'static str],
+        visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("enum")
+        let shape = self.classify_shape()?;
+
+        if shape == Shape::Empty {
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected an element, found an empty field value",
+            )));
+        }
+
+        // Each item re-matches a variant: the variant-name list stays pending for the whole
+        // enum and is restored afterwards.
+        let prev_names = self.pending_names;
+        self.pending_names = Some(variants);
+
+        let result = visitor.visit_enum(EnumAccess { de: &mut *self });
+
+        self.pending_names = prev_names;
+
+        // An enum value is a single item: at value position nothing may follow. Inside a
+        // sequence item the trailing boundary element belongs to the next seed.
+        if !self.in_item_scope && (self.head.is_some() || self.lookahead.is_some()) {
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected a single item",
+            )));
+        }
+
+        result
     }
 
     fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -2666,6 +2796,127 @@ mod test {
                     charset: Some("utf-8".to_owned())
                 }
             ]
+        );
+    }
+
+    /// An enum target covering unit, struct, and newtype variants (test-only).
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    enum Mime {
+        TextPlain,
+        TextHtml { charset: Option<String> },
+        NoCache(NoCache),
+    }
+
+    #[test]
+    fn deserialize_enum_unit_variant() {
+        let mut input = *b"Example-X: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Mime = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, Mime::TextPlain);
+    }
+
+    #[test]
+    fn deserialize_enum_struct_variant() {
+        let mut input = *b"Example-X: text/html; charset=utf-8";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Mime = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(
+            value,
+            Mime::TextHtml {
+                charset: Some("utf-8".to_owned())
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_enum_newtype_variant() {
+        let mut input = *b"Example-X: no-cache; max-age=3600";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Mime = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(
+            value,
+            Mime::NoCache(NoCache {
+                max_age: Some("3600".to_owned())
+            })
+        );
+    }
+
+    #[test]
+    fn deserialize_enum_missing_element() {
+        // A params-only item has no element to name the variant.
+        let mut input = *b"Example-X: ;a=1";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<Mime, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::MissingElement))
+        );
+    }
+
+    #[test]
+    fn deserialize_enum_unit_variant_rejects_params() {
+        let mut input = *b"Example-X: text/plain; charset=utf-8";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<Mime, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected a bare element, found parameters"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_enum_rejects_empty_field_value() {
+        let mut input = *b"Example-X:";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<Mime, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected an element, found an empty field value"
+            )))
+        );
+    }
+
+    #[test]
+    fn deserialize_enum_rejects_multi_item_list() {
+        let mut input = *b"Example-X: text/plain, text/html";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let result: Result<Mime, Error> = serde::Deserialize::deserialize(&mut de);
+
+        assert_eq!(
+            result,
+            Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected a single item"
+            )))
         );
     }
 }
