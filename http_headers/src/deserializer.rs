@@ -1011,11 +1011,33 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         unsupported_hint!("enum")
     }
 
-    fn deserialize_identifier<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("identifier")
+        // The identifier is the current value: an element's bytes or a parameter's key half.
+        let Some(value) = self.next_value()? else {
+            return Err(Error::ErrorParsing(ErrorParsing::UnsupportedShape(
+                "expected an identifier",
+            )));
+        };
+
+        let wire = match value {
+            Value::Element(element) => shared_bytes(element),
+            Value::Parameter { key, .. } => shared_bytes(key),
+        };
+
+        // A normalized match feeds the exact expected name so the target's own identifier
+        // visitor recognizes it.
+        if let Some(name) = match_identifier(wire, self.pending_names) {
+            return visitor.visit_borrowed_str(name);
+        }
+
+        // No list, or no match: feed the raw wire bytes (rename/alias fallback).
+        let s = std::str::from_utf8(wire)
+            .map_err(|_| Error::ErrorParsing(ErrorParsing::InvalidUtf8))?;
+
+        visitor.visit_borrowed_str(s)
     }
 
     fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -1072,6 +1094,21 @@ fn normalize(bytes: &[u8]) -> Vec<u8> {
     }
 
     normalized
+}
+
+/// Matches identifier wire bytes against an expected-name list: the first name whose normalized
+/// form equals the wire's wins and is returned; with no list or no match, `None` signals the raw
+/// wire-bytes fallback (rename/alias). Matching is byte-level, so non-UTF-8 wire bytes can still
+/// match — only the fallback path requires valid UTF-8.
+fn match_identifier(wire: &[u8], names: Option<&'static [&'static str]>) -> Option<&'static str> {
+    let expected = names?;
+
+    let needle = normalize(wire);
+
+    expected
+        .iter()
+        .copied()
+        .find(|name| normalize(name.as_bytes()) == needle)
 }
 
 #[cfg(test)]
@@ -2262,5 +2299,102 @@ mod test {
         de.pending_names = Some(&["a", "b"][..]);
 
         assert_eq!(de.pending_names, Some(&["a", "b"][..]));
+    }
+
+    /// A target capturing whatever `deserialize_identifier` feeds (test-only).
+    #[derive(Debug, PartialEq)]
+    struct Identifier(String);
+
+    impl<'de> serde::Deserialize<'de> for Identifier {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct Visitor;
+
+            impl serde::de::Visitor<'_> for Visitor {
+                type Value = Identifier;
+
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("an identifier")
+                }
+
+                fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(Identifier(v.to_owned()))
+                }
+            }
+
+            deserializer.deserialize_identifier(Visitor)
+        }
+    }
+
+    #[test]
+    fn deserialize_identifier_normalized_hit() {
+        let mut input = *b"Example-X: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+        de.pending_names = Some(&["TextPlain"]);
+
+        let value: Identifier = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        // The exact expected name is fed, not the wire bytes.
+        assert_eq!(value, Identifier("TextPlain".to_owned()));
+    }
+
+    #[test]
+    fn deserialize_identifier_collision_first_wins() {
+        let mut input = *b"Example-X: max-age";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+        de.pending_names = Some(&["MaxAge", "max_age"]);
+
+        let value: Identifier = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        // Both names normalize to `maxage`; the first in the list wins.
+        assert_eq!(value, Identifier("MaxAge".to_owned()));
+    }
+
+    #[test]
+    fn deserialize_identifier_rename_fallback() {
+        let mut input = *b"Example-X: bndry";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+        de.pending_names = Some(&["boundary"]);
+
+        let value: Identifier = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        // No normalized match: the raw wire bytes pass through for alias recognition.
+        assert_eq!(value, Identifier("bndry".to_owned()));
+    }
+
+    #[test]
+    fn deserialize_identifier_no_list_passthrough() {
+        let mut input = *b"Example-X: bndry";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Identifier = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, Identifier("bndry".to_owned()));
+    }
+
+    #[test]
+    fn deserialize_identifier_parameter_key_half() {
+        // A parameter contributes its key half as the identifier.
+        let mut input = *b"Example-X: ;charset=utf-8";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Identifier = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, Identifier("charset".to_owned()));
     }
 }

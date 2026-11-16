@@ -129,10 +129,13 @@ Rev 2 (feedback incorporated):
   - Findings: the owned return is internal scratch — it never reaches a visitor; matching in the next sub-item allocates one buffer per identifier plus one per expected name (bounded by field count), noted there.
 - [x] Add a **pending expected-name list** slot on the deserializer: stores `&'static [&'static str]`, set by `deserialize_struct`/`deserialize_enum`, consumed by `deserialize_identifier`.
   - Implemented as `Deserializer::pending_names: Option<&'static [&'static str]>`, initialized to `None` in `from_header_values`. A roundtrip test pins the initial state and the exact type (set/read via direct field access, as tests already do for the buffer slots).
-- [ ] Implement `deserialize_identifier`:
+- [x] Implement `deserialize_identifier`:
   - With an expected-name list present: first-normalized-match wins → feed the exact expected name; otherwise feed raw wire bytes (rename/alias fallback).
   - With no list (e.g. `HashMap` keys): feed raw wire bytes.
-- [ ] Unit tests: normalized hit, collision first-wins, rename fallback, no-list passthrough.
+  - Implemented as: main deserializer pulls the current value (Element → element bytes, Parameter → key half), then a shared free fn `match_identifier(wire, names) -> Option<&'static str>` does first-normalized-match-wins; a match feeds the exact expected name via `visit_borrowed_str`, otherwise the raw wire bytes are UTF-8-validated and fed. Empty stream → `UnsupportedShape("expected an identifier")`.
+  - Findings: (1) matching is byte-level, so non-UTF-8 wire bytes can still match an expected name — only the fallback path requires valid UTF-8 (`InvalidUtf8`). (2) Phase 3's access objects will need to match already-pulled bytes without re-pulling from the stream; `match_identifier` + a small identifier-serving deserializer over raw bytes is the intended wiring (decided when MapAccess/EnumAccess land).
+- [x] Unit tests: normalized hit, collision first-wins, rename fallback, no-list passthrough.
+  - Implemented via an `Identifier` capture target driving `deserialize_identifier` directly; plus a parameter-key-half test pinning that a `Parameter` contributes its key (not value) as the identifier.
 
 ## Phase 3 — Struct + Enum deserialization (build on identifier matching)
 
