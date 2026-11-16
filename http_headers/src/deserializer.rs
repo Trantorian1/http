@@ -4347,4 +4347,23 @@ mod test {
 
         assert_eq!(shared, b"abc");
     }
+
+    #[test]
+    fn fuzz_section_permissive_target_is_consistent() {
+        // Random wire bytes must never panic the deserializer (bolero catches any panic), and
+        // the same bytes must always produce the same outcome: a value, or an error. The target
+        // is permissive — a map of raw names to `any` values — so every expressible shape is
+        // accepted while everything else surfaces as a typed error.
+        bolero::check!().with_max_len(64).for_each(|bytes: &[u8]| {
+            let run = || {
+                let mut buffer = bytes.to_vec();
+
+                let headers = line::Headers::new(&mut buffer);
+
+                crate::de::from_headers::<std::collections::HashMap<String, AnyValue>>(headers)
+            };
+
+            assert_eq!(run(), run());
+        });
+    }
 }
