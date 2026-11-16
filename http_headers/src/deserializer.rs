@@ -193,6 +193,19 @@ impl<'a> Deserializer<'a> {
         Ok(self.values.next().transpose()?)
     }
 
+    /// Like [`Self::next_value`], except that while inside an item scope an `Element` is treated
+    /// as the start of the next list item: it is buffered back (in [`Self::head`]) and `None` is
+    /// returned instead, ending the current item's drain.
+    fn next_value_in_scope(&mut self) -> Result<Option<Value<'a>>, Error> {
+        match self.next_value()? {
+            Some(Value::Element(element)) if self.in_item_scope => {
+                self.head = Some(Value::Element(element));
+                Ok(None)
+            },
+            other => Ok(other),
+        }
+    }
+
     /// Classifies the shape of the field value at the current position via the two-call pattern:
     /// the first pulled value is the head; the second discriminates single from list. Both are
     /// buffered and served by [`Self::next_value`] in pull order.
@@ -242,13 +255,18 @@ impl<'a> Deserializer<'a> {
             return Ok(BareScope::Borrowed(shared_bytes(head)));
         }
 
-        // The shape is `List`: drain the remaining values, rejecting any parameter.
+        // The shape is `List`: drain the remaining values, rejecting any parameter. An item-scope
+        // drain ends at the next element boundary (buffered back by `next_value_in_scope`); when
+        // no continuation was consumed within this item, the single bare element stays borrowed.
+        let head_bytes = shared_bytes(head);
         let mut rejoined: Vec<u8> = Vec::new();
-        rejoined.extend_from_slice(shared_bytes(head));
 
-        while let Some(value) = self.next_value()? {
+        while let Some(value) = self.next_value_in_scope()? {
             match value {
                 Value::Element(element) => {
+                    if rejoined.is_empty() {
+                        rejoined.extend_from_slice(head_bytes);
+                    }
                     rejoined.extend_from_slice(b", ");
                     rejoined.extend_from_slice(shared_bytes(element));
                 },
@@ -260,7 +278,11 @@ impl<'a> Deserializer<'a> {
             }
         }
 
-        Ok(BareScope::Rejoined(rejoined))
+        if rejoined.is_empty() {
+            Ok(BareScope::Borrowed(head_bytes))
+        } else {
+            Ok(BareScope::Rejoined(rejoined))
+        }
     }
 
     /// Emits a consumed bare-element scope to a string visitor: a single bare element is borrowed
@@ -352,6 +374,45 @@ macro_rules! integer_hint {
             }
         }
     };
+}
+
+/// Sequence access over the deserializer's item stream: each element seed deserializes one list
+/// item, with the item-scope flag set for the duration of the seed call so that item-scoped
+/// drains stop at the next element boundary.
+struct SeqAccess<'a, 'de> {
+    de: &'a mut Deserializer<'de>,
+
+    /// The expected element count for tuple-family hints; `None` for plain sequences.
+    len: Option<usize>,
+
+    /// How many elements have been served so far.
+    seen: usize,
+}
+
+impl<'de> de::SeqAccess<'de> for SeqAccess<'_, 'de> {
+    type Error = Error;
+
+    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        if self.len.is_some_and(|len| self.seen >= len) {
+            return Ok(None);
+        }
+
+        // An item exists iff a value is buffered: every item-scoped drain terminates either at
+        // end of stream or by buffering the next item's head element back.
+        if self.de.head.is_none() && self.de.lookahead.is_none() {
+            return Ok(None);
+        }
+
+        self.seen += 1;
+        self.de.in_item_scope = true;
+        let value = seed.deserialize(&mut *self.de)?;
+        self.de.in_item_scope = false;
+
+        Ok(Some(value))
+    }
 }
 
 impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
@@ -487,30 +548,47 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         unsupported_hint!("newtype struct")
     }
 
-    fn deserialize_seq<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("seq")
+        // The classification buffers the head and discriminator; items are then served one per
+        // element seed by the sequence access.
+        self.classify_shape()?;
+        visitor.visit_seq(SeqAccess {
+            de: self,
+            len: None,
+            seen: 0,
+        })
     }
 
-    fn deserialize_tuple<V>(self, _len: usize, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("tuple")
+        self.classify_shape()?;
+        visitor.visit_seq(SeqAccess {
+            de: self,
+            len: Some(len),
+            seen: 0,
+        })
     }
 
     fn deserialize_tuple_struct<V>(
         self,
         _name: &str,
-        _len: usize,
-        _visitor: V,
+        len: usize,
+        visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        unsupported_hint!("tuple struct")
+        self.classify_shape()?;
+        visitor.visit_seq(SeqAccess {
+            de: self,
+            len: Some(len),
+            seen: 0,
+        })
     }
 
     fn deserialize_map<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
@@ -1235,5 +1313,81 @@ mod test {
                 "expected a bare element, found parameters"
             )))
         );
+    }
+
+    #[test]
+    fn deserialize_seq_list_of_bare_elements() {
+        let mut input = *b"Example-List: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Vec<String> = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, vec!["a".to_owned(), "b".to_owned()]);
+    }
+
+    #[test]
+    fn deserialize_seq_single_bare_element_is_one_item() {
+        // Bare single-value leniency: a lone element deserializes as a 1-element seq.
+        let mut input = *b"Content-Type: text/plain";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Vec<String> = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, vec!["text/plain".to_owned()]);
+    }
+
+    #[test]
+    fn deserialize_seq_empty_field_value() {
+        let mut input = *b"Example-X:";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Vec<String> = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, Vec::<String>::new());
+    }
+
+    #[test]
+    fn deserialize_seq_list_of_integers() {
+        let mut input = *b"Example-List: 1, 2, 3";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Vec<i64> = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn deserialize_tuple() {
+        let mut input = *b"Example-List: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: (String, String) = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, ("a".to_owned(), "b".to_owned()));
+    }
+
+    #[test]
+    fn deserialize_tuple_struct() {
+        #[derive(Debug, PartialEq, serde::Deserialize)]
+        struct Pair(String, String);
+
+        let mut input = *b"Example-List: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: Pair = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, Pair("a".to_owned(), "b".to_owned()));
     }
 }
