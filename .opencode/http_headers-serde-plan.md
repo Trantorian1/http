@@ -124,7 +124,9 @@ Rev 2 (feedback incorporated):
 
 > Its own phase, directly after the core body and before struct/enum, which build on it.
 
-- [ ] Implement `normalize(bytes)` = strip non-alphanumerics + lowercase. Unit-test the bridging cases: `text/plain`↔`TextPlain`, `max-age`↔`max_age`, `content-type`↔`content_type`, plus a collision case.
+- [x] Implement `normalize(bytes)` = strip non-alphanumerics + lowercase. Unit-test the bridging cases: `text/plain`↔`TextPlain`, `max-age`↔`max_age`, `content-type`↔`content_type`, plus a collision case.
+  - Implemented as a byte-level free fn returning an owned `Vec<u8>` (ASCII-only semantics: `is_ascii_alphanumeric` filter + `to_ascii_lowercase`; non-ASCII/obs-text bytes are stripped, so matching is defined for non-UTF-8 wire bytes too).
+  - Findings: the owned return is internal scratch — it never reaches a visitor; matching in the next sub-item allocates one buffer per identifier plus one per expected name (bounded by field count), noted there.
 - [ ] Add a **pending expected-name list** slot on the deserializer: stores `&'static [&'static str]`, set by `deserialize_struct`/`deserialize_enum`, consumed by `deserialize_identifier`.
 - [ ] Implement `deserialize_identifier`:
   - With an expected-name list present: first-normalized-match wins → feed the exact expected name; otherwise feed raw wire bytes (rename/alias fallback).

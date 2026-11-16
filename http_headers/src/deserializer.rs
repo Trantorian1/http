@@ -1052,6 +1052,21 @@ fn shared_str(element: &mut [u8]) -> Result<&str, Error> {
     std::str::from_utf8(element).map_err(|_| Error::ErrorParsing(ErrorParsing::InvalidUtf8))
 }
 
+/// Normalizes an identifier for case- and separator-insensitive matching: strips every
+/// non-alphanumeric byte and lowercases the remaining ASCII letters. This is what lets a wire
+/// form like `text/plain` or `Max-Age` bridge to a Rust-side name like `TextPlain` or `max_age`.
+fn normalize(bytes: &[u8]) -> Vec<u8> {
+    let mut normalized = Vec::with_capacity(bytes.len());
+
+    for &c in bytes {
+        if c.is_ascii_alphanumeric() {
+            normalized.push(c.to_ascii_lowercase());
+        }
+    }
+
+    normalized
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -2196,4 +2211,34 @@ mod test {
         NewtypeStructTarget,
         "newtype struct"
     );
+
+    #[test]
+    fn normalize_strips_separators_and_lowercases() {
+        assert_eq!(normalize(b"text/plain"), b"textplain");
+        assert_eq!(normalize(b"Max-Age"), b"maxage");
+        assert_eq!(normalize(b"content_type"), b"contenttype");
+        assert_eq!(normalize(b""), b"");
+    }
+
+    #[test]
+    fn normalize_bridges_wire_and_rust_names() {
+        // Media-type-style slash vs. CamelCase Rust name.
+        assert_eq!(normalize(b"text/plain"), normalize(b"TextPlain"));
+        // Hyphenated wire form vs. snake_case Rust name.
+        assert_eq!(normalize(b"max-age"), normalize(b"max_age"));
+        assert_eq!(normalize(b"content-type"), normalize(b"content_type"));
+    }
+
+    #[test]
+    fn normalize_collides_distinct_names() {
+        // Distinct spellings that collapse onto one normalized form: matching is first-wins.
+        assert_eq!(normalize(b"max_age"), normalize(b"maxage"));
+        assert_eq!(normalize(b"Max-Age"), normalize(b"max_age"));
+    }
+
+    #[test]
+    fn normalize_drops_non_ascii_bytes() {
+        // `obs-text` (0x80-FF) is legal on the wire but carries no identifier content.
+        assert_eq!(normalize(b"a\xffb"), b"ab");
+    }
 }
