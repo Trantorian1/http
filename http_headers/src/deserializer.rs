@@ -5,6 +5,9 @@
 
 use serde::de;
 
+use super::line::HeaderValues;
+use super::line::Value;
+
 /// Error type for the serde deserialization layer.
 ///
 /// This is deliberately separate from [`crate::error::Error`] so that consumers of the low-level
@@ -111,10 +114,40 @@ impl From<ErrorParsing> for Error {
     }
 }
 
+/// Serde deserializer for a single header field value.
+///
+/// Wraps the zero-copy [`HeaderValues`] iterator together with at most one buffered (lookahead)
+/// [`Value`] and an item-scope flag. Consumption is strictly forward-only: once a value has been
+/// yielded, its buffer region is frozen and must never be mutated again.
+#[derive(Debug)]
+pub(crate) struct Deserializer<'a> {
+    /// The underlying field-value iterator driving the parser in [`super::line`].
+    values: HeaderValues<'a>,
+
+    /// At most one value pulled ahead for shape classification and item grouping.
+    lookahead: Option<Value<'a>>,
+
+    /// Whether the current position is inside a list item (set by the sequence access).
+    in_item_scope: bool,
+}
+
+impl<'a> Deserializer<'a> {
+    /// Initializes a new deserializer over the field values of a parsed header line.
+    #[must_use]
+    pub(crate) fn from_header_values(values: HeaderValues<'a>) -> Self {
+        Self {
+            values,
+            lookahead: None,
+            in_item_scope: false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::error;
+    use crate::line;
 
     #[test]
     fn parser_error_conversion() {
@@ -206,5 +239,19 @@ mod test {
 
         assert!(matches!(err, Error::ErrorParsing(ErrorParsing::Custom(_))));
         assert_eq!(err.to_string(), "unknown variant `foo`");
+    }
+
+    #[test]
+    fn deserializer_construction() {
+        let mut input_a = *b"Content-Type: text/plain";
+        let mut input_b = *b"Accept: */*";
+
+        let header_a = line::HeaderLine::new(&mut input_a).unwrap();
+        let header_b = line::HeaderLine::new(&mut input_b).unwrap();
+
+        let de_a = Deserializer::from_header_values(header_a.values);
+        let de_b = Deserializer::from_header_values(header_b.values);
+
+        assert_ne!(format!("{de_a:?}"), format!("{de_b:?}"));
     }
 }

@@ -65,6 +65,7 @@ Rev 2 (feedback incorporated):
 
 ## Standing constraints (apply to every item)
 - Workspace lints are strict: **no `unwrap`/`expect`** (deny), **no shadowing** (forbid), **no `print*`/`dbg!`** (deny/forbid). Use `?` and explicit matching.
+  - Finding (verified on the current nightly toolchain): `unwrap_used`/`expect_used` are enforced in non-test code but **exempted from `#[cfg(test)]` code** — existing crate tests use `.unwrap()` freely, so new tests follow that house style.
 - Zero-copy except the one documented allocation (owned rejoin for str/bytes over bare-element lists).
 - **`line.rs` encapsulation**: no refactors exposing parser internals; the deserializer uses only the public API of the existing types.
 - The existing public API keeps **exactly** its current observable behavior — all existing tests in `line.rs`/`stack.rs` stay green.
@@ -82,7 +83,8 @@ Rev 2 (feedback incorporated):
 ## Phase 1 — Value-level deserializer
 
 ### 1a. Skeleton, lookahead discipline, borrowing mechanics
-- [ ] Deserializer struct owning: the field-value region (lazily initialized into a `HeaderValues<'a>`), one lookahead `Option<Value<'a>>`, and an item-scope flag. Entry point following serde's `from_*` convention.
+- [x] Deserializer struct owning: the field-value region (lazily initialized into a `HeaderValues<'a>`), one lookahead `Option<Value<'a>>`, and an item-scope flag. Entry point following serde's `from_*` convention.
+  - Findings: (1) deviation from "lazily initialized" — every hint path (including `str`) classifies via the parser, so the region is consumed into `HeaderValues` eagerly at construction; `HeaderValues::new` is O(1), so this costs nothing and simplifies the struct to owning `values: HeaderValues<'a>` directly. (2) Entry point is `Deserializer::from_header_values(HeaderValues<'a>)`. (3) Transient dead-code warnings on the struct/fields remain until sub-items 2–3 and Phase 1b reference them.
 - [ ] Borrowing helper: move a `Value` out of the iterator/lookahead and coerce its slice(s) to shared `&'a` views (UTF-8 validation where a string is required), emitting the new error type's UTF-8 failure on invalid input. Note the forward-only invariant at this site.
 - [ ] Shape classification via the two-call pattern (head + discriminator, then drain loop); element-as-boundary item grouping.
 
