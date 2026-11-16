@@ -165,7 +165,9 @@ Rev 2 (feedback incorporated):
 
 ## Phase 5 — Test hardening & edge cases
 
-- [ ] Table-driven tests across the full hint × shape matrix (every cell in the spec).
+- [x] Table-driven tests across the full hint × shape matrix (every cell in the spec).
+  - Implemented as 17 table tests over six canonical shapes (empty, bare element, bare-element list, params-only, element+params, mixed list) × ten hint families (str, bytes, unsigned/signed integer, seq, tuple, map, struct, enum, option, any, ignored_any, plus the nine v1-rejected hints × all shapes), driven by a `check_matrix_cell` helper that compares full Ok/Err outcomes. Borrowing modes pinned separately: single bare element → `visit_borrowed_*`, list → owned `", "`-rejoin via `visit_*`.
+  - Findings: (1) serde 1.0.229 has **no specific `Cow<'de, str>` / `Cow<'de, [u8]>` Deserialize impls** — only the generic fallback (`T::Owned::deserialize`, always owned; `Vec<u8>` deserializes as a seq of u8s) — so borrowing-mode checks need manual capture visitors (`StrEmission`/`BytesEmission`) recording which visit method fired. (2) serde's own `de::Value` cannot serve as the any/seq matrix target: its map visitor deserializes keys via `deserialize_any`, which `SliceDeserializer` rejects — the pre-existing `AnyValue` capture type (String keys) is used instead. (3) Tuple family over short streams surfaces serde's `invalid_length` as a `Custom` error — plain serde semantics, asserted by message content.
 - [ ] Error-path tests: each `ErrorParsing` failure, plus parser errors surfacing through the `From<error::Error>` wrapper.
 - [ ] Forward-only / borrowing invariant check (assert no region is mutated after being yielded; a targeted runtime or compile-time guard as appropriate).
 - [ ] Clippy pedantic clean under workspace lints (no unwrap/expect/shadowing/prints).

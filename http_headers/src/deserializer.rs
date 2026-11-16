@@ -3439,4 +3439,627 @@ mod test {
             )))
         );
     }
+
+    /// The six canonical value-level shapes for the hint × shape matrix (test-only).
+    const MATRIX_EMPTY: &[u8] = b"Example-X:";
+    const MATRIX_BARE: &[u8] = b"Example-X: a";
+    const MATRIX_LIST: &[u8] = b"Example-X: a, b";
+    const MATRIX_PARAMS_ONLY: &[u8] = b"Example-X: ;k=v";
+    const MATRIX_ELEMENT_PARAMS: &[u8] = b"Example-X: a; k=v";
+    const MATRIX_MIXED_LIST: &[u8] = b"Example-X: a, ;k=v";
+
+    /// Runs one hint × shape matrix cell: deserializes `T` from a fresh deserializer over
+    /// `input` and compares the outcome with `expect`.
+    fn check_matrix_cell<T>(input: &[u8], expect: &Result<T, Error>)
+    where
+        T: serde::de::DeserializeOwned + PartialEq + std::fmt::Debug,
+    {
+        let mut buffer = input.to_vec();
+
+        let header = line::HeaderLine::new(&mut buffer).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let actual: Result<T, Error> = serde::Deserialize::deserialize(&mut de);
+
+        match (&actual, expect) {
+            (Ok(got), Ok(want)) => {
+                assert_eq!(got, want, "input: {}", String::from_utf8_lossy(input));
+            },
+            (Err(got), Err(want)) => {
+                assert_eq!(got, want, "input: {}", String::from_utf8_lossy(input));
+            },
+            (other_actual, other_expect) => panic!(
+                "input {}: expected {other_expect:?}, got {other_actual:?}",
+                String::from_utf8_lossy(input)
+            ),
+        }
+    }
+
+    fn shape_err(msg: &'static str) -> Error {
+        Error::ErrorParsing(ErrorParsing::UnsupportedShape(msg))
+    }
+
+    fn hint_err(hint: &'static str) -> Error {
+        Error::ErrorParsing(ErrorParsing::UnsupportedHint(hint))
+    }
+
+    #[test]
+    fn matrix_str_shape_table() {
+        let rows: &[(&[u8], Result<String, Error>)] = &[
+            (
+                MATRIX_EMPTY,
+                Err(shape_err(
+                    "expected a bare element, found an empty field value",
+                )),
+            ),
+            (MATRIX_BARE, Ok("a".to_owned())),
+            (MATRIX_LIST, Ok("a, b".to_owned())),
+            (
+                MATRIX_PARAMS_ONLY,
+                Err(shape_err("expected a bare element, found parameters")),
+            ),
+            (
+                MATRIX_ELEMENT_PARAMS,
+                Err(shape_err("expected bare elements, found parameters")),
+            ),
+            (
+                MATRIX_MIXED_LIST,
+                Err(shape_err("expected bare elements, found parameters")),
+            ),
+        ];
+
+        for (input, expect) in rows {
+            check_matrix_cell(input, expect);
+        }
+    }
+
+    #[test]
+    fn matrix_bytes_shape_table() {
+        let rows: &[(&[u8], Result<ByteBuf, Error>)] = &[
+            (
+                MATRIX_EMPTY,
+                Err(shape_err(
+                    "expected a bare element, found an empty field value",
+                )),
+            ),
+            (MATRIX_BARE, Ok(ByteBuf(b"a".to_vec()))),
+            (MATRIX_LIST, Ok(ByteBuf(b"a, b".to_vec()))),
+            (
+                MATRIX_PARAMS_ONLY,
+                Err(shape_err("expected a bare element, found parameters")),
+            ),
+            (
+                MATRIX_ELEMENT_PARAMS,
+                Err(shape_err("expected bare elements, found parameters")),
+            ),
+            (
+                MATRIX_MIXED_LIST,
+                Err(shape_err("expected bare elements, found parameters")),
+            ),
+        ];
+
+        for (input, expect) in rows {
+            check_matrix_cell(input, expect);
+        }
+    }
+
+    #[test]
+    fn matrix_unsigned_integer_shape_table() {
+        let rows: &[(&[u8], Result<u32, Error>)] = &[
+            (
+                MATRIX_EMPTY,
+                Err(shape_err(
+                    "expected a bare element, found an empty field value",
+                )),
+            ),
+            (b"Example-X: 42", Ok(42)),
+            (
+                b"Example-X: a",
+                Err(Error::ErrorParsing(ErrorParsing::InvalidInteger {
+                    found: b"a".to_vec(),
+                })),
+            ),
+            // Fits `i128` but overflows the target type.
+            (
+                b"Example-X: 4294967296",
+                Err(Error::ErrorParsing(ErrorParsing::InvalidInteger {
+                    found: b"4294967296".to_vec(),
+                })),
+            ),
+            // More than 19 digits is rejected before any accumulation.
+            (
+                b"Example-X: 99999999999999999999",
+                Err(Error::ErrorParsing(ErrorParsing::InvalidInteger {
+                    found: b"99999999999999999999".to_vec(),
+                })),
+            ),
+            (
+                b"Example-X: 1, 2",
+                Err(shape_err("expected a single bare element")),
+            ),
+            (
+                MATRIX_PARAMS_ONLY,
+                Err(shape_err("expected a bare element, found parameters")),
+            ),
+            (
+                b"Example-X: 42; k=v",
+                Err(shape_err("expected bare elements, found parameters")),
+            ),
+            (
+                b"Example-X: 1, ;k=v",
+                Err(shape_err("expected bare elements, found parameters")),
+            ),
+        ];
+
+        for (input, expect) in rows {
+            check_matrix_cell(input, expect);
+        }
+    }
+
+    #[test]
+    fn matrix_signed_integer_shape_table() {
+        let rows: &[(&[u8], Result<i64, Error>)] = &[
+            (
+                MATRIX_EMPTY,
+                Err(shape_err(
+                    "expected a bare element, found an empty field value",
+                )),
+            ),
+            (b"Example-X: -7", Ok(-7)),
+            // No `+` sign form is accepted.
+            (
+                b"Example-X: +5",
+                Err(Error::ErrorParsing(ErrorParsing::InvalidInteger {
+                    found: b"+5".to_vec(),
+                })),
+            ),
+            (
+                b"Example-X: 1, 2",
+                Err(shape_err("expected a single bare element")),
+            ),
+            (
+                MATRIX_PARAMS_ONLY,
+                Err(shape_err("expected a bare element, found parameters")),
+            ),
+            (
+                b"Example-X: -7; k=v",
+                Err(shape_err("expected bare elements, found parameters")),
+            ),
+        ];
+
+        for (input, expect) in rows {
+            check_matrix_cell(input, expect);
+        }
+    }
+
+    #[test]
+    fn matrix_seq_shape_table() {
+        let rows = &[
+            (MATRIX_EMPTY, Ok(vec![])),
+            (MATRIX_BARE, Ok(vec![AnyValue::Str("a".to_owned())])),
+            (
+                MATRIX_LIST,
+                Ok(vec![
+                    AnyValue::Str("a".to_owned()),
+                    AnyValue::Str("b".to_owned()),
+                ]),
+            ),
+            // Params-only: a 1-element seq of one map holding all params.
+            (
+                MATRIX_PARAMS_ONLY,
+                Ok(vec![AnyValue::Map({
+                    let mut map = std::collections::HashMap::new();
+                    map.insert("k".to_owned(), "v".to_owned());
+                    map
+                })]),
+            ),
+            (
+                MATRIX_ELEMENT_PARAMS,
+                Err(shape_err("element with parameters")),
+            ),
+            (MATRIX_MIXED_LIST, Err(shape_err("element with parameters"))),
+        ];
+
+        for (input, expect) in rows {
+            check_matrix_cell(input, expect);
+        }
+    }
+
+    #[test]
+    fn matrix_tuple_shape_table() {
+        // A 2-element list fills the tuple; shorter streams end in serde's invalid-length error.
+        let mut input = *b"Example-X: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: (String, String) = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert_eq!(value, ("a".to_owned(), "b".to_owned()));
+
+        for short in [MATRIX_EMPTY, MATRIX_BARE] {
+            let mut buffer = short.to_vec();
+
+            let short_header = line::HeaderLine::new(&mut buffer).unwrap();
+            let mut short_de = Deserializer::from_header_values(short_header.values);
+
+            let result: Result<(String, String), Error> =
+                serde::Deserialize::deserialize(&mut short_de);
+
+            let Err(Error::ErrorParsing(ErrorParsing::Custom(message))) = result else {
+                panic!("expected a serde custom error, got {result:?}");
+            };
+
+            assert!(
+                message.contains("invalid length"),
+                "unexpected message: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn matrix_map_shape_table() {
+        let rows = &[
+            (MATRIX_EMPTY, Ok(std::collections::HashMap::new())),
+            (
+                MATRIX_BARE,
+                Err(shape_err("expected parameters, found an element")),
+            ),
+            (
+                MATRIX_LIST,
+                Err(shape_err("expected parameters, found an element")),
+            ),
+            (
+                MATRIX_PARAMS_ONLY,
+                Ok({
+                    let mut map = std::collections::HashMap::new();
+                    map.insert("k".to_owned(), "v".to_owned());
+                    map
+                }),
+            ),
+            (
+                MATRIX_ELEMENT_PARAMS,
+                Err(shape_err("expected parameters, found an element")),
+            ),
+            (
+                MATRIX_MIXED_LIST,
+                Err(shape_err("expected parameters, found an element")),
+            ),
+        ];
+
+        for (input, expect) in rows {
+            check_matrix_cell(input, expect);
+        }
+    }
+
+    #[test]
+    fn matrix_struct_shape_table() {
+        let rows: &[(&[u8], Result<TextPlain, Error>)] = &[
+            (
+                MATRIX_EMPTY,
+                Err(shape_err("expected an element, found an empty field value")),
+            ),
+            (b"Example-X: text/plain", Ok(TextPlain { charset: None })),
+            (
+                b"Example-X: text/plain, text/html",
+                Err(shape_err("expected a single item")),
+            ),
+            (
+                b"Example-X: ;charset=utf-8",
+                Ok(TextPlain {
+                    charset: Some("utf-8".to_owned()),
+                }),
+            ),
+            (
+                b"Example-X: text/plain; charset=utf-8",
+                Ok(TextPlain {
+                    charset: Some("utf-8".to_owned()),
+                }),
+            ),
+            // The params-only tail attaches to the preceding element: one item.
+            (
+                b"Example-X: text/plain, ;charset=utf-8",
+                Ok(TextPlain {
+                    charset: Some("utf-8".to_owned()),
+                }),
+            ),
+        ];
+
+        for (input, expect) in rows {
+            check_matrix_cell(input, expect);
+        }
+    }
+
+    /// An enum target for the matrix: one struct variant and one unit variant (test-only).
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    enum MatrixMime {
+        TextPlain { charset: Option<String> },
+        TextHtml,
+    }
+
+    #[test]
+    fn matrix_enum_shape_table() {
+        let rows: &[(&[u8], Result<MatrixMime, Error>)] = &[
+            (
+                MATRIX_EMPTY,
+                Err(shape_err("expected an element, found an empty field value")),
+            ),
+            // A bare element matching a struct variant is a zero-entry map.
+            (
+                b"Example-X: text/plain",
+                Ok(MatrixMime::TextPlain { charset: None }),
+            ),
+            // A bare element naming the unit variant.
+            (b"Example-X: text/html", Ok(MatrixMime::TextHtml)),
+            (
+                b"Example-X: text/plain, text/html",
+                Err(shape_err("expected a single item")),
+            ),
+            (
+                MATRIX_PARAMS_ONLY,
+                Err(Error::ErrorParsing(ErrorParsing::MissingElement)),
+            ),
+            (
+                b"Example-X: text/plain; charset=utf-8",
+                Ok(MatrixMime::TextPlain {
+                    charset: Some("utf-8".to_owned()),
+                }),
+            ),
+            // The params-only tail attaches to the preceding element: one item.
+            (
+                b"Example-X: text/plain, ;charset=utf-8",
+                Ok(MatrixMime::TextPlain {
+                    charset: Some("utf-8".to_owned()),
+                }),
+            ),
+        ];
+
+        for (input, expect) in rows {
+            check_matrix_cell(input, expect);
+        }
+    }
+
+    #[test]
+    fn matrix_option_shape_table() {
+        let rows = &[
+            (MATRIX_EMPTY, Ok(None)),
+            (MATRIX_BARE, Ok(Some("a".to_owned()))),
+            (MATRIX_LIST, Ok(Some("a, b".to_owned()))),
+            (
+                MATRIX_PARAMS_ONLY,
+                Err(shape_err("expected a bare element, found parameters")),
+            ),
+            (
+                MATRIX_ELEMENT_PARAMS,
+                Err(shape_err("expected bare elements, found parameters")),
+            ),
+            (
+                MATRIX_MIXED_LIST,
+                Err(shape_err("expected bare elements, found parameters")),
+            ),
+        ];
+
+        for (input, expect) in rows {
+            check_matrix_cell(input, expect);
+        }
+    }
+
+    #[test]
+    fn matrix_any_shape_table() {
+        let rows: &[(&[u8], Result<AnyValue, Error>)] = &[
+            (MATRIX_EMPTY, Ok(AnyValue::Unit)),
+            (MATRIX_BARE, Ok(AnyValue::Str("a".to_owned()))),
+            (
+                MATRIX_LIST,
+                Ok(AnyValue::Seq(vec![
+                    AnyValue::Str("a".to_owned()),
+                    AnyValue::Str("b".to_owned()),
+                ])),
+            ),
+            (
+                MATRIX_PARAMS_ONLY,
+                Ok(AnyValue::Map({
+                    let mut map = std::collections::HashMap::new();
+                    map.insert("k".to_owned(), "v".to_owned());
+                    map
+                })),
+            ),
+            (
+                MATRIX_ELEMENT_PARAMS,
+                Err(shape_err("element with parameters")),
+            ),
+            (MATRIX_MIXED_LIST, Err(shape_err("element with parameters"))),
+        ];
+
+        for (input, expect) in rows {
+            check_matrix_cell(input, expect);
+        }
+    }
+
+    #[test]
+    fn matrix_ignored_any_shape_table() {
+        // Every shape is consumed without visiting and completes as unit.
+        let shapes: &[&[u8]] = &[
+            MATRIX_EMPTY,
+            MATRIX_BARE,
+            MATRIX_LIST,
+            MATRIX_PARAMS_ONLY,
+            MATRIX_ELEMENT_PARAMS,
+            MATRIX_MIXED_LIST,
+        ];
+
+        for input in shapes {
+            check_matrix_cell(input, &Ok(serde::de::IgnoredAny));
+        }
+    }
+
+    #[test]
+    fn matrix_rejected_hints_table() {
+        // The v1-rejected hints fail at the hint level, independent of shape.
+        let shapes: &[&[u8]] = &[
+            MATRIX_EMPTY,
+            MATRIX_BARE,
+            MATRIX_LIST,
+            MATRIX_PARAMS_ONLY,
+            MATRIX_ELEMENT_PARAMS,
+            MATRIX_MIXED_LIST,
+        ];
+
+        for input in shapes {
+            check_matrix_cell::<bool>(input, &Err(hint_err("bool")));
+            check_matrix_cell::<i128>(input, &Err(hint_err("i128")));
+            check_matrix_cell::<u128>(input, &Err(hint_err("u128")));
+            check_matrix_cell::<f32>(input, &Err(hint_err("f32")));
+            check_matrix_cell::<f64>(input, &Err(hint_err("f64")));
+            check_matrix_cell::<char>(input, &Err(hint_err("char")));
+            check_matrix_cell::<()>(input, &Err(hint_err("unit")));
+            check_matrix_cell::<UnitStructTarget>(input, &Err(hint_err("unit struct")));
+            check_matrix_cell::<NewtypeStructTarget>(input, &Err(hint_err("newtype struct")));
+        }
+    }
+
+    /// Captures how a string hint emitted its data (borrowed vs owned) plus the content
+    /// (test-only).
+    #[derive(Debug, PartialEq)]
+    struct StrEmission {
+        borrowed: bool,
+        content: String,
+    }
+
+    impl<'de> serde::Deserialize<'de> for StrEmission {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct Visitor;
+
+            impl serde::de::Visitor<'_> for Visitor {
+                type Value = StrEmission;
+
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("a string")
+                }
+
+                fn visit_borrowed_str<E>(self, v: &str) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(StrEmission {
+                        borrowed: true,
+                        content: v.to_owned(),
+                    })
+                }
+
+                fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(StrEmission {
+                        borrowed: false,
+                        content: v.to_owned(),
+                    })
+                }
+            }
+
+            deserializer.deserialize_str(Visitor)
+        }
+    }
+
+    /// The byte-level counterpart of [`StrEmission`] (test-only).
+    #[derive(Debug, PartialEq)]
+    struct BytesEmission {
+        borrowed: bool,
+        content: Vec<u8>,
+    }
+
+    impl<'de> serde::Deserialize<'de> for BytesEmission {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct Visitor;
+
+            impl serde::de::Visitor<'_> for Visitor {
+                type Value = BytesEmission;
+
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("a byte slice")
+                }
+
+                fn visit_borrowed_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(BytesEmission {
+                        borrowed: true,
+                        content: v.to_vec(),
+                    })
+                }
+
+                fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    Ok(BytesEmission {
+                        borrowed: false,
+                        content: v.to_vec(),
+                    })
+                }
+            }
+
+            deserializer.deserialize_bytes(Visitor)
+        }
+    }
+
+    #[test]
+    fn matrix_str_hint_single_element_is_borrowed() {
+        let mut input = *b"Example-X: a";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: StrEmission = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert!(value.borrowed, "a single bare element must be borrowed");
+        assert_eq!(value.content, "a");
+    }
+
+    #[test]
+    fn matrix_str_hint_list_is_owned_rejoin() {
+        let mut input = *b"Example-X: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: StrEmission = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert!(!value.borrowed, "a rejoin must be owned");
+        assert_eq!(value.content, "a, b");
+    }
+
+    #[test]
+    fn matrix_bytes_hint_single_element_is_borrowed() {
+        let mut input = *b"Example-X: a";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: BytesEmission = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert!(value.borrowed, "a single bare element must be borrowed");
+        assert_eq!(value.content, b"a".to_vec());
+    }
+
+    #[test]
+    fn matrix_bytes_hint_list_is_owned_rejoin() {
+        let mut input = *b"Example-X: a, b";
+
+        let header = line::HeaderLine::new(&mut input).unwrap();
+        let mut de = Deserializer::from_header_values(header.values);
+
+        let value: BytesEmission = serde::Deserialize::deserialize(&mut de).unwrap();
+
+        assert!(!value.borrowed, "a rejoin must be owned");
+        assert_eq!(value.content, b"a, b".to_vec());
+    }
 }
