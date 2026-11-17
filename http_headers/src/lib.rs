@@ -4,7 +4,6 @@
 
 mod deserializer;
 mod error;
-mod stack;
 
 pub mod constants;
 pub mod line;
@@ -27,8 +26,15 @@ pub mod prelude {
     pub use super::element;
     pub use super::error::*;
     pub use super::line;
+    pub use super::line::Count;
+    pub use super::line::Element;
+    pub use super::line::HeaderElement;
     pub use super::line::HeaderLine;
+    pub use super::line::HeaderList;
+    pub use super::line::HeaderParameters;
+    pub use super::line::HeaderValues;
     pub use super::line::Headers;
+    pub use super::line::Parameter;
     pub use super::line::Value;
     pub use super::parameter;
 }

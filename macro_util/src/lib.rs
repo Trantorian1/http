@@ -18,8 +18,22 @@ pub mod prelude {
     pub use super::assert_greq;
     pub use super::assert_le;
     pub use super::assert_leq;
+    pub use super::assert_next;
     pub use super::assert_utf8_eq;
     pub use super::nonzero;
+}
+
+#[macro_export]
+macro_rules! assert_next {
+    ($values:expr, $pat:pat => $tt:tt) => {
+        match $values.next() {
+            $pat => $tt,
+            n => panic!("invalid variant: {n:?}"),
+        }
+    };
+    ($values:expr, $expr:expr) => {
+        assert_eq!($values.next(), $expr);
+    };
 }
 
 #[macro_export]
