@@ -233,6 +233,7 @@ dependencies = [
 name = "http_headers"
 version = "0.1.0"
 dependencies = [
+ "bolero",
  "macro_util",
  "memchr",
  "serde",
