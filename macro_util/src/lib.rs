@@ -18,9 +18,46 @@ pub mod prelude {
     pub use super::assert_greq;
     pub use super::assert_le;
     pub use super::assert_leq;
+    pub use super::assert_matches;
     pub use super::assert_next;
     pub use super::assert_utf8_eq;
     pub use super::nonzero;
+}
+
+#[macro_export]
+/// Asserts match or extracts an element on match.
+///
+/// # Examples
+///
+/// Checking an element for a match:
+///
+/// ```rust
+/// # use macro_util::prelude::*;
+/// let value = Some(1);
+///
+/// assert_matches!(value, Some(..));
+/// ```
+///
+/// Extracting an element on match:
+///
+/// ```rust
+/// # use macro_util::prelude::*;
+/// let value = Some(1);
+///
+/// assert_matches!(value, Some(n) => {
+///     assert_eq!(n, 1);
+/// })
+/// ```
+macro_rules! assert_matches {
+    ($elem:expr, $pat:pat => $tt:tt) => {
+        match $elem {
+            $pat => $tt,
+            n => panic!("invalid variant: {n:?}"),
+        }
+    };
+    ($elem:expr, $pat:pat) => {
+        assert_matches!($elem, $pat => {})
+    }
 }
 
 /// Asserts equality or match on the next element of an iterator.
