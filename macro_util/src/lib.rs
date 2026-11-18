@@ -23,6 +23,29 @@ pub mod prelude {
     pub use super::nonzero;
 }
 
+/// Asserts equality or match on the next element of an iterator.
+///
+/// # Examples
+///
+/// Comparing the next element for equality:
+///
+/// ```rust
+/// # use macro_util::prelude::*;
+/// let mut iter = [0, 1, 2].iter();
+///
+/// assert_next!(iter, Some(&0));
+/// ```
+///
+/// Pattern matching the next element:
+///
+/// ```rust
+/// # use macro_util::prelude::*;
+/// let mut iter = [Ok(0), Err(1), Ok(2)].iter();
+///
+/// assert_next!(iter, Some(Ok(n)) => {
+///     assert_eq!(n, &0);
+/// })
+/// ````
 #[macro_export]
 macro_rules! assert_next {
     ($values:expr, $pat:pat => $tt:tt) => {
@@ -36,7 +59,6 @@ macro_rules! assert_next {
     };
 }
 
-#[macro_export]
 /// Creates a new [`NonZero`] integer.
 ///
 /// # Examples
@@ -47,6 +69,7 @@ macro_rules! assert_next {
 /// ```
 ///
 /// [`NonZero`]: std::num::NonZero
+#[macro_export]
 macro_rules! nonzero {
     ($n:expr) => {
         std::num::NonZero::new($n).expect("literal should be non-zero")

@@ -303,24 +303,55 @@ impl<'a> HeaderLine<'a> {
     }
 }
 
+/// Counts the occurrences of [`Value`]s in a header line.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Count<'a> {
-    Many(HeaderList<'a>),
+    /// Single-[`Value`] occurrence.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use http_headers::prelude::*;
+    /// # use std::assert_matches;
+    /// let mut input = *b"1";
+    /// let mut values = HeaderValues::new(&mut input);
+    ///
+    /// assert_matches!(values.next(), Some(Ok(Count::One(..))));
+    /// ```
     One(Value<'a>),
+
+    /// Multiple-[`Value`] occurrence, indicative of a list.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use http_headers::prelude::*;
+    /// # use std::assert_matches;
+    /// let mut input = *b"1, 2, 3";
+    /// let mut values = HeaderValues::new(&mut input);
+    ///
+    /// assert_matches!(values.next(), Some(Ok(Count::Many(..))));
+    /// ```
+    Many(HeaderList<'a>),
 }
 
+/// Iterator over header [`Value`]s in a [`HeaderLine`].
 #[derive(PartialEq, Eq)]
 pub struct HeaderValues<'a> {
     bytes: Option<&'a mut [u8]>,
 }
 
 impl<'a> HeaderValues<'a> {
+    /// Initializes a new header [`Value`] iterator with the provided content.
+    #[must_use]
     pub fn new(bytes: &'a mut [u8]) -> Self {
         Self {
             bytes: Some(ows::skip_ows_leading(bytes)),
         }
     }
 
+    /// Creates an empty header [`Value`] iterator.
+    #[must_use]
     pub fn empty() -> Self {
         Self { bytes: None }
     }
@@ -345,11 +376,12 @@ impl<'a> Iterator for HeaderValues<'a> {
             // We need to ensure list delimiters are not contained withing quotes
             if let Some(n_quote_open) = quote::next_quote_valid(bytes, from) {
                 // Which means we also need to make sure those quotes are properly terminated
-                if let Some(n_quote_close) = quote::next_quote_valid(bytes, n_quote_open + 1) {
-                    if n_quote_open < n_list && n_quote_close + 1 > n_list {
-                        from = n_quote_close + 1;
-                        continue;
-                    }
+                if let Some(n_quote_close) = quote::next_quote_valid(bytes, n_quote_open + 1)
+                    && n_quote_open < n_list
+                    && n_quote_close + 1 > n_list
+                {
+                    from = n_quote_close + 1;
+                    continue;
                 }
             }
 
@@ -358,10 +390,10 @@ impl<'a> Iterator for HeaderValues<'a> {
 
         if bytes.is_empty() {
             // Empty elements shouldn't yield any further parsing steps
-            return None;
+            None
         } else if bytes.len() < 3 && bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"' {
             // Quoted empty elements should be treated the same as regular empty elements
-            return None;
+            None
         } else {
             match Value::new(ows::skip_ows_all(bytes)) {
                 Ok(value) => Some(Ok(Count::One(value))),
@@ -371,7 +403,7 @@ impl<'a> Iterator for HeaderValues<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for HeaderValues<'a> {
+impl std::fmt::Debug for HeaderValues<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HeaderValues")
             .field("bytes", &utf_8::option_string(&self.bytes))
@@ -379,6 +411,7 @@ impl<'a> std::fmt::Debug for HeaderValues<'a> {
     }
 }
 
+/// Header [`Value`] list iterator.
 #[derive(PartialEq, Eq)]
 pub struct HeaderList<'a> {
     bytes: Option<&'a mut [u8]>,
@@ -386,6 +419,8 @@ pub struct HeaderList<'a> {
 }
 
 impl<'a> HeaderList<'a> {
+    /// Initializes a new header [`Value`] list iterator with the provided content.
+    #[must_use]
     pub fn new(bytes: &'a mut [u8]) -> Self {
         Self {
             bytes: Some(ows::skip_ows_leading(bytes)),
@@ -393,6 +428,8 @@ impl<'a> HeaderList<'a> {
         }
     }
 
+    /// Crates a new empty header [`Value`] list iterator.
+    #[must_use]
     pub fn empty() -> Self {
         Self {
             bytes: None,
@@ -411,11 +448,11 @@ impl<'a> Iterator for HeaderList<'a> {
 
             // Empty list
             if list.is_empty() {
-                if self.size == 0 {
-                    return Some(Err(error::ErrorValue::EmptyList));
+                return if self.size == 0 {
+                    Some(Err(error::ErrorValue::EmptyList))
                 } else {
-                    return None;
-                }
+                    None
+                };
             }
 
             // Field elements can be quoted and may contain ',' delimiters, in which case
@@ -471,7 +508,7 @@ impl<'a> Iterator for HeaderList<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for HeaderList<'a> {
+impl std::fmt::Debug for HeaderList<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HeaderList")
             .field("bytes", &utf_8::option_string(&self.bytes))
@@ -480,18 +517,23 @@ impl<'a> std::fmt::Debug for HeaderList<'a> {
     }
 }
 
+/// Header [`Parameter`] iterator.
 #[derive(PartialEq, Eq)]
 pub struct HeaderParameters<'a> {
     bytes: Option<&'a mut [u8]>,
 }
 
 impl<'a> HeaderParameters<'a> {
+    /// Initializes a new header [`Parameter`] iterator with the provided content.
+    #[must_use]
     pub fn new(bytes: &'a mut [u8]) -> Self {
         Self {
             bytes: Some(ows::skip_ows_leading(bytes)),
         }
     }
 
+    /// Creates a new empty header [`Parameter`] iterator.
+    #[must_use]
     pub fn empty() -> Self {
         Self { bytes: None }
     }
@@ -530,7 +572,7 @@ impl<'a> Iterator for HeaderParameters<'a> {
                         return Some(Err(error::ErrorValue::MissingParameterValue));
                     },
                     Some(n) => {
-                        let (key, remaining) = param.split_at_mut(n);
+                        let (key, mut val) = param.split_at_mut(n);
                         key.make_ascii_lowercase();
 
                         if let Some(c) = validate::is_legal_header_parameter(key) {
@@ -538,17 +580,17 @@ impl<'a> Iterator for HeaderParameters<'a> {
                         }
 
                         // Field parameter values may be quoted, but field parameter keys cannot.
-                        let val = if remaining[1] == b'"' {
-                            let Some(closing_quote) = quote::next_quote_valid(remaining, 2) else {
+                        if val[1] == b'"' {
+                            let Some(closing_quote) = quote::next_quote_valid(val, 2) else {
                                 return Some(Err(error::ErrorValue::MissingClosingQuote));
                             };
 
-                            if closing_quote != remaining.len() - 1 {
+                            if closing_quote != val.len() - 1 {
                                 return Some(Err(error::ErrorValue::LeftoverBytes));
                             }
 
                             // Value can once again be empty after unquoting
-                            let val = &mut remaining[2..closing_quote];
+                            val = &mut val[2..closing_quote];
                             if val.is_empty() {
                                 return Some(Err(error::ErrorValue::MissingParameterValue));
                             }
@@ -558,16 +600,14 @@ impl<'a> Iterator for HeaderParameters<'a> {
                             }
 
                             let unpaired = quote::decode_quoted_pairs(val);
-                            &mut val[..unpaired]
+                            val = &mut val[..unpaired];
                         } else {
-                            let val = &mut remaining[1..];
+                            val = &mut val[1..];
 
                             if let Some(c) = validate::is_legal_header_parameter(val) {
                                 return Some(Err(error::ErrorValue::InvalidFieldParameter(c)));
                             }
-
-                            val
-                        };
+                        }
 
                         return Some(Ok(Parameter::new(key, val)));
                     },
@@ -577,7 +617,7 @@ impl<'a> Iterator for HeaderParameters<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for HeaderParameters<'a> {
+impl std::fmt::Debug for HeaderParameters<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HeaderParameters")
             .field("bytes", &utf_8::option_string(&self.bytes))
@@ -585,9 +625,17 @@ impl<'a> std::fmt::Debug for HeaderParameters<'a> {
     }
 }
 
+/// Header [field values].
+///
+/// [field values]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values
 #[derive(Debug, PartialEq, Eq)]
 pub enum Value<'a> {
+    /// Single element field value.
     Element(Element<'a>, HeaderParameters<'a>),
+
+    /// Zero or more header field value [parameters].
+    ///
+    /// [parameters]: https://www.rfc-editor.org/rfc/rfc9110.html#name-parameters
     Parameters(HeaderParameters<'a>),
 }
 
@@ -659,30 +707,54 @@ impl<'a> Value<'a> {
     }
 }
 
+/// A single header [field value].
+///
+/// [field value]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Element<'a> {
+    /// Header [field value].
+    ///
+    /// [field value]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values
     pub val: ByteStr<'a>,
 }
 
 impl<'a> Element<'a> {
+    /// Initializes a new header [field value] with the provided content.
+    ///
+    /// [field value]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values
+    #[must_use]
     pub fn new(val: impl Into<ByteStr<'a>>) -> Self {
         Self { val: val.into() }
     }
 }
 
-impl<'a> std::fmt::Debug for Element<'a> {
+impl std::fmt::Debug for Element<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Element").field("val", &self.val).finish()
     }
 }
 
+/// A single header [field parameter].
+///
+/// [field parameter]: https://www.rfc-editor.org/rfc/rfc9110.html#name-parameters
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Parameter<'a> {
+    /// Header [field parameter] key.
+    ///
+    /// [field parameter]: https://www.rfc-editor.org/rfc/rfc9110.html#name-parameters
     pub key: ByteStr<'a>,
+
+    /// Header [field parameter] value.
+    ///
+    /// [field parameter]: https://www.rfc-editor.org/rfc/rfc9110.html#name-parameters
     pub val: ByteStr<'a>,
 }
 
 impl<'a> Parameter<'a> {
+    /// Initializes a new header [field parameter] with the provided key/value pair.
+    ///
+    /// [field parameter]: https://www.rfc-editor.org/rfc/rfc9110.html#name-parameters
+    #[must_use]
     pub fn new(key: impl Into<ByteStr<'a>>, val: impl Into<ByteStr<'a>>) -> Self {
         Self {
             key: key.into(),
@@ -691,7 +763,7 @@ impl<'a> Parameter<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for Parameter<'a> {
+impl std::fmt::Debug for Parameter<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Parameter")
             .field("key", &self.key)
@@ -700,14 +772,20 @@ impl<'a> std::fmt::Debug for Parameter<'a> {
     }
 }
 
+/// Binary string backed by a [`u8`] slice, used to hold raw network bytes for further processing
+/// without re-allocation.
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ByteStr<'a>(&'a [u8]);
 
 impl<'a> ByteStr<'a> {
+    /// Initializes a new binary string with the provided content.
+    #[must_use]
     pub fn new(bytes: &'a [u8]) -> Self {
         Self(bytes)
     }
 
+    /// Consumes the binary string and retrieve the backing [`u8`] byte array.
+    #[must_use]
     pub fn into_inner(self) -> &'a [u8] {
         self.0
     }
@@ -743,9 +821,9 @@ impl<'a, const N: usize> From<&'a mut [u8; N]> for ByteStr<'a> {
     }
 }
 
-impl<'a> Into<&'a [u8]> for ByteStr<'a> {
-    fn into(self) -> &'a [u8] {
-        self.0
+impl<'a> From<ByteStr<'a>> for &'a [u8] {
+    fn from(bytestr: ByteStr<'a>) -> Self {
+        bytestr.0
     }
 }
 
@@ -773,7 +851,7 @@ impl<const N: usize> PartialEq<&mut [u8; N]> for ByteStr<'_> {
     }
 }
 
-impl<'a> std::fmt::Debug for ByteStr<'a> {
+impl std::fmt::Debug for ByteStr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ByteStr")
             .field(&std::str::from_utf8(self.0).unwrap_or_default())
@@ -781,7 +859,7 @@ impl<'a> std::fmt::Debug for ByteStr<'a> {
     }
 }
 
-impl<'a> std::fmt::Display for ByteStr<'a> {
+impl std::fmt::Display for ByteStr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", std::str::from_utf8(self.0).unwrap_or_default())
     }
@@ -1021,8 +1099,7 @@ mod utf_8 {
     pub(super) fn option_string<'a>(bytes: &'a Option<&'a mut [u8]>) -> &'a str {
         bytes
             .as_deref()
-            .map(std::str::from_utf8)
-            .unwrap_or(Ok(""))
+            .map_or(Ok(""), std::str::from_utf8)
             .unwrap_or_default()
     }
 }
