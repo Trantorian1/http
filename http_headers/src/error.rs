@@ -178,13 +178,7 @@ pub enum ErrorValue {
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values;
     ///
-    /// if let Some(Ok(Count::One(mut element))) = values.next() {
-    ///     assert_eq!(element.next(), Some(Err(ErrorValue::MissingClosingQuote)));
-    /// }
-    /// # else {
-    /// #   panic!();
-    /// # }
-    /// #
+    /// assert_eq!(values.next(), Some(Err(ErrorValue::MissingClosingQuote)));
     /// # Ok(())
     /// # }
     /// ```
@@ -215,12 +209,7 @@ pub enum ErrorValue {
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values;
     ///
-    /// if let Some(Ok(Count::One(mut element))) = values.next() {
-    ///     assert_eq!(element.next(), Some(Err(ErrorValue::LeftoverBytes)));
-    /// }
-    /// # else {
-    /// #   panic!();
-    /// # }
+    /// assert_eq!(values.next(), Some(Err(ErrorValue::LeftoverBytes)));
     /// #
     /// # Ok(())
     /// # }
@@ -248,16 +237,11 @@ pub enum ErrorValue {
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values;
     ///
-    /// if let Some(Ok(Count::One(mut element))) = values.next() {
-    ///     if let Some(Ok(Value::Parameters(mut parameters))) = element.next() {
-    ///         assert_eq!(
-    ///             parameters.next(),
-    ///             Some(Err(ErrorValue::MissingParameterDelimiter))
-    ///         );
-    ///     }
-    ///     # else {
-    ///     #   panic!();
-    ///     # }
+    /// if let Some(Ok(Count::One(Value::Parameters(mut parameters)))) = values.next() {
+    ///     assert_eq!(
+    ///         parameters.next(),
+    ///         Some(Err(ErrorValue::MissingParameterDelimiter))
+    ///     );
     /// }
     /// # else {
     /// #   panic!();
@@ -291,16 +275,11 @@ pub enum ErrorValue {
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values;
     ///
-    /// if let Some(Ok(Count::One(mut element))) = values.next() {
-    ///     if let Some(Ok(Value::Parameters(mut parameters))) = element.next() {
-    ///         assert_eq!(
-    ///             parameters.next(),
-    ///             Some(Err(ErrorValue::MissingParameterKey))
-    ///         );
-    ///     }
-    ///     # else {
-    ///     #   panic!();
-    ///     # }
+    /// if let Some(Ok(Count::One(Value::Parameters(mut parameters)))) = values.next() {
+    ///     assert_eq!(
+    ///         parameters.next(),
+    ///         Some(Err(ErrorValue::MissingParameterKey))
+    ///     );
     /// }
     /// # else {
     /// #   panic!();
@@ -334,16 +313,11 @@ pub enum ErrorValue {
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values;
     ///
-    /// if let Some(Ok(Count::One(mut element))) = values.next() {
-    ///     if let Some(Ok(Value::Parameters(mut parameters))) = element.next() {
-    ///         assert_eq!(
-    ///             parameters.next(),
-    ///             Some(Err(ErrorValue::MissingParameterValue))
-    ///         );
-    ///     }
-    ///     # else {
-    ///     #   panic!();
-    ///     # }
+    /// if let Some(Ok(Count::One(Value::Parameters(mut parameters)))) = values.next() {
+    ///     assert_eq!(
+    ///         parameters.next(),
+    ///         Some(Err(ErrorValue::MissingParameterValue))
+    ///     );
     /// }
     /// # else {
     /// #   panic!();
@@ -377,16 +351,10 @@ pub enum ErrorValue {
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values;
     ///
-    /// if let Some(Ok(Count::One(mut element))) = values.next() {
-    ///     assert_eq!(
-    ///         element.next(),
-    ///         Some(Err(ErrorValue::InvalidFieldValue(b'\0')))
-    ///     );
-    /// }
-    /// # else {
-    /// #   panic!();
-    /// # }
-    /// #
+    /// assert_eq!(
+    ///     values.next(),
+    ///     Some(Err(ErrorValue::InvalidFieldValue(b'\0')))
+    /// );
     /// # Ok(())
     /// # }
     /// ```
@@ -423,16 +391,11 @@ pub enum ErrorValue {
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values;
     ///
-    /// if let Some(Ok(Count::One(mut element))) = values.next() {
-    ///     if let Some(Ok(Value::Parameters(mut parameters))) = element.next() {
-    ///         assert_eq!(
-    ///             parameters.next(),
-    ///             Some(Err(ErrorValue::InvalidFieldParameter(b'\\')))
-    ///         );
-    ///     }
-    ///     # else {
-    ///     #   panic!();
-    ///     # }
+    /// if let Some(Ok(Count::One(Value::Parameters(mut parameters)))) = values.next() {
+    ///     assert_eq!(
+    ///         parameters.next(),
+    ///         Some(Err(ErrorValue::InvalidFieldParameter(b'\\')))
+    ///     );
     /// }
     /// # else {
     /// #   panic!();
@@ -457,16 +420,11 @@ pub enum ErrorValue {
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values;
     ///
-    /// if let Some(Ok(Count::One(mut element))) = values.next() {
-    ///     if let Some(Ok(Value::Parameters(mut parameters))) = element.next() {
-    ///         assert_eq!(
-    ///             parameters.next(),
-    ///             Some(Err(ErrorValue::InvalidFieldParameter(b'\\')))
-    ///         );
-    ///     }
-    ///     # else {
-    ///     #   panic!();
-    ///     # }
+    /// if let Some(Ok(Count::One(Value::Parameters(mut parameters)))) = values.next() {
+    ///     assert_eq!(
+    ///         parameters.next(),
+    ///         Some(Err(ErrorValue::InvalidFieldParameter(b'\\')))
+    ///     );
     /// }
     /// # else {
     /// #   panic!();
@@ -528,16 +486,10 @@ pub enum ErrorValue {
     /// let mut header = headers.next().unwrap()?;
     /// let mut values = header.values;
     ///
-    /// if let Some(Ok(Count::One(mut element))) = values.next() {
-    ///     assert_eq!(
-    ///         element.next(),
-    ///         Some(Err(ErrorValue::InvalidEscapeSequence(b'\0'))),
-    ///     );
-    /// }
-    /// # else {
-    /// #   panic!();
-    /// # }
-    /// #
+    /// assert_eq!(
+    ///     values.next(),
+    ///     Some(Err(ErrorValue::InvalidEscapeSequence(b'\0'))),
+    /// );
     /// # Ok(())
     /// # }
     /// ```

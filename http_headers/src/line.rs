@@ -2,126 +2,162 @@
 //!
 //! This is intended as a lower-level API with higher flexibility: generally speaking, you are
 //! better off using the higher level [`serde`] parsers provided by this crate.
+//!
+//! # Examples
+//!
+//! The following showcases a manual parsing implementation which accumulates headers into a
+//! [`HashMap`]-like collection.
+//!
+//! ```rust
+//! # use std::collections::HashMap;
+//! # use std::collections::hash_map::Entry;
+//! #
+//! # use http_headers::prelude::*;
+//! #
+//! // This is the main entry-point to our parser, handling header parsing and de-duplication.
+//! #[derive(Debug, Default, Clone, PartialEq, Eq)]
+//! struct HeaderSet<'a>(HashMap<ByteStr<'a>, Vec<HeaderValue<'a>>>);
+//!
+//! // The library doesn't provide any out-of-the box primitive for storing header elements and
+//! // their parameters, as doing so would either require allocating or enforcing hard bounds on
+//! // the number of header parameters per element. Instead, we leave it up to the user to
+//! // implement their own storage systems with whatever allocation strategy they desire.
+//! #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//! struct HeaderValue<'a> {
+//!     element: Option<Element<'a>>,
+//!     parameters: Vec<Parameter<'a>>,
+//! }
+//!
+//! impl<'a> HeaderValue<'a> {
+//!     fn new(element: Option<Element<'a>>) -> Self {
+//!         Self {
+//!             element,
+//!             parameters: Vec::new(),
+//!         }
+//!     }
+//! }
+//!
+//! impl<'a> HeaderSet<'a> {
+//!     // Retrieves information about a header which has already been parsed.
+//!     fn get(&self, header_name: impl Into<ByteStr<'a>>) -> Option<&Vec<HeaderValue<'a>>> {
+//!         self.0.get(&header_name.into())
+//!     }
+//!
+//!     // `http_headers` provides iterators which yield structured information about a header
+//!     // segment. This method is responsible for parsing that structure and appending it to our
+//!     // header set.
+//!     fn insert(&mut self, mut header: HeaderLine<'a>) -> Result<(), Error> {
+//!         match header.values.next().transpose()? {
+//!             // A header line can contain only a single value
+//!             Some(Count::One(value)) => {
+//!                 self.process_value(header.name, value)?;
+//!             },
+//!
+//!             // A header line can also contain a list of many different values
+//!             Some(Count::Many(mut list)) => {
+//!                 while let Some(value) = list.next().transpose()? {
+//!                     self.process_value(header.name, value)?;
+//!                 }
+//!             },
+//!
+//!             // A header line can also be empty!
+//!             None => {
+//!                 self.0.entry(header.name).or_default();
+//!             },
+//!         }
+//!
+//!         Ok(())
+//!     }
+//!
+//!     // The `Value` enum is the main primitive for parsing header fields. This method is
+//!     // responsible for extracting its contents.
+//!     fn process_value(
+//!         &mut self,
+//!         header_name: ByteStr<'a>,
+//!         value: Value<'a>,
+//!     ) -> Result<(), Error> {
+//!         match value {
+//!             // A value can be a single element
+//!             Value::Element(element, mut parameters) => {
+//!                 let mut header_value = HeaderValue::new(Some(element));
+//!
+//!                 // An element may be followed by zero or more parameters
+//!                 while let Some(parameter) = parameters.next().transpose()? {
+//!                     header_value.parameters.push(parameter);
+//!                 }
+//!
+//!                 // remember that a header can have multiple values, which each need to be
+//!                 // accumulated into a shared collection.
+//!                 self.0.entry(header_name).or_default().push(header_value);
+//!             },
+//!
+//!             // An value can also be zero or more parameters, with no leading element
+//!             Value::Parameters(mut parameters) => {
+//!                 let mut header_value = HeaderValue::new(None);
+//!
+//!                 while let Some(parameter) = parameters.next().transpose()? {
+//!                     header_value.parameters.push(parameter);
+//!                 }
+//!
+//!                 self.0.entry(header_name).or_default().push(header_value)
+//!             },
+//!         }
+//!
+//!         Ok(())
+//!     }
+//! }
+//!
+//! fn main() -> Result<(), Error> {
+//!     let mut header_lines = *b"\
+//!         Content-Type: multipart/form-data; boundary=7MA4YWxk; charset=utf-8\r\n\
+//!         \r\n\
+//!     ";
+//!
+//!     let mut headers = HeaderSet::default();
+//!     let mut iter = Headers::new(&mut header_lines);
+//!
+//!     // Parsing is implemented as an iterator over header field lines
+//!     while let Some(mut header) = iter.next().transpose()? {
+//!         // Our `HeaderSet` takes care of parsing the rest of the header structure.
+//!         headers.insert(header)?;
+//!     }
+//!
+//!     // Now that each header has been successfully processed,
+//!     // we can access each of their individual values.
+//!
+//!     assert_eq!(
+//!         // Header names get lower-cased!
+//!         headers.get(b"content-type"),
+//!         // Each header contains...
+//!         Some(&vec![
+//!             // A list of header values...
+//!             HeaderValue {
+//!                 // With an optional element...
+//!                 element: Some(Element::new(b"multipart/form-data")),
+//!                 parameters: vec![
+//!                     // Followed by zero or more parameters
+//!                     Parameter::new(b"boundary", b"7MA4YWxk"),
+//!                     Parameter::new(b"charset", b"utf-8"),
+//!                 ]
+//!             }
+//!         ])
+//!     );
+//!
+//!     // Remember that all of the above could be empty,
+//!     // and that would still be valid header line!
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
+//! [`HashMap`]: std::collections::HashMap
 use super::error;
-
-/// Helper macro for generating an [`Element`] header field [`Value`]. Handles static string conversion into a
-/// mutable reference.
-///
-/// # Example
-///
-/// ```rust
-/// use http_headers::prelude::*;
-///
-/// let mut val = *b"text/plain";
-/// assert_eq!(Element { val: &mut val }, element!(b"text/plain"));
-/// ```
-///
-/// [`Element`]: Value::Element
-#[macro_export]
-macro_rules! element {
-    ($s:literal) => {
-        $crate::line::Element {
-            val: &mut $s.map(|b| b),
-        }
-    };
-}
-
-/// Helper macro for generating a [`Parameter`] header field [`Value`]. Handles static string
-/// conversion into a mutable reference.
-///
-/// # Example
-///
-/// ```rust
-/// use http_headers::prelude::*;
-///
-/// let mut key = *b"q";
-/// let mut val = *b"0.3";
-///
-/// assert_eq!(
-///     Parameter {
-///         key: &mut key,
-///         val: &mut val
-///     },
-///     parameter!(b"q", b"0.3")
-/// );
-/// ```
-///
-/// [`Parameter`]: Value::Parameter
-#[macro_export]
-macro_rules! parameter {
-    ($k:literal, $v:literal) => {
-        $crate::line::Parameter {
-            key: &mut $k.map(|b| b),
-            val: &mut $v.map(|b| b),
-        }
-    };
-}
 
 /// Header section parser.
 ///
 /// # Specs
 ///
 /// See the HTTP field format as described in [section 5] of [RFC9110], HTTP Semantics.
-///
-/// # Examples
-///
-/// ```rust
-/// # fn main() -> Result<(), http_headers::Error> {
-/// use http_headers::prelude::*;
-///
-/// let mut input = *b"\
-///     Content-Type: text/plain\r\n\
-///     Content-Length: 3\r\n\
-///     \r\n\
-/// ";
-///
-/// // While parsing is allocation-free your are free to use your own method
-/// // of collecting the results.
-/// let mut headers = std::collections::HashMap::<_, Vec<_>>::new();
-///
-/// let mut iter = Headers::new(&mut input);
-///
-/// // Parsing is implemented as an iterator over header field lines
-/// while let Some(mut header) = iter.next().transpose()? {
-///     let values = headers.entry(header.name).or_default();
-///
-///     match header.values.next().transpose()? {
-///         // A header line may contain a single element
-///         Some(Count::One(mut element)) => {
-///             // Header elements may also be followed by a series of header parameters.
-///             // In this case, we are only interested in the header element.
-///             if let Some(Value::Element(value)) = element.next().transpose()? {
-///                 values.push(value);
-///             }
-///         },
-///
-///         // A header line may also contain a list of elements
-///         Some(Count::Many(mut list)) => {
-///             // (A list is just an iterator over multiple elements)
-///             while let Some(mut element) = list.next().transpose()? {
-///                 if let Some(Value::Element(value)) = element.next().transpose()? {
-///                     values.push(value);
-///                 }
-///             }
-///         },
-///
-///         // A line can also be empty!
-///         None => (),
-///     }
-/// }
-///
-/// assert_eq!(
-///     headers.get(b"content-type" as &[u8]),
-///     Some(&vec![element!(b"text/plain")])
-/// );
-///
-/// assert_eq!(
-///     headers.get(b"content-length" as &[u8]),
-///     Some(&vec![element!(b"3")])
-/// );
-/// # Ok(())
-/// # }
-/// ```
 ///
 /// Parsing is implemented as an iterator over each header field line which allows it to remain
 /// allocation-free and zero-copy, though some minimal mutation of the underlying buffer might still
@@ -190,16 +226,13 @@ impl<'a> Iterator for Headers<'a> {
 ///
 /// assert_eq!(header.name, b"content-type");
 ///
-/// if let Some(Ok(Count::One(mut element))) = values.next() {
-///     assert_eq!(
-///         element.next(),
-///         Some(Ok(Value::Element(element!(b"text/plain"))))
-///     );
-/// }
-/// # else {
-/// #   panic!();
-/// # }
-/// #
+/// assert_eq!(
+///     values.next(),
+///     Some(Ok(Count::One(Value::Element(
+///         Element::new(b"text/plain"),
+///         HeaderParameters::empty()
+///     ))))
+/// );
 /// # Ok(())
 /// # }
 /// ```
@@ -216,7 +249,7 @@ pub struct HeaderLine<'a> {
     ///
     /// [section 5.1]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-names
     /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
-    pub name: &'a mut [u8],
+    pub name: ByteStr<'a>,
 
     /// Header field [`Value`]s.
     pub values: HeaderValues<'a>,
@@ -264,7 +297,7 @@ impl<'a> HeaderLine<'a> {
         field_name.make_ascii_lowercase();
 
         Ok(Self {
-            name: field_name,
+            name: ByteStr::new(field_name),
             values: field_value,
         })
     }
@@ -273,7 +306,7 @@ impl<'a> HeaderLine<'a> {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Count<'a> {
     Many(HeaderList<'a>),
-    One(HeaderElement<'a>),
+    One(Value<'a>),
 }
 
 #[derive(PartialEq, Eq)]
@@ -282,8 +315,14 @@ pub struct HeaderValues<'a> {
 }
 
 impl<'a> HeaderValues<'a> {
-    fn new(bytes: &'a mut [u8]) -> Self {
-        Self { bytes: Some(bytes) }
+    pub fn new(bytes: &'a mut [u8]) -> Self {
+        Self {
+            bytes: Some(ows::skip_ows_leading(bytes)),
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self { bytes: None }
     }
 }
 
@@ -314,20 +353,20 @@ impl<'a> Iterator for HeaderValues<'a> {
                 }
             }
 
-            let list = ows::skip_ows_leading(bytes);
-            return Some(Ok(Count::Many(HeaderList::new(list))));
+            return Some(Ok(Count::Many(HeaderList::new(bytes))));
         }
 
-        let element = ows::skip_ows_all(bytes);
-
-        if element.is_empty() {
+        if bytes.is_empty() {
             // Empty elements shouldn't yield any further parsing steps
             return None;
-        } else if element.len() < 3 && element[0] == b'"' && element[element.len() - 1] == b'"' {
+        } else if bytes.len() < 3 && bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"' {
             // Quoted empty elements should be treated the same as regular empty elements
             return None;
         } else {
-            Some(Ok(Count::One(HeaderElement::new(element))))
+            match Value::new(ows::skip_ows_all(bytes)) {
+                Ok(value) => Some(Ok(Count::One(value))),
+                Err(err) => Some(Err(err)),
+            }
         }
     }
 }
@@ -347,16 +386,23 @@ pub struct HeaderList<'a> {
 }
 
 impl<'a> HeaderList<'a> {
-    fn new(bytes: &'a mut [u8]) -> Self {
+    pub fn new(bytes: &'a mut [u8]) -> Self {
         Self {
-            bytes: Some(bytes),
+            bytes: Some(ows::skip_ows_leading(bytes)),
+            size: 0,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            bytes: None,
             size: 0,
         }
     }
 }
 
 impl<'a> Iterator for HeaderList<'a> {
-    type Item = Result<HeaderElement<'a>, error::ErrorValue>;
+    type Item = Result<Value<'a>, error::ErrorValue>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // Need to handle empty list items
@@ -400,7 +446,7 @@ impl<'a> Iterator for HeaderList<'a> {
                 let (element, remaining) = list.split_at_mut(unquoted);
                 self.bytes = Some(ows::skip_ows_leading(&mut remaining[skip..]));
 
-                element
+                ows::skip_ows_all(element)
             } else {
                 // CAUTION: `delimiter_next` is indexed relative to `list`, however `skip`
                 // is indexed relative to `&list[delimiter_next..]`
@@ -412,14 +458,14 @@ impl<'a> Iterator for HeaderList<'a> {
                 let (element, remaining) = list.split_at_mut(delimiter_next);
                 self.bytes = Some(ows::skip_ows_leading(&mut remaining[skip..]));
 
-                element
+                ows::skip_ows_all(element)
             };
 
             if !element.is_empty() && element[0] != b'"' || element.len() > 2 {
                 // Element is non-empty nor quoted empty
                 self.size += 1;
 
-                return Some(Ok(HeaderElement::new(element)));
+                return Some(Value::new(element));
             }
         }
     }
@@ -435,109 +481,19 @@ impl<'a> std::fmt::Debug for HeaderList<'a> {
 }
 
 #[derive(PartialEq, Eq)]
-pub struct HeaderElement<'a> {
-    bytes: Option<&'a mut [u8]>,
-}
-
-impl<'a> HeaderElement<'a> {
-    fn new(bytes: &'a mut [u8]) -> Self {
-        Self { bytes: Some(bytes) }
-    }
-}
-
-impl<'a> Iterator for HeaderElement<'a> {
-    type Item = Result<Value<'a>, error::ErrorValue>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let element = self.bytes.take()?;
-
-        // Empty element. This can still happen due to how element parameters are consumed one by
-        // one, eventually leaving the backing bytes array empty after all elements and parameters
-        // have been successfully parsed.
-        if element.is_empty() {
-            return None;
-        }
-
-        let val = if element[0] == b'"' && element[element.len() - 1] == b'"' {
-            assert!(element.len() > 2);
-
-            // Quoted element, make sure quotes are valid and return the value between them
-
-            let len = element.len();
-            let value = &mut element[1..len - 1];
-
-            if let Some(c) = validate::is_legal_header_quote(value) {
-                return Some(Err(error::ErrorValue::InvalidEscapeSequence(c)));
-            }
-
-            let unpaired = quote::decode_quoted_pairs(value);
-            let val = &mut value[..unpaired];
-
-            val
-        } else {
-            // Unquoted elements may still contain field parameters
-
-            match memchr::memchr(b';', element) {
-                // Element IS a field parameter
-                Some(0) => {
-                    let param = ows::skip_ows_leading(&mut element[1..]);
-                    return Some(Ok(Value::Parameters(HeaderParameters::new(param))));
-                },
-
-                // There are some bytes left to consume before the next field parameter
-                Some(n) => {
-                    let (value, remaining) = element.split_at_mut(n);
-                    let val = ows::skip_ows_trailing(value);
-
-                    self.bytes = Some(remaining);
-
-                    val
-                },
-
-                // Element does not contain any field parameters and can be consumed in
-                // its entirety.
-                None => element,
-            }
-        };
-
-        // Quote validation, including missing closing quotes and leftover bytes. This is only
-        // performed on the element and not on any potential parameter bytes in order to adhere to
-        // the lazy parsing conventions employed by other iterators.
-        if let Some(n_quote_open) = quote::next_quote_valid(val, 0) {
-            if let Some(n_quote_close) = quote::next_quote_valid(val, n_quote_open + 1) {
-                if n_quote_close + 1 != val.len() {
-                    return Some(Err(error::ErrorValue::LeftoverBytes));
-                }
-            } else {
-                return Some(Err(error::ErrorValue::MissingClosingQuote));
-            }
-        }
-
-        // Checks element for any illegal code points
-        if let Some(c) = validate::is_legal_header_element(val) {
-            return Some(Err(error::ErrorValue::InvalidFieldValue(c)));
-        }
-
-        Some(Ok(Value::Element(Element { val })))
-    }
-}
-
-impl<'a> std::fmt::Debug for HeaderElement<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HeaderElement")
-            .field("bytes", &utf_8::option_string(&self.bytes))
-            .finish()
-    }
-}
-
-#[derive(PartialEq, Eq)]
 pub struct HeaderParameters<'a> {
     bytes: Option<&'a mut [u8]>,
 }
 
 impl<'a> HeaderParameters<'a> {
-    fn new(bytes: &'a mut [u8]) -> Self {
-        Self { bytes: Some(bytes) }
+    pub fn new(bytes: &'a mut [u8]) -> Self {
+        Self {
+            bytes: Some(ows::skip_ows_leading(bytes)),
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self { bytes: None }
     }
 }
 
@@ -613,7 +569,7 @@ impl<'a> Iterator for HeaderParameters<'a> {
                             val
                         };
 
-                        return Some(Ok(Parameter { key, val }));
+                        return Some(Ok(Parameter::new(key, val)));
                     },
                 }
             }
@@ -631,40 +587,203 @@ impl<'a> std::fmt::Debug for HeaderParameters<'a> {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Value<'a> {
-    Element(Element<'a>),
+    Element(Element<'a>, HeaderParameters<'a>),
     Parameters(HeaderParameters<'a>),
 }
 
-#[derive(PartialEq, Eq)]
+impl<'a> Value<'a> {
+    fn new(element: &'a mut [u8]) -> Result<Self, error::ErrorValue> {
+        assert_ne!(element, &[]);
+
+        let (val, parameters) = if element[0] == b'"' && element[element.len() - 1] == b'"' {
+            assert!(element.len() > 2);
+
+            // Quoted element, make sure quotes are valid and return the value between them
+
+            let len = element.len();
+            let value = &mut element[1..len - 1];
+
+            if let Some(c) = validate::is_legal_header_quote(value) {
+                return Err(error::ErrorValue::InvalidEscapeSequence(c));
+            }
+
+            let unpaired = quote::decode_quoted_pairs(value);
+            let val = &mut value[..unpaired];
+            let parameters = HeaderParameters::empty();
+
+            (val, parameters)
+        } else {
+            // Unquoted elements may still contain field parameters
+
+            match memchr::memchr(b';', element) {
+                // Element IS a field parameter
+                Some(0) => {
+                    let param = &mut element[1..];
+                    return Ok(Value::Parameters(HeaderParameters::new(param)));
+                },
+
+                // There are some bytes left to consume before the next field parameter
+                Some(n) => {
+                    let (value, remaining) = element.split_at_mut(n);
+                    let val = ows::skip_ows_trailing(value);
+                    let param = &mut remaining[1..];
+
+                    (val, HeaderParameters::new(param))
+                },
+
+                // Element does not contain any field parameters and can be consumed in
+                // its entirety.
+                None => (element, HeaderParameters::empty()),
+            }
+        };
+
+        // Quote validation, including missing closing quotes and leftover bytes. This is only
+        // performed on the element and not on any potential parameter bytes in order to adhere to
+        // the lazy parsing conventions employed by other iterators.
+        if let Some(n_quote_open) = quote::next_quote_valid(val, 0) {
+            if let Some(n_quote_close) = quote::next_quote_valid(val, n_quote_open + 1) {
+                if n_quote_close + 1 != val.len() {
+                    return Err(error::ErrorValue::LeftoverBytes);
+                }
+            } else {
+                return Err(error::ErrorValue::MissingClosingQuote);
+            }
+        }
+
+        // Checks element for any illegal code points
+        if let Some(c) = validate::is_legal_header_element(val) {
+            return Err(error::ErrorValue::InvalidFieldValue(c));
+        }
+
+        Ok(Value::Element(Element::new(val), parameters))
+    }
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Element<'a> {
-    pub val: &'a mut [u8],
+    pub val: ByteStr<'a>,
+}
+
+impl<'a> Element<'a> {
+    pub fn new(val: impl Into<ByteStr<'a>>) -> Self {
+        Self { val: val.into() }
+    }
 }
 
 impl<'a> std::fmt::Debug for Element<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Element")
-            .field("val", &std::str::from_utf8(self.val).unwrap_or_default())
-            .finish()
+        f.debug_struct("Element").field("val", &self.val).finish()
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Parameter<'a> {
-    pub key: &'a mut [u8],
-    pub val: &'a mut [u8],
+    pub key: ByteStr<'a>,
+    pub val: ByteStr<'a>,
 }
 
-pub struct HeaderInfo<'a> {
-    element: Element<'a>,
-    parameters: Vec<Parameter<'a>>,
+impl<'a> Parameter<'a> {
+    pub fn new(key: impl Into<ByteStr<'a>>, val: impl Into<ByteStr<'a>>) -> Self {
+        Self {
+            key: key.into(),
+            val: val.into(),
+        }
+    }
 }
 
 impl<'a> std::fmt::Debug for Parameter<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Parameter")
-            .field("key", &std::str::from_utf8(&self.key).unwrap_or_default())
-            .field("val", &std::str::from_utf8(&self.val).unwrap_or_default())
+            .field("key", &self.key)
+            .field("val", &self.val)
             .finish()
+    }
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ByteStr<'a>(&'a [u8]);
+
+impl<'a> ByteStr<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn into_inner(self) -> &'a [u8] {
+        self.0
+    }
+}
+
+impl AsRef<[u8]> for ByteStr<'_> {
+    fn as_ref(&self) -> &[u8] {
+        self.0
+    }
+}
+
+impl<'a> From<&'a [u8]> for ByteStr<'a> {
+    fn from(bytes: &'a [u8]) -> Self {
+        Self::new(bytes)
+    }
+}
+
+impl<'a> From<&'a mut [u8]> for ByteStr<'a> {
+    fn from(bytes: &'a mut [u8]) -> Self {
+        Self::new(bytes)
+    }
+}
+
+impl<'a, const N: usize> From<&'a [u8; N]> for ByteStr<'a> {
+    fn from(bytes: &'a [u8; N]) -> Self {
+        Self::new(bytes)
+    }
+}
+
+impl<'a, const N: usize> From<&'a mut [u8; N]> for ByteStr<'a> {
+    fn from(bytes: &'a mut [u8; N]) -> Self {
+        Self::new(bytes)
+    }
+}
+
+impl<'a> Into<&'a [u8]> for ByteStr<'a> {
+    fn into(self) -> &'a [u8] {
+        self.0
+    }
+}
+
+impl PartialEq<&[u8]> for ByteStr<'_> {
+    fn eq(&self, other: &&[u8]) -> bool {
+        &self.0 == other
+    }
+}
+
+impl PartialEq<&mut [u8]> for ByteStr<'_> {
+    fn eq(&self, other: &&mut [u8]) -> bool {
+        &self.0 == other
+    }
+}
+
+impl<const N: usize> PartialEq<&[u8; N]> for ByteStr<'_> {
+    fn eq(&self, other: &&[u8; N]) -> bool {
+        &self.0 == other
+    }
+}
+
+impl<const N: usize> PartialEq<&mut [u8; N]> for ByteStr<'_> {
+    fn eq(&self, other: &&mut [u8; N]) -> bool {
+        &self.0 == other
+    }
+}
+
+impl<'a> std::fmt::Debug for ByteStr<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ByteStr")
+            .field(&std::str::from_utf8(self.0).unwrap_or_default())
+            .finish()
+    }
+}
+
+impl<'a> std::fmt::Display for ByteStr<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", std::str::from_utf8(self.0).unwrap_or_default())
     }
 }
 
@@ -931,12 +1050,10 @@ mod test {
         // -- Line 1
 
         let mut l1 = lines.next().unwrap().unwrap();
+        assert_eq!(l1.name, b"content-type");
 
-        assert_utf8_eq!(l1.name, b"content-type");
-
-        assert_next!(l1.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Element(element!(b"text/plain")))));
-            assert_next!(element, None);
+        assert_next!(l1.values, Some(Ok(Count::One(Value::Element(element, ..)))) => {
+            assert_eq!(element, Element::new(b"text/plain"));
         });
 
         assert_next!(l1.values, None);
@@ -944,16 +1061,13 @@ mod test {
         // -- Line 2
 
         let mut l2 = lines.next().unwrap().unwrap();
+        assert_eq!(l2.name, b"content-length");
 
-        assert_utf8_eq!(l2.name, b"content-length");
-
-        assert_next!(l2.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Element(element!(b"3")))));
-            assert_next!(element, None);
+        assert_next!(l2.values, Some(Ok(Count::One(Value::Element(element, ..)))) => {
+            assert_eq!(element, Element::new(b"3"));
         });
 
         assert_next!(l2.values, None);
-
         assert_next!(lines, None);
     }
 
@@ -981,17 +1095,17 @@ mod test {
 
         let mut l1 = lines.next().unwrap().unwrap();
 
-        assert_utf8_eq!(l1.name, b"example-dates");
+        assert_eq!(l1.name, b"example-dates");
 
         assert_next!(l1.values, Some(Ok(Count::Many(mut list))) => {
-            assert_next!(list, Some(Ok(mut element)) => {
-                assert_next!(element, Some(Ok(Value::Element(element!(b"Sat 04 May 1996")))));
-                assert_next!(element, None);
+            assert_next!(list, Some(Ok(Value::Element(element, ..))) => {
+                assert_eq!(element, Element::new(b"Sat 04 May 1996"));
             });
-            assert_next!(list, Some(Ok(mut element)) => {
-                assert_next!(element, Some(Ok(Value::Element(element!(b"Wed 14 Sep 2005")))));
-                assert_next!(element, None);
+
+            assert_next!(list, Some(Ok(Value::Element(element, ..))) => {
+                assert_eq!(element, Element::new(b"Wed 14 Sep 2005"));
             });
+
             assert_next!(list, None);
         });
         assert_next!(l1.values, None);
@@ -1006,7 +1120,7 @@ mod test {
 
         let mut l1 = lines.next().unwrap().unwrap();
 
-        assert_utf8_eq!(l1.name, b"example-list");
+        assert_eq!(l1.name, b"example-list");
         assert_next!(l1.values, Some(Ok(Count::Many(mut list))) => {
             assert_next!(list, Some(Err(error::ErrorValue::EmptyList)));
             assert_next!(list, None);
@@ -1021,7 +1135,7 @@ mod test {
 
         let mut l1 = lines.next().unwrap().unwrap();
 
-        assert_utf8_eq!(l1.name, b"example-list");
+        assert_eq!(l1.name, b"example-list");
         assert_next!(l1.values, Some(Ok(Count::Many(mut list))) => {
             assert_next!(list, Some(Err(error::ErrorValue::EmptyList)));
             assert_next!(list, None);
@@ -1036,7 +1150,7 @@ mod test {
 
         let mut l1 = lines.next().unwrap().unwrap();
 
-        assert_utf8_eq!(l1.name, b"example-list");
+        assert_eq!(l1.name, b"example-list");
         assert_next!(l1.values, Some(Ok(Count::Many(mut list))) => {
             assert_next!(list, Some(Err(error::ErrorValue::EmptyList)));
             assert_next!(list, None);
@@ -1051,16 +1165,13 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"content-type");
+        assert_eq!(l1.name, b"content-type");
 
-        assert_next!(l1.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Element(element!(b"multipart/form-data")))));
-            assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                assert_next!(parameters, Some(Ok(parameter!(b"boundary", b"7MA4YWxk"))));
-                assert_next!(parameters, Some(Ok(parameter!(b"charset", b"utf-8"))));
-                assert_next!(parameters, None);
-            });
-            assert_next!(element, None);
+        assert_next!(l1.values, Some(Ok(Count::One(Value::Element(element, mut parameters)))) => {
+            assert_eq!(element, Element::new(b"multipart/form-data"));
+            assert_next!(parameters, Some(Ok(Parameter::new(b"boundary", b"7MA4YWxk"))));
+            assert_next!(parameters, Some(Ok(Parameter::new(b"charset", b"utf-8"))));
+            assert_next!(parameters, None);
         });
 
         assert_next!(l1.values, None);
@@ -1069,70 +1180,49 @@ mod test {
 
     #[test]
     fn header_line_parameters_fuck_me() {
-        let mut input = *b"Accept:    text/*;q=0.3, text/plain;Q=0.7;; \t  ;, text/plain;   \
-                             fOrMat=flowed,text/plain;   \tformat=fixed;q=0.4, */*  ;    \
-                             q=0.5\t\t\t\t\r\n\r\n";
+        let mut input = *b"\
+            Accept:    text/*;q=0.3\
+                , text/plain;Q=0.7;; \t  ;\
+                , text/plain;   fOrMat=flowed\
+                ,text/plain;   \tformat=fixed;q=0.4, */*  ;    q=0.5\t\t\t\t\r\n\
+            \r\n\
+        ";
 
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"accept");
+        assert_eq!(l1.name, b"accept");
 
         assert_next!(l1.values, Some(Ok(Count::Many(mut list))) => {
-            assert_next!(list, Some(Ok(mut element)) => {
-                assert_next!(element, Some(Ok(Value::Element(element!(b"text/*")))));
-
-                assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                    assert_next!(parameters, Some(Ok(parameter!(b"q", b"0.3"))));
-                    assert_next!(parameters, None);
-                });
-
-                assert_next!(element, None);
+            assert_next!(list, Some(Ok(Value::Element(element, mut parameters))) => {
+                assert_eq!(element, Element::new(b"text/*"));
+                assert_next!(parameters, Some(Ok(Parameter::new(b"q", b"0.3"))));
+                assert_next!(parameters, None);
             });
 
-            assert_next!(list, Some(Ok(mut element)) => {
-                assert_next!(element, Some(Ok(Value::Element(element!(b"text/plain")))));
-
-                assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                    assert_next!(parameters, Some(Ok(parameter!(b"q", b"0.7"))));
-                    assert_next!(parameters, None);
-                });
-
-                assert_next!(element, None);
+            assert_next!(list, Some(Ok(Value::Element(element, mut parameters))) => {
+                assert_eq!(element, Element::new(b"text/plain"));
+                assert_next!(parameters, Some(Ok(Parameter::new(b"q", b"0.7"))));
+                assert_next!(parameters, None);
             });
 
-            assert_next!(list, Some(Ok(mut element)) => {
-                assert_next!(element, Some(Ok(Value::Element(element!(b"text/plain")))));
-
-                assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                    assert_next!(parameters, Some(Ok(parameter!(b"format", b"flowed"))));
-                    assert_next!(parameters, None);
-                });
-
-                assert_next!(element, None);
+            assert_next!(list, Some(Ok(Value::Element(element, mut parameters))) => {
+                assert_eq!(element, Element::new(b"text/plain"));
+                assert_next!(parameters, Some(Ok(Parameter::new(b"format", b"flowed"))));
+                assert_next!(parameters, None);
             });
 
-            assert_next!(list, Some(Ok(mut element)) => {
-                assert_next!(element, Some(Ok(Value::Element(element!(b"text/plain")))));
-
-                assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                    assert_next!(parameters, Some(Ok(parameter!(b"format", b"fixed"))));
-                    assert_next!(parameters, Some(Ok(parameter!(b"q", b"0.4"))));
-                    assert_next!(parameters, None);
-                });
-
-                assert_next!(element, None);
+            assert_next!(list, Some(Ok(Value::Element(element, mut parameters))) => {
+                assert_eq!(element, Element::new(b"text/plain"));
+                assert_next!(parameters, Some(Ok(Parameter::new(b"format", b"fixed"))));
+                assert_next!(parameters, Some(Ok(Parameter::new(b"q", b"0.4"))));
+                assert_next!(parameters, None);
             });
 
-            assert_next!(list, Some(Ok(mut element)) => {
-                assert_next!(element, Some(Ok(Value::Element(element!(b"*/*")))));
-
-                assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                    assert_next!(parameters, Some(Ok(parameter!(b"q", b"0.5"))));
-                    assert_next!(parameters, None);
-                });
-
-                assert_next!(element, None);
+            assert_next!(list, Some(Ok(Value::Element(element, mut parameters))) => {
+                assert_eq!(element, Element::new(b"*/*"));
+                assert_next!(parameters, Some(Ok(Parameter::new(b"q", b"0.5"))));
+                assert_next!(parameters, None);
             });
 
             assert_next!(list, None);
@@ -1148,14 +1238,11 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"content-type");
+        assert_eq!(l1.name, b"content-type");
 
-        assert_next!(l1.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                assert_next!(parameters, Some(Err(error::ErrorValue::MissingParameterDelimiter)));
-                assert_next!(parameters, None);
-            });
-            assert_next!(element, None);
+        assert_next!(l1.values, Some(Ok(Count::One(Value::Parameters(mut parameters)))) => {
+            assert_next!(parameters, Some(Err(error::ErrorValue::MissingParameterDelimiter)));
+            assert_next!(parameters, None);
         });
 
         assert_next!(l1.values, None);
@@ -1168,14 +1255,11 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"content-type");
+        assert_eq!(l1.name, b"content-type");
 
-        assert_next!(l1.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                assert_next!(parameters, Some(Err(error::ErrorValue::MissingParameterKey)));
-                assert_next!(parameters, None);
-            });
-            assert_next!(element, None);
+        assert_next!(l1.values, Some(Ok(Count::One(Value::Parameters(mut parameters)))) => {
+            assert_next!(parameters, Some(Err(error::ErrorValue::MissingParameterKey)));
+            assert_next!(parameters, None);
         });
 
         assert_next!(l1.values, None);
@@ -1188,14 +1272,11 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"content-type");
+        assert_eq!(l1.name, b"content-type");
 
-        assert_next!(l1.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                assert_next!(parameters, Some(Err(error::ErrorValue::MissingParameterValue)));
-                assert_next!(parameters, None);
-            });
-            assert_next!(element, None);
+        assert_next!(l1.values, Some(Ok(Count::One(Value::Parameters(mut parameters)))) => {
+            assert_next!(parameters, Some(Err(error::ErrorValue::MissingParameterValue)));
+            assert_next!(parameters, None);
         });
 
         assert_next!(l1.values, None);
@@ -1208,11 +1289,10 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"example-dates");
+        assert_eq!(l1.name, b"example-dates");
 
-        assert_next!(l1.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Element(element!(b"Sat, 04 May 1996")))));
-            assert_next!(element, None);
+        assert_next!(l1.values, Some(Ok(Count::One(Value::Element(element, ..)))) => {
+            assert_eq!(element, Element::new(b"Sat, 04 May 1996"));
         });
 
         assert_next!(l1.values, None);
@@ -1225,10 +1305,9 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"example-dates");
+        assert_eq!(l1.name, b"example-dates");
 
         assert_next!(l1.values, None);
-
         assert_next!(lines, None);
     }
 
@@ -1238,19 +1317,15 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"example-dates");
+        assert_eq!(l1.name, b"example-dates");
 
         assert_next!(l1.values, Some(Ok(Count::Many(mut list))) => {
-            assert_next!(list, Some(Ok(mut element)) => {
-                assert_next!(element, Some(Ok(Value::Element(element!(b"Sat, 04 May 1996")))));
-                assert_next!(element, None);
+            assert_next!(list, Some(Ok(Value::Element(element, ..))) => {
+                assert_eq!(element, Element::new(b"Sat, 04 May 1996"));
             });
-
-            assert_next!(list, Some(Ok(mut element)) => {
-                assert_next!(element, Some(Ok(Value::Element(element!(b"Wed, 14 Sep 2005")))));
-                assert_next!(element, None);
+            assert_next!(list, Some(Ok(Value::Element(element, ..))) => {
+                assert_eq!(element, Element::new(b"Wed, 14 Sep 2005"));
             });
-
             assert_next!(list, None);
         });
 
@@ -1264,12 +1339,11 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"example-dates");
+        assert_eq!(l1.name, b"example-dates");
 
         assert_next!(l1.values, Some(Ok(Count::Many(mut list))) => {
-            assert_next!(list, Some(Ok(mut element)) => {
-                assert_next!(element, Some(Ok(Value::Element(element!(b"Sat, 04 May 1996")))));
-                assert_next!(element, None);
+            assert_next!(list, Some(Ok(Value::Element(element, ..))) => {
+                assert_eq!(element, Element::new(b"Sat, 04 May 1996"));
             });
             assert_next!(list, None);
         });
@@ -1284,17 +1358,12 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"content-type");
+        assert_eq!(l1.name, b"content-type");
 
-        assert_next!(l1.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Element(element!(b"multipart/form-data")))));
-
-            assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                assert_next!(parameters, Some(Ok(parameter!(b"boundary", b"7MA4YWxk"))));
-                assert_next!(parameters, None);
-            });
-
-            assert_next!(element, None);
+        assert_next!(l1.values, Some(Ok(Count::One(Value::Element(element, mut parameters)))) => {
+            assert_eq!(element, Element::new(b"multipart/form-data"));
+            assert_next!(parameters, Some(Ok(Parameter::new(b"boundary", b"7MA4YWxk"))));
+            assert_next!(parameters, None);
         });
 
         assert_next!(l1.values, None);
@@ -1307,12 +1376,9 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"content-type");
+        assert_eq!(l1.name, b"content-type");
 
-        assert_next!(l1.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Err(error::ErrorValue::MissingClosingQuote)));
-            assert_next!(element, None);
-        });
+        assert_next!(l1.values, Some(Err(error::ErrorValue::MissingClosingQuote)));
 
         assert_next!(l1.values, None);
         assert_next!(lines, None);
@@ -1324,17 +1390,12 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"content-type");
+        assert_eq!(l1.name, b"content-type");
 
-        assert_next!(l1.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Element(element!(b"multipart/form-data")))));
-
-            assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                assert_next!(parameters, Some(Err(error::ErrorValue::MissingClosingQuote)));
-                assert_next!(parameters, None);
-            });
-
-            assert_next!(element, None);
+        assert_next!(l1.values, Some(Ok(Count::One(Value::Element(element, mut parameters)))) => {
+            assert_eq!(element, Element::new(b"multipart/form-data"));
+            assert_next!(parameters, Some(Err(error::ErrorValue::MissingClosingQuote)));
+            assert_next!(parameters, None);
         });
 
         assert_next!(l1.values, None);
@@ -1347,12 +1408,9 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"content-type");
+        assert_eq!(l1.name, b"content-type");
 
-        assert_next!(l1.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Err(error::ErrorValue::LeftoverBytes)));
-            assert_next!(element, None);
-        });
+        assert_next!(l1.values, Some(Err(error::ErrorValue::LeftoverBytes)));
 
         assert_next!(l1.values, None);
         assert_next!(lines, None);
@@ -1364,17 +1422,12 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"content-type");
+        assert_eq!(l1.name, b"content-type");
 
-        assert_next!(l1.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Element(element!(b"multipart/form-data")))));
-
-            assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                assert_next!(parameters, Some(Err(error::ErrorValue::LeftoverBytes)));
-                assert_next!(parameters, None);
-            });
-
-            assert_next!(element, None);
+        assert_next!(l1.values, Some(Ok(Count::One(Value::Element(element, mut parameters)))) => {
+            assert_eq!(element, Element::new(b"multipart/form-data"));
+            assert_next!(parameters, Some(Err(error::ErrorValue::LeftoverBytes)));
+            assert_next!(parameters, None);
         });
 
         assert_next!(l1.values, None);
@@ -1387,17 +1440,12 @@ mod test {
         let mut lines = Headers::new(&mut input);
 
         let mut l1 = lines.next().unwrap().unwrap();
-        assert_utf8_eq!(l1.name, b"content-type");
+        assert_eq!(l1.name, b"content-type");
 
-        assert_next!(l1.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Element(element!(b"multipart/form-data")))));
-
-            assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                assert_next!(parameters, Some(Err(error::ErrorValue::MissingParameterValue)));
-                assert_next!(parameters, None);
-            });
-
-            assert_next!(element, None);
+        assert_next!(l1.values, Some(Ok(Count::One(Value::Element(element, mut parameters)))) => {
+            assert_eq!(element, Element::new(b"multipart/form-data"));
+            assert_next!(parameters, Some(Err(error::ErrorValue::MissingParameterValue)));
+            assert_next!(parameters, None);
         });
 
         assert_next!(l1.values, None);
@@ -1409,11 +1457,10 @@ mod test {
         let mut input = *b"Content-Type:text/plain";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_utf8_eq!(header.name, b"content-type");
+        assert_eq!(header.name, b"content-type");
 
-        assert_next!(header.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Element(element!(b"text/plain")))));
-            assert_next!(element, None);
+        assert_next!(header.values, Some(Ok(Count::One(Value::Element(element, ..)))) => {
+            assert_eq!(element, Element::new(b"text/plain"));
         });
 
         assert_next!(header.values, None);
@@ -1424,11 +1471,10 @@ mod test {
         let mut input = *b"Content-Type: \t text/plain\t\t  \t";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_utf8_eq!(header.name, b"content-type");
+        assert_eq!(header.name, b"content-type");
 
-        assert_next!(header.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Element(element!(b"text/plain")))));
-            assert_next!(element, None);
+        assert_next!(header.values, Some(Ok(Count::One(Value::Element(element, ..)))) => {
+            assert_eq!(element, Element::new(b"text/plain"));
         });
 
         assert_next!(header.values, None);
@@ -1439,7 +1485,7 @@ mod test {
         let mut input = *b"Content-Type:";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_utf8_eq!(header.name, b"content-type");
+        assert_eq!(header.name, b"content-type");
         assert_next!(header.values, None);
     }
 
@@ -1448,7 +1494,7 @@ mod test {
         let mut input = *b"Content-Type:  \t \t\t  \t";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_utf8_eq!(header.name, b"content-type");
+        assert_eq!(header.name, b"content-type");
         assert_next!(header.values, None);
     }
 
@@ -1493,10 +1539,10 @@ mod test {
         let mut input = *b"Content-Type: text\0plain";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_next!(header.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Err(error::ErrorValue::InvalidFieldValue(b'\0'))));
-            assert_next!(element, None);
-        });
+        assert_next!(
+            header.values,
+            Some(Err(error::ErrorValue::InvalidFieldValue(b'\0')))
+        );
 
         assert_next!(header.values, None);
     }
@@ -1506,10 +1552,10 @@ mod test {
         let mut input = *b"Content-Type: text/plain\r\n";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_next!(header.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Err(error::ErrorValue::InvalidFieldValue(b'\r'))));
-            assert_next!(element, None);
-        });
+        assert_next!(
+            header.values,
+            Some(Err(error::ErrorValue::InvalidFieldValue(b'\r')))
+        );
 
         assert_next!(header.values, None);
     }
@@ -1519,10 +1565,10 @@ mod test {
         let mut input = *b"Content-Type: \" text/plain\"";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_next!(header.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Err(error::ErrorValue::InvalidFieldValue(b' '))));
-            assert_next!(element, None);
-        });
+        assert_next!(
+            header.values,
+            Some(Err(error::ErrorValue::InvalidFieldValue(b' ')))
+        );
 
         assert_next!(header.values, None);
     }
@@ -1532,12 +1578,9 @@ mod test {
         let mut input = *b"Content-Type: ; bo\\undary=7MA4YWxk";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_next!(header.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                assert_next!(parameters, Some(Err(error::ErrorValue::InvalidFieldParameter(b'\\'))));
-                assert_next!(parameters, None);
-            });
-            assert_next!(element, None);
+        assert_next!(header.values, Some(Ok(Count::One(Value::Parameters(mut parameters)))) => {
+            assert_next!(parameters, Some(Err(error::ErrorValue::InvalidFieldParameter(b'\\'))));
+            assert_next!(parameters, None);
         });
 
         assert_next!(header.values, None);
@@ -1548,12 +1591,9 @@ mod test {
         let mut input = *b"Content-Type: ; boundary=7MA4Y\\WxkTrZu0gW";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_next!(header.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                assert_next!(parameters, Some(Err(error::ErrorValue::InvalidFieldParameter(b'\\'))));
-                assert_next!(parameters, None);
-            });
-            assert_next!(element, None);
+        assert_next!(header.values, Some(Ok(Count::One(Value::Parameters(mut parameters)))) => {
+            assert_next!(parameters, Some(Err(error::ErrorValue::InvalidFieldParameter(b'\\'))));
+            assert_next!(parameters, None);
         });
 
         assert_next!(header.values, None);
@@ -1564,9 +1604,8 @@ mod test {
         let mut input = *b"Content-Type: \"\\\"text/plain\\\"\"";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_next!(header.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Element(element!(b"\"text/plain\"")))));
-            assert_next!(element, None);
+        assert_next!(header.values, Some(Ok(Count::One(Value::Element(element, ..)))) => {
+            assert_eq!(element, Element::new(b"\"text/plain\""));
         });
 
         assert_next!(header.values, None);
@@ -1577,12 +1616,9 @@ mod test {
         let mut input = *b"Content-Type: ; boundary=\"\\\"\\7MA4Y\\Wx\\kTrZu0gW\\\"\"";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_next!(header.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                assert_next!(parameters, Some(Ok(parameter!(b"boundary", b"\"7MA4YWxkTrZu0gW\""))));
-                assert_next!(parameters, None);
-            });
-            assert_next!(element, None);
+        assert_next!(header.values, Some(Ok(Count::One(Value::Parameters(mut parameters)))) => {
+            assert_next!(parameters, Some(Ok(Parameter::new(b"boundary", b"\"7MA4YWxkTrZu0gW\""))));
+            assert_next!(parameters, None);
         });
 
         assert_next!(header.values, None);
@@ -1593,10 +1629,10 @@ mod test {
         let mut input = *b"Content-Type: \"text\\\0/plain\"";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_next!(header.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Err(error::ErrorValue::InvalidEscapeSequence(b'\0'))));
-            assert_next!(element, None);
-        });
+        assert_next!(
+            header.values,
+            Some(Err(error::ErrorValue::InvalidEscapeSequence(b'\0')))
+        );
 
         assert_next!(header.values, None);
     }
@@ -1606,12 +1642,9 @@ mod test {
         let mut input = *b"Content-Type: ; boundary=\"7MA4Y\\\0WxkTrZu0gW\"";
         let mut header = HeaderLine::new(&mut input).unwrap();
 
-        assert_next!(header.values, Some(Ok(Count::One(mut element))) => {
-            assert_next!(element, Some(Ok(Value::Parameters(mut parameters))) => {
-                assert_next!(parameters, Some(Err(error::ErrorValue::InvalidEscapeSequence(b'\0'))));
-                assert_next!(parameters, None);
-            });
-            assert_next!(element, None);
+        assert_next!(header.values, Some(Ok(Count::One(Value::Parameters(mut parameters)))) => {
+            assert_next!(parameters, Some(Err(error::ErrorValue::InvalidEscapeSequence(b'\0'))));
+            assert_next!(parameters, None);
         });
 
         assert_next!(header.values, None);
