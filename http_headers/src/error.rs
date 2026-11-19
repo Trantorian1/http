@@ -1,20 +1,61 @@
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ErrorSerde {
+    EmptyValue,
+    InvalidSeq(&'static str),
+    InvalidValue(&'static str),
+    Arithmetic,
+
+    Utf8Error(std::str::Utf8Error),
+    Parse(ErrorParse),
+    Custom(String),
+}
+
+impl From<ErrorParse> for ErrorSerde {
+    fn from(err: ErrorParse) -> Self {
+        Self::Parse(err)
+    }
+}
+
+impl From<ErrorValue> for ErrorSerde {
+    fn from(err: ErrorValue) -> Self {
+        Self::Parse(ErrorParse::Value(err))
+    }
+}
+
+impl std::fmt::Display for ErrorSerde {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}
+
+impl serde::de::Error for ErrorSerde {
+    fn custom<T: std::fmt::Display>(msg: T) -> Self {
+        Self::Custom(msg.to_string())
+    }
+}
+
+impl std::error::Error for ErrorSerde {}
+
 /// General header line format errors.
 ///
 /// This includes errors pertaining to the field name as well as the field value. More specific
 /// value errors are encapsulated in the [`ErrorValue`] type.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Error {
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ErrorParse {
     /// Tried to parse a header with an empty field.
     ///
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b"";
     ///
-    /// assert_eq!(line::HeaderLine::new(&mut input), Err(Error::EmptyLine));
+    /// assert_eq!(
+    ///     line::HeaderLine::new(&mut input),
+    ///     Err(ErrorParse::EmptyLine)
+    /// );
     /// # Ok(())
     /// # }
     /// ```
@@ -25,13 +66,13 @@ pub enum Error {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b"Content-Type text/plain\r\n";
     ///
     /// let mut headers = line::Headers::new(&mut input);
-    /// assert_eq!(headers.next(), Some(Err(Error::MissingFieldDelimiter)));
+    /// assert_eq!(headers.next(), Some(Err(ErrorParse::MissingFieldDelimiter)));
     /// # Ok(())
     /// # }
     /// ```
@@ -42,13 +83,13 @@ pub enum Error {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b": text/plain\r\n";
     ///
     /// let mut headers = line::Headers::new(&mut input);
-    /// assert_eq!(headers.next(), Some(Err(Error::MissingFieldName)));
+    /// assert_eq!(headers.next(), Some(Err(ErrorParse::MissingFieldName)));
     /// # Ok(())
     /// # }
     /// ```
@@ -59,13 +100,13 @@ pub enum Error {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b"Content-Type: text/plain";
     ///
     /// let mut headers = line::Headers::new(&mut input);
-    /// assert_eq!(headers.next(), Some(Err(Error::MissingCRLFDelimiter)));
+    /// assert_eq!(headers.next(), Some(Err(ErrorParse::MissingCRLFDelimiter)));
     /// # Ok(())
     /// # }
     /// ```
@@ -78,55 +119,58 @@ pub enum Error {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b"Content=Type: text/plain\r\n";
     ///
     /// let mut headers = line::Headers::new(&mut input);
-    /// assert_eq!(headers.next(), Some(Err(Error::InvalidFieldName(b'='))));
+    /// assert_eq!(
+    ///     headers.next(),
+    ///     Some(Err(ErrorParse::InvalidFieldName(b'=')))
+    /// );
     /// # Ok(())
     /// # }
     /// ```
-    InvalidFieldName(u8),
+    InvalidFieldName(char),
 
     /// Field value parsing error.
     Value(ErrorValue),
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::EmptyLine => {
-                write!(f, "Tried to parse a header with an empty field")
-            },
-            Error::MissingFieldDelimiter => {
-                write!(f, "Missing ':' field delimiter in header line")
-            },
-            Error::MissingFieldName => {
-                write!(f, "Missing field name in header line")
-            },
-            Error::MissingCRLFDelimiter => {
-                write!(f, "Missing CRLF delimiter at the end of a header line")
-            },
-            Error::InvalidFieldName(c) => {
-                write!(f, "Invalid byte '{c}' in header field name")
-            },
-            Error::Value(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl From<ErrorValue> for Error {
+impl From<ErrorValue> for ErrorParse {
     fn from(err: ErrorValue) -> Self {
         Self::Value(err)
     }
 }
 
-impl std::error::Error for Error {}
+impl std::fmt::Display for ErrorParse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorParse::EmptyLine => {
+                write!(f, "Tried to parse a header with an empty field")
+            },
+            ErrorParse::MissingFieldDelimiter => {
+                write!(f, "Missing ':' field delimiter in header line")
+            },
+            ErrorParse::MissingFieldName => {
+                write!(f, "Missing field name in header line")
+            },
+            ErrorParse::MissingCRLFDelimiter => {
+                write!(f, "Missing CRLF delimiter at the end of a header line")
+            },
+            ErrorParse::InvalidFieldName(c) => {
+                write!(f, "Invalid byte '{c}' in header field name")
+            },
+            ErrorParse::Value(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for ErrorParse {}
 
 /// Header format errors which are specific to field values.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ErrorValue {
     /// # Tried to parse an empty header field value list.
     ///
@@ -136,7 +180,7 @@ pub enum ErrorValue {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b"Example-List: ,  ,, ,\r\n\r\n";
@@ -169,7 +213,7 @@ pub enum ErrorValue {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b"Content-Type: \"multipart/form-data\r\n\r\n";
@@ -200,7 +244,7 @@ pub enum ErrorValue {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b"Content-Type: \"multipart\"/form-data\r\n\r\n";
@@ -228,7 +272,7 @@ pub enum ErrorValue {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b"Content-Type: ;boundary7MA4YWxkTrZu0gW\r\n\r\n";
@@ -266,7 +310,7 @@ pub enum ErrorValue {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b"Content-Type: ;=7MA4YWxkTrZu0gW\r\n\r\n";
@@ -304,7 +348,7 @@ pub enum ErrorValue {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b"Content-Type: ;boundary=\r\n\r\n";
@@ -342,7 +386,7 @@ pub enum ErrorValue {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b"Content-Type: text\0plain\r\n";
@@ -369,7 +413,7 @@ pub enum ErrorValue {
     ///
     /// [section 5.5]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values
     /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
-    InvalidFieldValue(u8),
+    InvalidFieldValue(char),
 
     /// # Invalid byte in a header field parameter.
     ///
@@ -378,7 +422,7 @@ pub enum ErrorValue {
     /// # Examples
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// // "\" cannot be used in parameter keys.
@@ -407,7 +451,7 @@ pub enum ErrorValue {
     /// not distinguish between either.
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// // This time the parameter *value* is invalid.
@@ -456,7 +500,7 @@ pub enum ErrorValue {
     ///
     /// [section 5.6.6]: https://www.rfc-editor.org/rfc/rfc9110.html#name-parameters
     /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
-    InvalidFieldParameter(u8),
+    InvalidFieldParameter(char),
 
     /// # Invalid escape sequence inside a header field value quote.
     ///
@@ -474,7 +518,7 @@ pub enum ErrorValue {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), http_headers::Error> {
+    /// # fn main() -> Result<(), http_headers::ErrorParse> {
     /// use http_headers::prelude::*;
     ///
     /// let mut input = *b"Content-Type: \"text\\\0/plain\"\r\n";
@@ -504,7 +548,7 @@ pub enum ErrorValue {
     ///
     /// [section 5.6.6]: https://www.rfc-editor.org/rfc/rfc9110.html#name-quoted-strings
     /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
-    InvalidEscapeSequence(u8),
+    InvalidEscapeSequence(char),
 }
 
 impl std::fmt::Display for ErrorValue {

@@ -79,6 +79,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 # Parsing
 itoa = "1.0.18"
+atoi = "3.1.1"
 memchr = { version = "2.8.3", default-features = false }
 hex = { version = "0.4.3", default-features = false }
 serde = { version = "1.0.229", default-features = false }

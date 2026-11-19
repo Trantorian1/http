@@ -21,7 +21,15 @@ pub mod prelude {
     pub use super::assert_matches;
     pub use super::assert_next;
     pub use super::assert_utf8_eq;
+    pub use super::mutbytes;
     pub use super::nonzero;
+}
+
+#[macro_export]
+macro_rules! mutbytes {
+    ($bytes:literal) => {
+        &mut $bytes.map(|b| b)
+    };
 }
 
 #[macro_export]

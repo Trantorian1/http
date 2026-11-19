@@ -2,10 +2,10 @@
 //!
 //! [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values
 
-mod deserializer;
 mod error;
 
 pub mod constants;
+pub mod de;
 pub mod line;
 
 pub use error::*;
@@ -25,14 +25,4 @@ pub mod prelude {
 
     pub use super::error::*;
     pub use super::line;
-    pub use super::line::ByteStr;
-    pub use super::line::Count;
-    pub use super::line::Element;
-    pub use super::line::HeaderLine;
-    pub use super::line::HeaderList;
-    pub use super::line::HeaderParameters;
-    pub use super::line::HeaderValues;
-    pub use super::line::Headers;
-    pub use super::line::Parameter;
-    pub use super::line::Value;
 }

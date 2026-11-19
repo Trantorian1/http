@@ -7,12 +7,17 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+alloc = ["serde/alloc"]
+
 [dependencies]
 # Parsing
 serde.workspace = true
 memchr.workspace = true
+atoi.workspace = true
 
 macro_util.workspace = true
 
 [dev-dependencies]
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["std", "derive"] }
