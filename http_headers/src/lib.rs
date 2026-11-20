@@ -2,11 +2,12 @@
 //!
 //! [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values
 
+mod bytestr;
 mod error;
+mod line;
 
 pub mod constants;
 pub mod de;
-pub mod line;
 
 pub use error::*;
 
@@ -24,5 +25,4 @@ pub mod prelude {
     //! The prelude may grow over time as additional items see ubiquitous use.
 
     pub use super::error::*;
-    pub use super::line;
 }

@@ -1,3 +1,4 @@
+// TODO: combine all error types into a single error enum
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ErrorSerde {
     EmptyValue,
@@ -42,25 +43,6 @@ impl std::error::Error for ErrorSerde {}
 /// value errors are encapsulated in the [`ErrorValue`] type.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ErrorParse {
-    /// Tried to parse a header with an empty field.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b"";
-    ///
-    /// assert_eq!(
-    ///     line::HeaderLine::new(&mut input),
-    ///     Err(ErrorParse::EmptyLine)
-    /// );
-    /// # Ok(())
-    /// # }
-    /// ```
-    EmptyLine,
-
     /// Missing ':' field delimiter in a header line.
     ///
     /// # Example
@@ -147,9 +129,6 @@ impl From<ErrorValue> for ErrorParse {
 impl std::fmt::Display for ErrorParse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ErrorParse::EmptyLine => {
-                write!(f, "Tried to parse a header with an empty field")
-            },
             ErrorParse::MissingFieldDelimiter => {
                 write!(f, "Missing ':' field delimiter in header line")
             },
