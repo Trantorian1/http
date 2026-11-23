@@ -2,7 +2,7 @@ use super::bytestr::*;
 use super::error::*;
 use super::line::*;
 
-pub fn from_mut_bytes<'de, T>(bytes: &'de mut [u8]) -> Result<T, ErrorSerde>
+pub fn from_mut_bytes<'de, T>(bytes: &'de mut [u8]) -> Result<T, Error>
 where
     T: serde::de::Deserialize<'de>,
 {
@@ -22,7 +22,7 @@ impl<'de> Deserializer<'de> {
 }
 
 impl<'de> serde::de::Deserializer<'de> for Deserializer<'de> {
-    type Error = ErrorSerde;
+    type Error = Error;
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -58,7 +58,7 @@ impl<'de> serde::de::Deserializer<'de> for Deserializer<'de> {
 }
 
 impl<'de> serde::de::MapAccess<'de> for Deserializer<'de> {
-    type Error = ErrorSerde;
+    type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
     where
@@ -95,7 +95,7 @@ impl<'de> DeserializeList<'de> {
 }
 
 impl<'de> serde::de::Deserializer<'de> for DeserializeList<'de> {
-    type Error = ErrorSerde;
+    type Error = Error;
 
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -138,7 +138,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeList<'de> {
 }
 
 impl<'de> serde::de::SeqAccess<'de> for DeserializeList<'de> {
-    type Error = ErrorSerde;
+    type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
     where
@@ -165,7 +165,7 @@ impl<'de> DeserializeKey<'de> {
 }
 
 impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
-    type Error = ErrorSerde;
+    type Error = Error;
 
     fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -182,7 +182,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.key.as_ref()).map_err(Error::Arithmetic)?;
         visitor.visit_i8(n)
     }
 
@@ -190,7 +190,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.key.as_ref()).map_err(Error::Arithmetic)?;
         visitor.visit_i16(n)
     }
 
@@ -198,7 +198,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.key.as_ref()).map_err(Error::Arithmetic)?;
         visitor.visit_i32(n)
     }
 
@@ -206,7 +206,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.key.as_ref()).map_err(Error::Arithmetic)?;
         visitor.visit_i64(n)
     }
 
@@ -214,7 +214,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.key.as_ref()).map_err(Error::Arithmetic)?;
         visitor.visit_u8(n)
     }
 
@@ -222,7 +222,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.key.as_ref()).map_err(Error::Arithmetic)?;
         visitor.visit_u16(n)
     }
 
@@ -230,7 +230,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.key.as_ref()).map_err(Error::Arithmetic)?;
         visitor.visit_u32(n)
     }
 
@@ -238,7 +238,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.key.as_ref()).map_err(Error::Arithmetic)?;
         visitor.visit_u64(n)
     }
 
@@ -246,7 +246,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.key.as_ref()).map_err(Error::Arithmetic)?;
         visitor.visit_f32(n)
     }
 
@@ -254,7 +254,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.key.as_ref()).map_err(Error::Arithmetic)?;
         visitor.visit_f64(n)
     }
 
@@ -262,7 +262,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let string = std::str::from_utf8(self.key.0).map_err(ErrorSerde::Utf8Error)?;
+        let string = std::str::from_utf8(self.key.0).map_err(Error::Utf8Error)?;
         visitor.visit_str(string)
     }
 
@@ -270,7 +270,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let string = std::str::from_utf8(self.key.0).map_err(ErrorSerde::Utf8Error)?;
+        let string = std::str::from_utf8(self.key.0).map_err(Error::Utf8Error)?;
         visitor.visit_borrowed_str(string)
     }
 
@@ -279,7 +279,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let string = std::str::from_utf8(self.key.0).map_err(ErrorSerde::Utf8Error)?;
+        let string = std::str::from_utf8(self.key.0).map_err(Error::Utf8Error)?;
         visitor.visit_string(string.to_owned())
     }
 
@@ -385,8 +385,8 @@ impl<'de, 'a> DeserializeValue<'de, 'a> {
     fn deserialize_element<V>(
         self,
         visitor: V,
-        de: impl FnOnce(V, ByteStr<'de>, HeaderParameters<'de, 'a>) -> Result<V::Value, ErrorSerde>,
-    ) -> Result<V::Value, ErrorSerde>
+        de: impl FnOnce(V, ByteStr<'de>, HeaderParameters<'de, 'a>) -> Result<V::Value, Error>,
+    ) -> Result<V::Value, Error>
     where
         V: serde::de::Visitor<'de>,
     {
@@ -403,7 +403,7 @@ impl<'de, 'a> DeserializeValue<'de, 'a> {
 }
 
 impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
-    type Error = ErrorSerde;
+    type Error = Error;
 
     fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -421,7 +421,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(Error::Arithmetic)?;
             visitor.visit_i8(n)
         })
     }
@@ -431,7 +431,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(Error::Arithmetic)?;
             visitor.visit_i16(n)
         })
     }
@@ -441,7 +441,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(Error::Arithmetic)?;
             visitor.visit_i32(n)
         })
     }
@@ -451,7 +451,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(Error::Arithmetic)?;
             visitor.visit_i64(n)
         })
     }
@@ -461,7 +461,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(Error::Arithmetic)?;
             visitor.visit_u8(n)
         })
     }
@@ -471,7 +471,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(Error::Arithmetic)?;
             visitor.visit_u16(n)
         })
     }
@@ -481,7 +481,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(Error::Arithmetic)?;
             visitor.visit_u32(n)
         })
     }
@@ -491,7 +491,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(Error::Arithmetic)?;
             visitor.visit_u64(n)
         })
     }
@@ -501,7 +501,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(Error::Arithmetic)?;
             visitor.visit_f32(n)
         })
     }
@@ -511,7 +511,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(Error::Arithmetic)?;
             visitor.visit_f64(n)
         })
     }
@@ -521,7 +521,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let string = std::str::from_utf8(bytes.as_ref()).map_err(ErrorSerde::Utf8Error)?;
+            let string = std::str::from_utf8(bytes.as_ref()).map_err(Error::Utf8Error)?;
             visitor.visit_str(string)
         })
     }
@@ -697,7 +697,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         if bytes == name.as_bytes() {
             visitor.visit_map(DeserializeParameters::new(parameters))
         } else {
-            Err(ErrorSerde::InvalidStructName)
+            Err(Error::InvalidStructName(name))
         }
     }
 
@@ -717,7 +717,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         if bytes == name.as_bytes() {
             visitor.visit_enum(DeserializeParameters::new(parameters))
         } else {
-            Err(ErrorSerde::InvalidEnumName)
+            Err(Error::InvalidEnumName(name))
         }
     }
 
@@ -734,7 +734,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
 }
 
 impl<'de, 'a> serde::de::SeqAccess<'de> for DeserializeValue<'de, 'a> {
-    type Error = ErrorSerde;
+    type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
     where
@@ -760,7 +760,7 @@ impl<'de, 'a> DeserializeParameters<'de, 'a> {
 }
 
 impl<'de, 'a> serde::de::MapAccess<'de> for DeserializeParameters<'de, 'a> {
-    type Error = ErrorSerde;
+    type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
     where
@@ -781,7 +781,7 @@ impl<'de, 'a> serde::de::MapAccess<'de> for DeserializeParameters<'de, 'a> {
 }
 
 impl<'de, 'a> serde::de::EnumAccess<'de> for DeserializeParameters<'de, 'a> {
-    type Error = ErrorSerde;
+    type Error = Error;
     type Variant = Self;
 
     fn variant_seed<V>(mut self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
@@ -796,7 +796,7 @@ impl<'de, 'a> serde::de::EnumAccess<'de> for DeserializeParameters<'de, 'a> {
 }
 
 impl<'de, 'a> serde::de::VariantAccess<'de> for DeserializeParameters<'de, 'a> {
-    type Error = ErrorSerde;
+    type Error = Error;
 
     fn unit_variant(self) -> Result<(), Self::Error> {
         unimplemented!()
@@ -847,7 +847,7 @@ impl<'de> DeserializeParameterValue<'de> {
 }
 
 impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
-    type Error = ErrorSerde;
+    type Error = Error;
 
     fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -864,7 +864,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.value.0).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.value.0).map_err(Error::Arithmetic)?;
         visitor.visit_i8(n)
     }
 
@@ -872,7 +872,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.value.0).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.value.0).map_err(Error::Arithmetic)?;
         visitor.visit_i16(n)
     }
 
@@ -880,7 +880,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.value.0).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.value.0).map_err(Error::Arithmetic)?;
         visitor.visit_i32(n)
     }
 
@@ -888,7 +888,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.value.0).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.value.0).map_err(Error::Arithmetic)?;
         visitor.visit_i64(n)
     }
 
@@ -896,7 +896,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.value.0).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.value.0).map_err(Error::Arithmetic)?;
         visitor.visit_u8(n)
     }
 
@@ -904,7 +904,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.value.0).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.value.0).map_err(Error::Arithmetic)?;
         visitor.visit_u16(n)
     }
 
@@ -912,7 +912,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.value.0).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.value.0).map_err(Error::Arithmetic)?;
         visitor.visit_u32(n)
     }
 
@@ -920,7 +920,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.value.0).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.value.0).map_err(Error::Arithmetic)?;
         visitor.visit_u64(n)
     }
 
@@ -928,7 +928,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.value.0).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.value.0).map_err(Error::Arithmetic)?;
         visitor.visit_f32(n)
     }
 
@@ -936,7 +936,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let n = lexical_core::parse(self.value.0).map_err(ErrorSerde::Arithmetic)?;
+        let n = lexical_core::parse(self.value.0).map_err(Error::Arithmetic)?;
         visitor.visit_f64(n)
     }
 
@@ -944,7 +944,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        let string = std::str::from_utf8(self.value.0).map_err(ErrorSerde::Utf8Error)?;
+        let string = std::str::from_utf8(self.value.0).map_err(Error::Utf8Error)?;
         visitor.visit_str(string)
     }
 

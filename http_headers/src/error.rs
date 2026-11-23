@@ -1,48 +1,28 @@
-// TODO: combine all error types into a single error enum
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ErrorSerde {
-    InvalidStructName,
-    InvalidEnumName,
-    ExpectedEmptyBytes,
+// TODO: include line and character information as part of error reporting. `Error` could also
+// reference parsed bytes but that would require adding an extra lifetime argument to it, which will
+// be quite cumbersome for end users but might be worth it for the added clarity on errors such as
+// `InvalidStructName`.
 
-    Arithmetic(lexical_core::Error),
-    Utf8Error(std::str::Utf8Error),
-    Parse(ErrorParse),
-    Custom(String),
-}
-
-impl From<ErrorParse> for ErrorSerde {
-    fn from(err: ErrorParse) -> Self {
-        Self::Parse(err)
-    }
-}
-
-impl From<ErrorValue> for ErrorSerde {
-    fn from(err: ErrorValue) -> Self {
-        Self::Parse(ErrorParse::Value(err))
-    }
-}
-
-impl std::fmt::Display for ErrorSerde {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
-    }
-}
-
-impl serde::de::Error for ErrorSerde {
-    fn custom<T: std::fmt::Display>(msg: T) -> Self {
-        Self::Custom(msg.to_string())
-    }
-}
-
-impl std::error::Error for ErrorSerde {}
-
-/// General header line format errors.
+/// Header segment parsing errors.
 ///
-/// This includes errors pertaining to the field name as well as the field value. More specific
-/// value errors are encapsulated in the [`ErrorValue`] type.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ErrorParse {
+/// Grammar is defined in [Section 5] of [RFC9110].
+///
+/// [section 5.6.1]: https://www.rfc-editor.org/rfc/rfc9110.html#name-fields
+/// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Error {
+    /// # Struct name does not match input bytes
+    ///
+    /// A `struct` can only be deserialized from a header field element which shares the same name
+    /// as it.
+    InvalidStructName(&'static str),
+
+    /// # Enum name does not match input bytes
+    ///
+    /// An `enum` can only be deserialized from a header field element which shares the same name as
+    /// it.
+    InvalidEnumName(&'static str),
+
     /// Missing ':' field delimiter in a header line.
     MissingFieldDelimiter,
 
@@ -57,41 +37,6 @@ pub enum ErrorParse {
     /// Unsupported byte in header field name.
     InvalidFieldName(char),
 
-    /// Field value parsing error.
-    Value(ErrorValue),
-}
-
-impl From<ErrorValue> for ErrorParse {
-    fn from(err: ErrorValue) -> Self {
-        Self::Value(err)
-    }
-}
-
-impl std::fmt::Display for ErrorParse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ErrorParse::MissingFieldDelimiter => {
-                write!(f, "Missing ':' field delimiter in header line")
-            },
-            ErrorParse::MissingFieldName => {
-                write!(f, "Missing field name in header line")
-            },
-            ErrorParse::MissingCRLFDelimiter => {
-                write!(f, "Missing CRLF delimiter at the end of a header line")
-            },
-            ErrorParse::InvalidFieldName(c) => {
-                write!(f, "Invalid byte '{c}' in header field name")
-            },
-            ErrorParse::Value(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl std::error::Error for ErrorParse {}
-
-/// Header format errors which are specific to field values.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ErrorValue {
     /// # Tried to parse an empty header field value list.
     ///
     /// Unlike single field elements, lists cannot be empty. Even if they can contain _some_ empty
@@ -245,11 +190,43 @@ pub enum ErrorValue {
     /// [section 5.6.6]: https://www.rfc-editor.org/rfc/rfc9110.html#name-quoted-strings
     /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
     InvalidEscapeSequence(char),
+
+    /// # Arithmetic conversion error
+    ///
+    /// This can happen as a result of parsing an integer which is too large for its containing type.
+    Arithmetic(lexical_core::Error),
+
+    /// # Invalid utf-8 encoding
+    ///
+    /// While utf-8 encoding is not enforced at the parsing step, deserializing to string types will
+    /// still require the input be valid code points.
+    Utf8Error(std::str::Utf8Error),
+
+    /// [`serde`]-specific errors.
+    Custom(String),
 }
 
-impl std::fmt::Display for ErrorValue {
+impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidStructName(name) => {
+                write!(f, "Invalid struct name, expected \"{name}\"")
+            },
+            Self::InvalidEnumName(name) => {
+                write!(f, "Invalid enum name, expected \"{name}\"")
+            },
+            Self::MissingFieldDelimiter => {
+                write!(f, "Missing ':' field delimiter in header line")
+            },
+            Self::MissingFieldName => {
+                write!(f, "Missing field name in header line")
+            },
+            Self::MissingCRLFDelimiter => {
+                write!(f, "Missing CRLF delimiter at the end of a header line")
+            },
+            Self::InvalidFieldName(c) => {
+                write!(f, "Invalid byte '{c}' in header field name")
+            },
             Self::EmptyList => {
                 write!(f, "Header field value lists cannot be empty")
             },
@@ -277,8 +254,23 @@ impl std::fmt::Display for ErrorValue {
             Self::InvalidEscapeSequence(c) => {
                 write!(f, "Invalid escape '{c}' in header field value quote")
             },
+            Self::Arithmetic(err) => {
+                write!(f, "{err}")
+            },
+            Self::Utf8Error(err) => {
+                write!(f, "{err}")
+            },
+            Self::Custom(err) => {
+                write!(f, "{err}")
+            },
         }
     }
 }
 
-impl std::error::Error for ErrorValue {}
+impl serde::de::Error for Error {
+    fn custom<T: std::fmt::Display>(msg: T) -> Self {
+        Self::Custom(msg.to_string())
+    }
+}
+
+impl std::error::Error for Error {}

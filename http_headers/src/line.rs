@@ -1,5 +1,5 @@
 use super::bytestr::*;
-use super::error;
+use super::error::*;
 
 /// Header section parser.
 ///
@@ -32,7 +32,7 @@ impl<'de> Headers<'de> {
         }
     }
 
-    pub(crate) fn next_key(&mut self) -> Result<Option<ByteStr<'de>>, error::ErrorParse> {
+    pub(crate) fn next_key(&mut self) -> Result<Option<ByteStr<'de>>, Error> {
         match self.input.take() {
             // End of header section
             None | Some(ByteStrMut([b'\r', b'\n'])) => Ok(None),
@@ -40,14 +40,14 @@ impl<'de> Headers<'de> {
             Some(ByteStrMut(input)) => {
                 match memchr::memmem::find(input, crate::constants::CRLF) {
                     // Invalid header line end
-                    None => Err(error::ErrorParse::MissingCRLFDelimiter),
+                    None => Err(Error::MissingCRLFDelimiter),
 
                     // Extract and parse header line
                     Some(pos_crlf) => match memchr::memchr(b':', &input[..pos_crlf]) {
                         // Missing field delimiter (':')
                         None => {
                             self.input = None;
-                            Err(error::ErrorParse::MissingFieldDelimiter)
+                            Err(Error::MissingFieldDelimiter)
                         },
 
                         // Field name
@@ -55,11 +55,11 @@ impl<'de> Headers<'de> {
                             let (field_name, remaining) = input.split_at_mut(pos_value);
 
                             if field_name.is_empty() {
-                                return Err(error::ErrorParse::MissingFieldName);
+                                return Err(Error::MissingFieldName);
                             }
 
                             if let Some(c) = validate::is_legal_header_name(field_name) {
-                                return Err(error::ErrorParse::InvalidFieldName(c));
+                                return Err(Error::InvalidFieldName(c));
                             }
 
                             self.input = Some(ByteStrMut(remaining));
@@ -123,12 +123,12 @@ impl<'de> HeaderList<'de> {
 
     pub(crate) fn next_val(
         &mut self,
-    ) -> Result<Option<(ByteStr<'de>, HeaderParameters<'de, '_>)>, error::ErrorValue> {
+    ) -> Result<Option<(ByteStr<'de>, HeaderParameters<'de, '_>)>, Error> {
         let bytes = match self.bytes.take() {
             // Empty list checks
             Some(ByteStrMut([])) | None => {
                 return if self.is_empty && self.entries > 0 {
-                    Err(error::ErrorValue::EmptyList)
+                    Err(Error::EmptyList)
                 } else {
                     Ok(None)
                 };
@@ -141,7 +141,7 @@ impl<'de> HeaderList<'de> {
             // Quoted Element
             b'"' => {
                 let Some(pos_quote) = quote::next_quote_valid(bytes, 1) else {
-                    return Err(error::ErrorValue::MissingClosingQuote);
+                    return Err(Error::MissingClosingQuote);
                 };
 
                 let pos_unquoted = pos_quote + 1;
@@ -159,7 +159,7 @@ impl<'de> HeaderList<'de> {
 
                 let leftover = ows::skip_ows_leading(&mut bytes[pos_unquoted..pos_parameters]);
                 if !leftover.is_empty() {
-                    return Err(error::ErrorValue::LeftoverBytes);
+                    return Err(Error::LeftoverBytes);
                 }
 
                 let (segment, mut remaining) = bytes.split_at_mut(pos_segment);
@@ -170,7 +170,7 @@ impl<'de> HeaderList<'de> {
                 remaining = ows::skip_ows_leading(&mut remaining[skip_segment..]);
 
                 if let Some(c) = validate::is_legal_header_quote(element) {
-                    return Err(error::ErrorValue::InvalidEscapeSequence(c));
+                    return Err(Error::InvalidEscapeSequence(c));
                 }
 
                 let n = quote::decode_quoted_pairs(element);
@@ -205,7 +205,7 @@ impl<'de> HeaderList<'de> {
             self.is_empty = false;
 
             if let Some(c) = validate::is_legal_header_element(element) {
-                return Err(error::ErrorValue::InvalidFieldValue(c));
+                return Err(Error::InvalidFieldValue(c));
             }
         }
 
@@ -244,7 +244,7 @@ impl<'de, 'a> HeaderParameters<'de, 'a> {
         true
     }
 
-    pub(crate) fn next_key(&mut self) -> Result<Option<ByteStr<'de>>, error::ErrorValue> {
+    pub(crate) fn next_key(&mut self) -> Result<Option<ByteStr<'de>>, Error> {
         loop {
             let bytes = match self.bytes.take() {
                 None | Some(ByteStrMut([])) => return Ok(None),
@@ -264,17 +264,17 @@ impl<'de, 'a> HeaderParameters<'de, 'a> {
 
             let pos_delimiter = match quote::next_unquoted(b'=', bytes) {
                 Some(n) => n,
-                None => return Err(error::ErrorValue::MissingParameterDelimiter),
+                None => return Err(Error::MissingParameterDelimiter),
             };
 
             let (key, remaining) = bytes.split_at_mut(pos_delimiter);
 
             if key.is_empty() {
-                return Err(error::ErrorValue::MissingParameterKey);
+                return Err(Error::MissingParameterKey);
             }
 
             if let Some(c) = validate::is_legal_header_parameter(key) {
-                return Err(error::ErrorValue::InvalidFieldParameter(c));
+                return Err(Error::InvalidFieldParameter(c));
             }
 
             self.bytes = Some(ByteStrMut(&mut remaining[1..]));
@@ -282,7 +282,7 @@ impl<'de, 'a> HeaderParameters<'de, 'a> {
         }
     }
 
-    pub(crate) fn next_val(&mut self) -> Result<ByteStr<'de>, error::ErrorValue> {
+    pub(crate) fn next_val(&mut self) -> Result<ByteStr<'de>, Error> {
         assert_ne!(self.bytes, None);
 
         let Some(ByteStrMut(bytes)) = self.bytes.take() else {
@@ -389,9 +389,7 @@ mod quote {
 
 /// Header field validation logic.
 mod validate {
-    use super::error;
-    use super::ows;
-    use super::quote;
+    use super::*;
 
     macro_rules! vchar {
         () => {
@@ -543,14 +541,14 @@ mod validate {
     /// '\' is not a legal `tchar`, so we have to fuse field parameter checks and quote pair checks
     /// into a single function so they don't interfere with each other, otherwise this would cause a
     /// parsing error as `\` is not normally a valid character in a header parameter.
-    pub(super) fn is_legal_header_parameter_quote(bytes: &[u8]) -> Option<error::ErrorValue> {
+    pub(super) fn is_legal_header_parameter_quote(bytes: &[u8]) -> Option<Error> {
         let mut iter = bytes.iter();
         while let Some(c) = iter.next() {
             if c == &b'\\' {
                 match iter.next() {
                     Some(quoted_pair!()) => continue,
                     Some(next) => {
-                        return Some(error::ErrorValue::InvalidEscapeSequence(char::from(*next)));
+                        return Some(Error::InvalidEscapeSequence(char::from(*next)));
                     },
                     None => unreachable!(
                         "empty quoted pairs are not possible as the parser does not count \\\" as \
@@ -560,35 +558,33 @@ mod validate {
             }
 
             if !matches!(c, tchar!()) {
-                return Some(error::ErrorValue::InvalidFieldParameter(char::from(*c)));
+                return Some(Error::InvalidFieldParameter(char::from(*c)));
             }
         }
 
         None
     }
 
-    pub(super) fn is_legal_header_parameter_value(
-        mut val: &mut [u8],
-    ) -> Result<&mut [u8], error::ErrorValue> {
+    pub(super) fn is_legal_header_parameter_value(mut val: &mut [u8]) -> Result<&mut [u8], Error> {
         val = ows::skip_ows_trailing(val);
 
         if val.is_empty() {
-            return Err(error::ErrorValue::MissingParameterValue);
+            return Err(Error::MissingParameterValue);
         }
 
         if val[0] == b'"' {
             let Some(closing_quote) = quote::next_quote_valid(val, 1) else {
-                return Err(error::ErrorValue::MissingClosingQuote);
+                return Err(Error::MissingClosingQuote);
             };
 
             if closing_quote != val.len() - 1 {
-                return Err(error::ErrorValue::LeftoverBytes);
+                return Err(Error::LeftoverBytes);
             }
 
             // Value can once again be empty after unquoting
             val = &mut val[1..closing_quote];
             if val.is_empty() {
-                return Err(error::ErrorValue::MissingParameterValue);
+                return Err(Error::MissingParameterValue);
             }
 
             if let Some(err) = is_legal_header_parameter_quote(val) {
@@ -599,7 +595,7 @@ mod validate {
             val = &mut val[..unpaired];
         } else {
             if let Some(c) = is_legal_header_parameter(val) {
-                return Err(error::ErrorValue::InvalidFieldParameter(char::from(c)));
+                return Err(Error::InvalidFieldParameter(char::from(c)));
             }
         }
 
@@ -672,10 +668,7 @@ mod test {
         let mut input = *b"Content-Type: text/plain";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Err(error::ErrorParse::MissingCRLFDelimiter)
-        );
+        assert_eq!(lines.next_key(), Err(Error::MissingCRLFDelimiter));
         assert_eq!(lines.next_key(), Ok(None));
     }
 
@@ -684,10 +677,7 @@ mod test {
         let mut input = *b"Content-Type text/plain\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Err(error::ErrorParse::MissingFieldDelimiter)
-        );
+        assert_eq!(lines.next_key(), Err(Error::MissingFieldDelimiter));
         assert_eq!(lines.next_key(), Ok(None));
     }
 
@@ -696,7 +686,7 @@ mod test {
         let mut input = *b": text/plain\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(lines.next_key(), Err(error::ErrorParse::MissingFieldName));
+        assert_eq!(lines.next_key(), Err(Error::MissingFieldName));
         assert_eq!(lines.next_key(), Ok(None));
     }
 
@@ -705,10 +695,7 @@ mod test {
         let mut input = *b"Content=Type: text/plain\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Err(error::ErrorParse::InvalidFieldName('='))
-        );
+        assert_eq!(lines.next_key(), Err(Error::InvalidFieldName('=')));
         assert_eq!(lines.next_key(), Ok(None));
     }
 
@@ -720,7 +707,7 @@ mod test {
         assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))),);
 
         assert_matches!(lines.next_val(), mut line => {
-            assert_eq!(line.next_val(), Err(error::ErrorValue::InvalidFieldValue('\0')));
+            assert_eq!(line.next_val(), Err(Error::InvalidFieldValue('\0')));
             assert_eq!(line.next_val(), Ok(None));
         });
 
@@ -735,7 +722,7 @@ mod test {
         assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))),);
 
         assert_matches!(lines.next_val(), mut line => {
-            assert_eq!(line.next_val(), Err(error::ErrorValue::InvalidFieldValue(' ')));
+            assert_eq!(line.next_val(), Err(Error::InvalidFieldValue(' ')));
             assert_eq!(line.next_val(), Ok(None));
         });
 
@@ -944,7 +931,7 @@ mod test {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, []);
 
-                assert_eq!(parameters.next_key(), Err(error::ErrorValue::MissingParameterDelimiter));
+                assert_eq!(parameters.next_key(), Err(Error::MissingParameterDelimiter));
                 assert_eq!(parameters.next_key(), Ok(None));
             });
 
@@ -965,7 +952,7 @@ mod test {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, []);
 
-                assert_eq!(parameters.next_key(), Err(error::ErrorValue::MissingParameterKey));
+                assert_eq!(parameters.next_key(), Err(Error::MissingParameterKey));
                 assert_eq!(parameters.next_key(), Ok(None));
             });
 
@@ -987,7 +974,7 @@ mod test {
                 assert_eq!(element, []);
 
                 assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
-                assert_eq!(parameters.next_val(), Err(error::ErrorValue::MissingParameterValue));
+                assert_eq!(parameters.next_val(), Err(Error::MissingParameterValue));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -1009,7 +996,7 @@ mod test {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, []);
 
-                assert_eq!(parameters.next_key(), Err(error::ErrorValue::InvalidFieldParameter('\0')));
+                assert_eq!(parameters.next_key(), Err(Error::InvalidFieldParameter('\0')));
                 assert_eq!(parameters.next_key(), Ok(None));
             });
 
@@ -1031,7 +1018,7 @@ mod test {
                 assert_eq!(element, []);
 
                 assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
-                assert_eq!(parameters.next_val(), Err(error::ErrorValue::InvalidFieldParameter('\0')));
+                assert_eq!(parameters.next_val(), Err(Error::InvalidFieldParameter('\0')));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -1198,7 +1185,7 @@ mod test {
         assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
-            assert_eq!(line.next_val(), Err(error::ErrorValue::MissingClosingQuote));
+            assert_eq!(line.next_val(), Err(Error::MissingClosingQuote));
             assert_eq!(line.next_val(), Ok(None));
         });
 
@@ -1217,7 +1204,7 @@ mod test {
                 assert_eq!(element, b"multipart/form-data");
 
                 assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
-                assert_eq!(parameters.next_val(), Err(error::ErrorValue::MissingClosingQuote));
+                assert_eq!(parameters.next_val(), Err(Error::MissingClosingQuote));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -1236,7 +1223,7 @@ mod test {
         assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
-            assert_eq!(line.next_val(), Err(error::ErrorValue::LeftoverBytes));
+            assert_eq!(line.next_val(), Err(Error::LeftoverBytes));
             assert_eq!(line.next_val(), Ok(None));
         });
 
@@ -1255,7 +1242,7 @@ mod test {
                 assert_eq!(element, b"multipart/form-data");
 
                 assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
-                assert_eq!(parameters.next_val(), Err(error::ErrorValue::LeftoverBytes));
+                assert_eq!(parameters.next_val(), Err(Error::LeftoverBytes));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -1278,7 +1265,7 @@ mod test {
                 assert_eq!(element, b"multipart/form-data");
 
                 assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
-                assert_eq!(parameters.next_val(), Err(error::ErrorValue::MissingParameterValue));
+                assert_eq!(parameters.next_val(), Err(Error::MissingParameterValue));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -1297,7 +1284,7 @@ mod test {
         assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
-            assert_eq!(line.next_val(), Err(error::ErrorValue::InvalidEscapeSequence('\0')));
+            assert_eq!(line.next_val(), Err(Error::InvalidEscapeSequence('\0')));
             assert_eq!(line.next_val(), Ok(None));
         });
 
@@ -1316,7 +1303,7 @@ mod test {
                 assert_eq!(element, []);
 
                 assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
-                assert_eq!(parameters.next_val(), Err(error::ErrorValue::InvalidEscapeSequence('\0')));
+                assert_eq!(parameters.next_val(), Err(Error::InvalidEscapeSequence('\0')));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
