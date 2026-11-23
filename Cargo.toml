@@ -72,14 +72,14 @@ semicolon_if_nothing_returned = "warn"
 http_1.path = "http_1"
 http_primitives.path = "http_primitives"
 http_url.path = "http_url"
+http_headers.path = "http_headers"
 
 # Logging
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 # Parsing
-itoa = "1.0.18"
-atoi = "3.1.1"
+lexical-core = "1.0.6"
 memchr = { version = "2.8.3", default-features = false }
 hex = { version = "0.4.3", default-features = false }
 serde = { version = "1.0.229", default-features = false }

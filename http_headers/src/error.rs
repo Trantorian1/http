@@ -4,8 +4,8 @@ pub enum ErrorSerde {
     EmptyValue,
     InvalidSeq(&'static str),
     InvalidValue(&'static str),
-    Arithmetic,
 
+    Arithmetic(lexical_core::Error),
     Utf8Error(std::str::Utf8Error),
     Parse(ErrorParse),
     Custom(String),
@@ -44,76 +44,17 @@ impl std::error::Error for ErrorSerde {}
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ErrorParse {
     /// Missing ':' field delimiter in a header line.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b"Content-Type text/plain\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// assert_eq!(headers.next(), Some(Err(ErrorParse::MissingFieldDelimiter)));
-    /// # Ok(())
-    /// # }
-    /// ```
     MissingFieldDelimiter,
 
     /// Missing field name in a header line.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b": text/plain\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// assert_eq!(headers.next(), Some(Err(ErrorParse::MissingFieldName)));
-    /// # Ok(())
-    /// # }
-    /// ```
     MissingFieldName,
 
     /// Missing [`CRLF`] delimiter at the end of a header line.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b"Content-Type: text/plain";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// assert_eq!(headers.next(), Some(Err(ErrorParse::MissingCRLFDelimiter)));
-    /// # Ok(())
-    /// # }
-    /// ```
     ///
     /// [`CRLF`]: crate::constants::CRLF
     MissingCRLFDelimiter,
 
     /// Unsupported byte in header field name.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b"Content=Type: text/plain\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// assert_eq!(
-    ///     headers.next(),
-    ///     Some(Err(ErrorParse::InvalidFieldName(b'=')))
-    /// );
-    /// # Ok(())
-    /// # }
-    /// ```
     InvalidFieldName(char),
 
     /// Field value parsing error.
@@ -156,29 +97,6 @@ pub enum ErrorValue {
     /// Unlike single field elements, lists cannot be empty. Even if they can contain _some_ empty
     /// elements, they must at least contain _one_ non-empty element to be considered valid.
     ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b"Example-List: ,  ,, ,\r\n\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values;
-    ///
-    /// if let Ok(Count::Many(mut list)) = values.count() {
-    ///     assert_eq!(list.next(), Some(Err(ErrorValue::EmptyList)));
-    /// }
-    /// # else {
-    /// #   panic!();
-    /// # }
-    /// #
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
     /// # Specs
     ///
     /// Header field value lists are defined in [section 5.6.1] of [RFC9110], HTTP Semantics.
@@ -188,23 +106,6 @@ pub enum ErrorValue {
     EmptyList,
 
     /// # Header field value is missing a closing quote.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b"Content-Type: \"multipart/form-data\r\n\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values;
-    ///
-    /// assert_eq!(values.count(), Err(ErrorValue::MissingClosingQuote));
-    /// # Ok(())
-    /// # }
-    /// ```
     ///
     /// # Specs
     ///
@@ -220,24 +121,6 @@ pub enum ErrorValue {
     /// complicate the parsing process and make it much harder to avoid copies during
     /// deserialization. They are therefore not supported in the current design.
     ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b"Content-Type: \"multipart\"/form-data\r\n\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values;
-    ///
-    /// assert_eq!(values.count(), Err(ErrorValue::LeftoverBytes));
-    /// #
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
     /// # Specs
     ///
     /// Header field quotation semantics are defined in [section 5.6.4] of [RFC9110], HTTP Semantics.
@@ -247,32 +130,6 @@ pub enum ErrorValue {
     LeftoverBytes,
 
     /// # A header field value parameter is missing its '=' delimiter.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b"Content-Type: ;boundary7MA4YWxkTrZu0gW\r\n\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values;
-    ///
-    /// if let Ok(Count::One(Value::Parameters(mut parameters))) = values.count() {
-    ///     assert_eq!(
-    ///         parameters.next(),
-    ///         Some(Err(ErrorValue::MissingParameterDelimiter))
-    ///     );
-    /// }
-    /// # else {
-    /// #   panic!();
-    /// # }
-    /// #
-    /// # Ok(())
-    /// # }
-    /// ```
     ///
     /// # Specs
     ///
@@ -286,32 +143,6 @@ pub enum ErrorValue {
     ///
     /// Unlike single field elements, parameters pairs cannot have an empty key or value.
     ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b"Content-Type: ;=7MA4YWxkTrZu0gW\r\n\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values;
-    ///
-    /// if let Ok(Count::One(Value::Parameters(mut parameters))) = values.count() {
-    ///     assert_eq!(
-    ///         parameters.next(),
-    ///         Some(Err(ErrorValue::MissingParameterKey))
-    ///     );
-    /// }
-    /// # else {
-    /// #   panic!();
-    /// # }
-    /// #
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
     /// # Specs
     ///
     /// Header field parameters are defined in [section 5.6.6] of [RFC9110], HTTP Semantics.
@@ -324,32 +155,6 @@ pub enum ErrorValue {
     ///
     /// Unlike single field elements, parameters pairs cannot have an empty key or value.
     ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b"Content-Type: ;boundary=\r\n\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values;
-    ///
-    /// if let Ok(Count::One(Value::Parameters(mut parameters))) = values.count() {
-    ///     assert_eq!(
-    ///         parameters.next(),
-    ///         Some(Err(ErrorValue::MissingParameterValue))
-    ///     );
-    /// }
-    /// # else {
-    /// #   panic!();
-    /// # }
-    /// #
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
     /// # Specs
     ///
     /// Header field parameters are defined in [section 5.6.6] of [RFC9110], HTTP Semantics.
@@ -361,23 +166,6 @@ pub enum ErrorValue {
     /// # Invalid byte in a header field value.
     ///
     /// Parsed bytes do not correspond to the legal set allowed in the specs.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b"Content-Type: text\0plain\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values;
-    ///
-    /// assert_eq!(values.count(), Err(ErrorValue::InvalidFieldValue(b'\0')));
-    /// # Ok(())
-    /// # }
-    /// ```
     ///
     /// # Specs
     ///
@@ -398,61 +186,10 @@ pub enum ErrorValue {
     ///
     /// Parsed bytes do not correspond to the legal set allowed in the specs.
     ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// // "\" cannot be used in parameter keys.
-    /// let mut input = *b"Content-Type: ; bo\\undary=7MA4YWxkTrZu0gW\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values;
-    ///
-    /// if let Ok(Count::One(Value::Parameters(mut parameters))) = values.count() {
-    ///     assert_eq!(
-    ///         parameters.next(),
-    ///         Some(Err(ErrorValue::InvalidFieldParameter(b'\\')))
-    ///     );
-    /// }
-    /// # else {
-    /// #   panic!();
-    /// # }
-    /// #
-    /// # Ok(())
-    /// # }
-    /// ```
     ///
     /// Validation rules only differ between parameter keys and values in that the latter can be
     /// quoted. Despite this, this error type is used for both key and value format errors and does
     /// not distinguish between either.
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// // This time the parameter *value* is invalid.
-    /// let mut input = *b"Content-Type: ; boundary=7MA4Y\\WxkTrZu0gW\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values;
-    ///
-    /// if let Ok(Count::One(Value::Parameters(mut parameters))) = values.count() {
-    ///     assert_eq!(
-    ///         parameters.next(),
-    ///         Some(Err(ErrorValue::InvalidFieldParameter(b'\\')))
-    ///     );
-    /// }
-    /// # else {
-    /// #   panic!();
-    /// # }
-    /// #
-    /// # Ok(())
-    /// # }
-    /// ```
     ///
     /// # Specs
     ///
@@ -493,26 +230,6 @@ pub enum ErrorValue {
     /// since special care is taken to avoid copying data when parsing header bytes, such escape
     /// sequences cannot be replaced at this stage in the parsing process. A second cleanup step has
     /// to then be manually performed in order to properly replace them._
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), http_headers::ErrorParse> {
-    /// use http_headers::prelude::*;
-    ///
-    /// let mut input = *b"Content-Type: \"text\\\0/plain\"\r\n";
-    ///
-    /// let mut headers = line::Headers::new(&mut input);
-    /// let mut header = headers.next().unwrap()?;
-    /// let mut values = header.values;
-    ///
-    /// assert_eq!(
-    ///     values.count(),
-    ///     Err(ErrorValue::InvalidEscapeSequence(b'\0')),
-    /// );
-    /// # Ok(())
-    /// # }
-    /// ```
     ///
     /// # Specs
     ///

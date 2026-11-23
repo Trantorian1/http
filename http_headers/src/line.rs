@@ -111,6 +111,16 @@ impl<'de> HeaderList<'de> {
         }
     }
 
+    pub(crate) fn is_seq(&self) -> bool {
+        if let Some(ByteStr(bytes)) = &self.bytes {
+            if quote::next_unquoted(b',', bytes).is_some() {
+                return true;
+            }
+        }
+
+        false
+    }
+
     pub(crate) fn next_val(
         &mut self,
     ) -> Result<Option<(ByteStr<'de>, HeaderParameters<'de, '_>)>, error::ErrorValue> {
@@ -211,8 +221,8 @@ impl<'de> HeaderList<'de> {
 /// Header parameter parser.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct HeaderParameters<'de, 'a> {
-    bytes: Option<ByteStr<'de>>,
-    is_empty: &'a mut bool,
+    pub(crate) bytes: Option<ByteStr<'de>>,
+    pub(crate) is_empty: &'a mut bool,
 }
 
 impl<'de, 'a> HeaderParameters<'de, 'a> {
@@ -222,6 +232,16 @@ impl<'de, 'a> HeaderParameters<'de, 'a> {
             bytes: Some(ows::skip_ows_leading(bytes).into()),
             is_empty,
         }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        if let Some(ByteStr(bytes)) = &self.bytes {
+            if quote::next_unquoted(b';', bytes).is_some() {
+                return false;
+            }
+        }
+
+        true
     }
 
     pub(crate) fn next_key(&mut self) -> Result<Option<ByteStr<'de>>, error::ErrorValue> {
@@ -298,6 +318,17 @@ mod ows {
         }
 
         &mut bytes[start..]
+    }
+
+    #[inline]
+    // TODO: make this return a start index instead
+    pub(super) fn skip_ows_leading_immut(bytes: &[u8]) -> &[u8] {
+        let mut start = 0;
+        while start < bytes.len() && crate::constants::OWS.contains(&bytes[start]) {
+            start += 1;
+        }
+
+        &bytes[start..]
     }
 
     #[inline]

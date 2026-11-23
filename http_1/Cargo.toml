@@ -18,7 +18,7 @@ tracing-subscriber.workspace = true
 
 # Parsing
 memchr.workspace = true
-itoa.workspace = true
+lexical-core.workspace = true
 
 [dev-dependencies]
 macro_util.workspace = true

@@ -15,9 +15,10 @@ alloc = ["serde/alloc"]
 # Parsing
 serde.workspace = true
 memchr.workspace = true
-atoi.workspace = true
+lexical-core.workspace = true
 
 macro_util.workspace = true
 
 [dev-dependencies]
 serde = { workspace = true, features = ["std", "derive"] }
+http_headers = { workspace = true, features = ["alloc"] }
