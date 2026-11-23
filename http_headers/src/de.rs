@@ -88,8 +88,40 @@ struct DeserializeList<'de> {
     values: HeaderList<'de>,
 }
 
+impl<'de> DeserializeList<'de> {
+    fn new(values: HeaderList<'de>) -> Self {
+        Self { values }
+    }
+}
+
 impl<'de> serde::de::Deserializer<'de> for DeserializeList<'de> {
     type Error = ErrorSerde;
+
+    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_seq(self)
+    }
+
+    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_seq(self)
+    }
+
+    fn deserialize_tuple_struct<V>(
+        self,
+        name: &'static str,
+        len: usize,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_seq(self)
+    }
 
     fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -99,9 +131,9 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeList<'de> {
     }
 
     serde::forward_to_deserialize_any! {
-        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-        bytes byte_buf option unit unit_struct newtype_struct seq tuple
-        tuple_struct map struct enum identifier ignored_any
+        bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char str string bytes
+        byte_buf option unit unit_struct newtype_struct map struct enum
+        identifier ignored_any
     }
 }
 
@@ -112,14 +144,12 @@ impl<'de> serde::de::SeqAccess<'de> for DeserializeList<'de> {
     where
         T: serde::de::DeserializeSeed<'de>,
     {
-        seed.deserialize(DeserializeValue::new(self.values.next_val()?))
-            .map(Some)
-    }
-}
-
-impl<'de> DeserializeList<'de> {
-    fn new(values: HeaderList<'de>) -> Self {
-        Self { values }
+        match self.values.next_val()? {
+            Some(value) => seed
+                .deserialize(DeserializeValue::new(Some(value)))
+                .map(Some),
+            None => Ok(None),
+        }
     }
 }
 
@@ -1635,6 +1665,69 @@ mod test {
             Ok(Headers {
                 field_1: Data::A(1),
                 field_2: Data::B(2)
+            })
+        )
+    }
+
+    #[test]
+    fn deserialize_headers_list_seq() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Headers {
+            #[serde(rename = "Field-Value")]
+            field_value: Vec<usize>,
+        }
+
+        let mut lines = *b"Field-Value: 1, 2, 3, \r\n\r\n";
+
+        let headers = from_mut_bytes(&mut lines);
+
+        assert_eq!(
+            headers,
+            Ok(Headers {
+                field_value: vec![1, 2, 3]
+            })
+        )
+    }
+
+    #[test]
+    fn deserialize_headers_list_tuple_simple() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Headers {
+            #[serde(rename = "Field-Value")]
+            field_value: (usize, usize, usize),
+        }
+
+        let mut lines = *b"Field-Value: 1, 2, 3, \r\n\r\n";
+
+        let headers = from_mut_bytes(&mut lines);
+
+        assert_eq!(
+            headers,
+            Ok(Headers {
+                field_value: (1, 2, 3)
+            })
+        )
+    }
+
+    #[test]
+    fn deserialize_headers_list_tuple_struct() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Tuple(usize, usize, usize);
+
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Headers {
+            #[serde(rename = "Field-Value")]
+            field_value: Tuple,
+        }
+
+        let mut lines = *b"Field-Value: 1, 2, 3, \r\n\r\n";
+
+        let headers = from_mut_bytes(&mut lines);
+
+        assert_eq!(
+            headers,
+            Ok(Headers {
+                field_value: Tuple(1, 2, 3)
             })
         )
     }
