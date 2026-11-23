@@ -1,4 +1,4 @@
-use super::bytestr::ByteStr;
+use super::bytestr::*;
 use super::error;
 
 /// Header section parser.
@@ -20,13 +20,13 @@ use super::error;
 /// [RFC9110]: https://www.rfc-editor.org/rfc/rfc9110.html
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Headers<'de> {
-    input: Option<ByteStr<'de>>,
+    input: Option<ByteStrMut<'de>>,
 }
 
 impl<'de> Headers<'de> {
     /// Initializes a new parser with the input bytes to be processed.
     #[must_use]
-    pub(crate) fn new(input: impl Into<ByteStr<'de>>) -> Self {
+    pub(crate) fn new(input: impl Into<ByteStrMut<'de>>) -> Self {
         Self {
             input: Some(input.into()),
         }
@@ -35,9 +35,9 @@ impl<'de> Headers<'de> {
     pub(crate) fn next_key(&mut self) -> Result<Option<ByteStr<'de>>, error::ErrorParse> {
         match self.input.take() {
             // End of header section
-            None | Some(ByteStr([b'\r', b'\n'])) => Ok(None),
+            None | Some(ByteStrMut([b'\r', b'\n'])) => Ok(None),
 
-            Some(ByteStr(input)) => {
+            Some(ByteStrMut(input)) => {
                 match memchr::memmem::find(input, crate::constants::CRLF) {
                     // Invalid header line end
                     None => Err(error::ErrorParse::MissingCRLFDelimiter),
@@ -62,7 +62,7 @@ impl<'de> Headers<'de> {
                                 return Err(error::ErrorParse::InvalidFieldName(c));
                             }
 
-                            self.input = Some(ByteStr(remaining));
+                            self.input = Some(ByteStrMut(remaining));
                             Ok(Some(ByteStr(field_name)))
                         },
                     },
@@ -74,7 +74,7 @@ impl<'de> Headers<'de> {
     pub(crate) fn next_val(&mut self) -> HeaderList<'de> {
         assert_ne!(self.input, None);
 
-        let Some(ByteStr(input)) = self.input.take() else {
+        let Some(ByteStrMut(input)) = self.input.take() else {
             unreachable!();
         };
 
@@ -87,7 +87,7 @@ impl<'de> Headers<'de> {
 
         let (field_value, remaining) = input.split_at_mut(pos_crlf);
 
-        self.input = Some(ByteStr(&mut remaining[crate::constants::CRLF.len()..]));
+        self.input = Some(ByteStrMut(&mut remaining[crate::constants::CRLF.len()..]));
         HeaderList::new(&mut field_value[1..])
     }
 }
@@ -95,7 +95,7 @@ impl<'de> Headers<'de> {
 /// Header field value list parser.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct HeaderList<'de> {
-    bytes: Option<ByteStr<'de>>,
+    bytes: Option<ByteStrMut<'de>>,
     entries: usize,
     is_empty: bool,
 }
@@ -112,7 +112,7 @@ impl<'de> HeaderList<'de> {
     }
 
     pub(crate) fn is_seq(&self) -> bool {
-        if let Some(ByteStr(bytes)) = &self.bytes {
+        if let Some(ByteStrMut(bytes)) = &self.bytes {
             if quote::next_unquoted(b',', bytes).is_some() {
                 return true;
             }
@@ -126,7 +126,7 @@ impl<'de> HeaderList<'de> {
     ) -> Result<Option<(ByteStr<'de>, HeaderParameters<'de, '_>)>, error::ErrorValue> {
         let bytes = match self.bytes.take() {
             // Empty list checks
-            Some(ByteStr([])) | None => {
+            Some(ByteStrMut([])) | None => {
                 return if self.is_empty && self.entries > 0 {
                     Err(error::ErrorValue::EmptyList)
                 } else {
@@ -134,7 +134,7 @@ impl<'de> HeaderList<'de> {
                 };
             },
 
-            Some(ByteStr(bytes)) => bytes,
+            Some(ByteStrMut(bytes)) => bytes,
         };
 
         let (element, parameters, remaining) = match bytes[0] {
@@ -209,7 +209,7 @@ impl<'de> HeaderList<'de> {
             }
         }
 
-        self.bytes = Some(ByteStr(remaining));
+        self.bytes = Some(ByteStrMut(remaining));
 
         Ok(Some((
             ByteStr(element),
@@ -221,7 +221,7 @@ impl<'de> HeaderList<'de> {
 /// Header parameter parser.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct HeaderParameters<'de, 'a> {
-    pub(crate) bytes: Option<ByteStr<'de>>,
+    pub(crate) bytes: Option<ByteStrMut<'de>>,
     pub(crate) is_empty: &'a mut bool,
 }
 
@@ -235,7 +235,7 @@ impl<'de, 'a> HeaderParameters<'de, 'a> {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        if let Some(ByteStr(bytes)) = &self.bytes {
+        if let Some(ByteStrMut(bytes)) = &self.bytes {
             if quote::next_unquoted(b';', bytes).is_some() {
                 return false;
             }
@@ -247,8 +247,8 @@ impl<'de, 'a> HeaderParameters<'de, 'a> {
     pub(crate) fn next_key(&mut self) -> Result<Option<ByteStr<'de>>, error::ErrorValue> {
         loop {
             let bytes = match self.bytes.take() {
-                None | Some(ByteStr([])) => return Ok(None),
-                Some(ByteStr(bytes)) => bytes,
+                None | Some(ByteStrMut([])) => return Ok(None),
+                Some(ByteStrMut(bytes)) => bytes,
             };
 
             let (pos_parameter, skip) = match quote::next_unquoted(b';', bytes) {
@@ -258,7 +258,7 @@ impl<'de, 'a> HeaderParameters<'de, 'a> {
 
             // empty parameters are skipped as otherwise parsing would flag them as invalid
             if ows::skip_ows_leading(&mut bytes[..pos_parameter]).is_empty() {
-                self.bytes = Some(ByteStr(&mut bytes[skip..]));
+                self.bytes = Some(ByteStrMut(&mut bytes[skip..]));
                 continue;
             }
 
@@ -277,7 +277,7 @@ impl<'de, 'a> HeaderParameters<'de, 'a> {
                 return Err(error::ErrorValue::InvalidFieldParameter(c));
             }
 
-            self.bytes = Some(ByteStr(&mut remaining[1..]));
+            self.bytes = Some(ByteStrMut(&mut remaining[1..]));
             return Ok(Some(ByteStr(key)));
         }
     }
@@ -285,7 +285,7 @@ impl<'de, 'a> HeaderParameters<'de, 'a> {
     pub(crate) fn next_val(&mut self) -> Result<ByteStr<'de>, error::ErrorValue> {
         assert_ne!(self.bytes, None);
 
-        let Some(ByteStr(bytes)) = self.bytes.take() else {
+        let Some(ByteStrMut(bytes)) = self.bytes.take() else {
             unreachable!();
         };
 
@@ -299,7 +299,7 @@ impl<'de, 'a> HeaderParameters<'de, 'a> {
 
         *self.is_empty = false;
 
-        self.bytes = Some(ByteStr(ows::skip_ows_leading(&mut remaining[skip..])));
+        self.bytes = Some(ByteStrMut(ows::skip_ows_leading(&mut remaining[skip..])));
         Ok(ByteStr(value))
     }
 }
@@ -636,10 +636,7 @@ mod test {
         let mut input = *b"Content-Type: text/plain\r\nContent-Length: 3\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -649,10 +646,7 @@ mod test {
             assert_eq!(line.next_val(), Ok(None));
         });
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Length"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Length"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -723,10 +717,7 @@ mod test {
         let mut input = *b"Content-Type: text\0plain\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type")))),
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))),);
 
         assert_matches!(lines.next_val(), mut line => {
             assert_eq!(line.next_val(), Err(error::ErrorValue::InvalidFieldValue('\0')));
@@ -741,10 +732,7 @@ mod test {
         let mut input = *b"Content-Type: \" text/plain\"\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type")))),
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))),);
 
         assert_matches!(lines.next_val(), mut line => {
             assert_eq!(line.next_val(), Err(error::ErrorValue::InvalidFieldValue(' ')));
@@ -759,10 +747,7 @@ mod test {
         let mut input = *b"Example-Dates: Sat 04 May 1996, Wed 14 Sep 2005\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Example-Dates"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Example-Dates"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -786,10 +771,7 @@ mod test {
         let mut input = *b"Example-List: ,\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Example-List"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Example-List"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -807,10 +789,7 @@ mod test {
         let mut input = *b"Example-List: ,   , \r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Example-List"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Example-List"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -834,10 +813,7 @@ mod test {
         let mut input = *b"Example-List: \"\",  \"\"\t, \"\"   \r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Example-List"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Example-List"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -867,20 +843,17 @@ mod test {
             *b"Content-Type: multipart/form-data; boundary=7MA4YWxk; charset=utf-8\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, b"multipart/form-data");
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"boundary")))));
-                assert_eq!(parameters.next_val(), Ok(ByteStr(mutbytes!(b"7MA4YWxk"))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
+                assert_eq!(parameters.next_val(), Ok(ByteStr(b"7MA4YWxk")));
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"charset")))));
-                assert_eq!(parameters.next_val(), Ok(ByteStr(mutbytes!(b"utf-8"))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"charset"))));
+                assert_eq!(parameters.next_val(), Ok(ByteStr(b"utf-8")));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -903,14 +876,14 @@ mod test {
 
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(lines.next_key(), Ok(Some(ByteStr(mutbytes!(b"Accept")))));
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Accept"))));
 
         assert_matches!(lines.next_val(), mut list => {
             assert_matches!(list.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, b"text/*");
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"q")))));
-                assert_eq!(parameters.next_val(), Ok(ByteStr(mutbytes!(b"0.3"))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"q"))));
+                assert_eq!(parameters.next_val(), Ok(ByteStr(b"0.3")));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -918,8 +891,8 @@ mod test {
             assert_matches!(list.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, b"text/plain");
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"q")))));
-                assert_eq!(parameters.next_val(), Ok(ByteStr(mutbytes!(b"0.7"))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"q"))));
+                assert_eq!(parameters.next_val(), Ok(ByteStr(b"0.7")));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -927,8 +900,8 @@ mod test {
             assert_matches!(list.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, b"text/plain");
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"format")))));
-                assert_eq!(parameters.next_val(), Ok(ByteStr(mutbytes!(b"flowed"))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"format"))));
+                assert_eq!(parameters.next_val(), Ok(ByteStr(b"flowed")));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -936,11 +909,11 @@ mod test {
             assert_matches!(list.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, b"text/plain");
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"format")))));
-                assert_eq!(parameters.next_val(), Ok(ByteStr(mutbytes!(b"fixed"))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"format"))));
+                assert_eq!(parameters.next_val(), Ok(ByteStr(b"fixed")));
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"q")))));
-                assert_eq!(parameters.next_val(), Ok(ByteStr(mutbytes!(b"0.4"))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"q"))));
+                assert_eq!(parameters.next_val(), Ok(ByteStr(b"0.4")));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -948,8 +921,8 @@ mod test {
             assert_matches!(list.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, b"*/*");
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"q")))));
-                assert_eq!(parameters.next_val(), Ok(ByteStr(mutbytes!(b"0.5"))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"q"))));
+                assert_eq!(parameters.next_val(), Ok(ByteStr(b"0.5")));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -965,10 +938,7 @@ mod test {
         let mut input = *b"Content-Type: ;boundary7MA4YWxk\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -989,10 +959,7 @@ mod test {
         let mut input = *b"Content-Type: ;=7MA4YWxk\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -1013,16 +980,13 @@ mod test {
         let mut input = *b"Content-Type: ;boundary=\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, []);
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"boundary")))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
                 assert_eq!(parameters.next_val(), Err(error::ErrorValue::MissingParameterValue));
 
                 assert_eq!(parameters.next_key(), Ok(None));
@@ -1039,10 +1003,7 @@ mod test {
         let mut input = *b"Content-Type: ;bo\0undary=7ma4ywxk\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -1063,16 +1024,13 @@ mod test {
         let mut input = *b"Content-Type: ;boundary=7ma\04ywxk\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, []);
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"boundary")))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
                 assert_eq!(parameters.next_val(), Err(error::ErrorValue::InvalidFieldParameter('\0')));
 
                 assert_eq!(parameters.next_key(), Ok(None));
@@ -1089,10 +1047,7 @@ mod test {
         let mut input = *b"Example-Dates: \"Sat, 04 May 1996\"\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Example-Dates"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Example-Dates"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -1110,10 +1065,7 @@ mod test {
         let mut input = *b"Example-Dates: \"\"\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Example-Dates"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Example-Dates"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -1131,10 +1083,7 @@ mod test {
         let mut input = *b"Example-Dates: \"Sat, 04 May 1996\", \"Wed, 14 Sep 2005\"\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Example-Dates"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Example-Dates"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -1158,10 +1107,7 @@ mod test {
         let mut input = *b"Example-Dates: \"Sat, 04 May 1996\", \"\"\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Example-Dates"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Example-Dates"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -1185,17 +1131,14 @@ mod test {
         let mut input = *b"Content-Type: multipart/form-data; boundary=\"7MA4YWxk\"\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, b"multipart/form-data");
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"boundary")))));
-                assert_eq!(parameters.next_val(), Ok(ByteStr(mutbytes!(b"7MA4YWxk"))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
+                assert_eq!(parameters.next_val(), Ok(ByteStr(b"7MA4YWxk")));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -1211,10 +1154,7 @@ mod test {
         let mut input = *b"Content-Type: \"\\\"text/plain\\\"\"\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
@@ -1232,17 +1172,14 @@ mod test {
         let mut input = *b"Content-Type: ; boundary=\"\\\"\\7MA4Y\\Wx\\kTrZu0gW\\\"\"\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, []);
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"boundary")))));
-                assert_eq!(parameters.next_val(), Ok(ByteStr(mutbytes!(b"\"7MA4YWxkTrZu0gW\""))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
+                assert_eq!(parameters.next_val(), Ok(ByteStr(b"\"7MA4YWxkTrZu0gW\"")));
 
                 assert_eq!(parameters.next_key(), Ok(None));
             });
@@ -1258,10 +1195,7 @@ mod test {
         let mut input = *b"Content-Type: \"multipart/form-data\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_eq!(line.next_val(), Err(error::ErrorValue::MissingClosingQuote));
@@ -1276,16 +1210,13 @@ mod test {
         let mut input = *b"Content-Type: multipart/form-data; boundary=\"7MA4YWxk\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, b"multipart/form-data");
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"boundary")))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
                 assert_eq!(parameters.next_val(), Err(error::ErrorValue::MissingClosingQuote));
 
                 assert_eq!(parameters.next_key(), Ok(None));
@@ -1302,10 +1233,7 @@ mod test {
         let mut input = *b"Content-Type: \"multipart\"/form-data\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_eq!(line.next_val(), Err(error::ErrorValue::LeftoverBytes));
@@ -1320,16 +1248,13 @@ mod test {
         let mut input = *b"Content-Type: multipart/form-data; boundary=\"7MA4YWxkTr\"Zu0gW\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, b"multipart/form-data");
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"boundary")))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
                 assert_eq!(parameters.next_val(), Err(error::ErrorValue::LeftoverBytes));
 
                 assert_eq!(parameters.next_key(), Ok(None));
@@ -1346,16 +1271,13 @@ mod test {
         let mut input = *b"Content-Type: multipart/form-data; boundary=\"\"\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, b"multipart/form-data");
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"boundary")))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
                 assert_eq!(parameters.next_val(), Err(error::ErrorValue::MissingParameterValue));
 
                 assert_eq!(parameters.next_key(), Ok(None));
@@ -1372,10 +1294,7 @@ mod test {
         let mut input = *b"Content-Type: \"text\\\0/plain\"\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_eq!(line.next_val(), Err(error::ErrorValue::InvalidEscapeSequence('\0')));
@@ -1390,16 +1309,13 @@ mod test {
         let mut input = *b"Content-Type: ; boundary=\"7MA4Y\\\0WxkTrZu0gW\"\r\n\r\n";
         let mut lines = Headers::new(&mut input);
 
-        assert_eq!(
-            lines.next_key(),
-            Ok(Some(ByteStr(mutbytes!(b"Content-Type"))))
-        );
+        assert_eq!(lines.next_key(), Ok(Some(ByteStr(b"Content-Type"))));
 
         assert_matches!(lines.next_val(), mut line => {
             assert_matches!(line.next_val(), Ok(Some((element, mut parameters))) => {
                 assert_eq!(element, []);
 
-                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(mutbytes!(b"boundary")))));
+                assert_eq!(parameters.next_key(), Ok(Some(ByteStr(b"boundary"))));
                 assert_eq!(parameters.next_val(), Err(error::ErrorValue::InvalidEscapeSequence('\0')));
 
                 assert_eq!(parameters.next_key(), Ok(None));

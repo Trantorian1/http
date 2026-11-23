@@ -123,6 +123,7 @@ impl<'de> DeserializeList<'de> {
     }
 }
 
+#[derive(Default)]
 struct DeserializeKey<'de> {
     key: ByteStr<'de>,
 }
@@ -136,11 +137,197 @@ impl<'de> DeserializeKey<'de> {
 impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     type Error = ErrorSerde;
 
+    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        match self.key.as_ref() {
+            b"true" => visitor.visit_bool(true),
+            b"false" => visitor.visit_bool(false),
+            b => visitor.visit_bytes(b),
+        }
+    }
+
+    fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        visitor.visit_i8(n)
+    }
+
+    fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        visitor.visit_i16(n)
+    }
+
+    fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        visitor.visit_i32(n)
+    }
+
+    fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        visitor.visit_i64(n)
+    }
+
+    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        visitor.visit_u8(n)
+    }
+
+    fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        visitor.visit_u16(n)
+    }
+
+    fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        visitor.visit_u32(n)
+    }
+
+    fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        visitor.visit_u64(n)
+    }
+
+    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        visitor.visit_f32(n)
+    }
+
+    fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let n = lexical_core::parse(self.key.as_ref()).map_err(ErrorSerde::Arithmetic)?;
+        visitor.visit_f64(n)
+    }
+
+    fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let string = std::str::from_utf8(self.key.0).map_err(ErrorSerde::Utf8Error)?;
+        visitor.visit_str(string)
+    }
+
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let string = std::str::from_utf8(self.key.0).map_err(ErrorSerde::Utf8Error)?;
+        visitor.visit_borrowed_str(string)
+    }
+
+    #[cfg(feature = "alloc")]
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let string = std::str::from_utf8(self.key.0).map_err(ErrorSerde::Utf8Error)?;
+        visitor.visit_string(string.to_owned())
+    }
+
+    #[cfg(not(feature = "alloc"))]
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        unimplemented!(
+            "`string` deserialization requires the `alloc` feature to be enabled for \
+             `http_headers`"
+        );
+    }
+
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_borrowed_bytes(self.key.0)
+    }
+
+    #[cfg(feature = "alloc")]
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_byte_buf(self.key.0.to_vec())
+    }
+
+    #[cfg(not(feature = "alloc"))]
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        unimplemented!(
+            "`byte_buf` deserialization requires the `alloc` feature to be enabled for \
+             `http_headers`"
+        );
+    }
+
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_some(self)
+    }
+
+    fn deserialize_unit_struct<V>(
+        self,
+        name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        if self.key == name.as_bytes() {
+            visitor.visit_unit()
+        } else {
+            visitor.visit_bytes(self.key.as_ref())
+        }
+    }
+
+    fn deserialize_newtype_struct<V>(
+        self,
+        name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_newtype_struct(self)
+    }
+
     fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        visitor.visit_bytes(self.key.0)
+        visitor.visit_bytes(self.key.as_ref())
     }
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -151,9 +338,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeKey<'de> {
     }
 
     serde::forward_to_deserialize_any! {
-        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-        bytes byte_buf option unit unit_struct newtype_struct seq tuple
-        tuple_struct map struct enum ignored_any
+        unit seq tuple tuple_struct map struct enum ignored_any
     }
 }
 
@@ -170,12 +355,12 @@ impl<'de, 'a> DeserializeValue<'de, 'a> {
     fn deserialize_element<V>(
         self,
         visitor: V,
-        de: impl FnOnce(V, &'de mut [u8], HeaderParameters<'de, 'a>) -> Result<V::Value, ErrorSerde>,
+        de: impl FnOnce(V, ByteStr<'de>, HeaderParameters<'de, 'a>) -> Result<V::Value, ErrorSerde>,
     ) -> Result<V::Value, ErrorSerde>
     where
         V: serde::de::Visitor<'de>,
     {
-        let Some((ByteStr(bytes), parameters)) = self.value else {
+        let Some((bytes, parameters)) = self.value else {
             return visitor.visit_none();
         };
 
@@ -194,10 +379,10 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
     where
         V: serde::de::Visitor<'de>,
     {
-        self.deserialize_element(visitor, |visitor, bytes, _| match &*bytes {
+        self.deserialize_element(visitor, |visitor, bytes, _| match bytes.as_ref() {
             b"true" => visitor.visit_bool(true),
             b"false" => visitor.visit_bool(false),
-            _ => visitor.visit_bytes(bytes),
+            b => visitor.visit_bytes(b),
         })
     }
 
@@ -206,7 +391,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
             visitor.visit_i8(n)
         })
     }
@@ -216,7 +401,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
             visitor.visit_i16(n)
         })
     }
@@ -226,7 +411,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
             visitor.visit_i32(n)
         })
     }
@@ -236,7 +421,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
             visitor.visit_i64(n)
         })
     }
@@ -246,7 +431,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
             visitor.visit_u8(n)
         })
     }
@@ -256,7 +441,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
             visitor.visit_u16(n)
         })
     }
@@ -266,7 +451,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
             visitor.visit_u32(n)
         })
     }
@@ -276,7 +461,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
             visitor.visit_u64(n)
         })
     }
@@ -286,7 +471,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
             visitor.visit_f32(n)
         })
     }
@@ -296,7 +481,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let n = lexical_core::parse(bytes).map_err(ErrorSerde::Arithmetic)?;
+            let n = lexical_core::parse(bytes.as_ref()).map_err(ErrorSerde::Arithmetic)?;
             visitor.visit_f64(n)
         })
     }
@@ -306,7 +491,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            let string = std::str::from_utf8(bytes).map_err(ErrorSerde::Utf8Error)?;
+            let string = std::str::from_utf8(bytes.as_ref()).map_err(ErrorSerde::Utf8Error)?;
             visitor.visit_str(string)
         })
     }
@@ -316,7 +501,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            visitor.visit_borrowed_bytes(bytes)
+            visitor.visit_borrowed_bytes(bytes.0)
         })
     }
 
@@ -325,7 +510,9 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
     where
         V: serde::de::Visitor<'de>,
     {
-        self.deserialize_element(visitor, |visitor, bytes, _| visitor.visit_bytes(bytes))
+        self.deserialize_element(visitor, |visitor, bytes, _| {
+            visitor.visit_bytes(bytes.as_ref())
+        })
     }
 
     #[cfg(not(feature = "alloc"))]
@@ -344,7 +531,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            visitor.visit_borrowed_bytes(bytes)
+            visitor.visit_borrowed_bytes(bytes.0)
         })
     }
 
@@ -354,7 +541,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, _| {
-            visitor.visit_byte_buf(bytes.to_vec())
+            visitor.visit_byte_buf(bytes.0.to_vec())
         })
     }
 
@@ -374,7 +561,7 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         self.deserialize_element(visitor, |visitor, bytes, parameters| {
-            visitor.visit_some(DeserializeValue::new(Some((ByteStr(bytes), parameters))))
+            visitor.visit_some(DeserializeValue::new(Some((bytes, parameters))))
         })
     }
 
@@ -382,7 +569,19 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        let Some((ByteStr(bytes), parameters)) = self.value else {
+            return visitor.visit_unit();
+        };
+
+        if !parameters.is_empty() {
+            return visitor.visit_map(DeserializeParameters::new(parameters));
+        }
+
+        if bytes.is_empty() {
+            visitor.visit_unit()
+        } else {
+            visitor.visit_bytes(bytes)
+        }
     }
 
     fn deserialize_unit_struct<V>(
@@ -393,7 +592,13 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        self.deserialize_element(visitor, |visitor, bytes, _| {
+            if bytes == name.as_bytes() {
+                visitor.visit_unit()
+            } else {
+                visitor.visit_bytes(bytes.as_ref())
+            }
+        })
     }
 
     fn deserialize_newtype_struct<V>(
@@ -404,21 +609,23 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        self.deserialize_element(visitor, |visitor, bytes, parameters| {
+            visitor.visit_newtype_struct(DeserializeValue::new(Some((bytes, parameters))))
+        })
     }
 
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        visitor.visit_seq(self)
     }
 
     fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        visitor.visit_seq(self)
     }
 
     fn deserialize_tuple_struct<V>(
@@ -430,14 +637,18 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        visitor.visit_seq(self)
     }
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        let Some((_, parameters)) = self.value else {
+            return visitor.visit_none();
+        };
+
+        visitor.visit_map(DeserializeParameters::new(parameters))
     }
 
     fn deserialize_struct<V>(
@@ -449,7 +660,15 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        let Some((bytes, parameters)) = self.value else {
+            return visitor.visit_none();
+        };
+
+        if bytes == name.as_bytes() {
+            visitor.visit_map(DeserializeParameters::new(parameters))
+        } else {
+            Err(ErrorSerde::InvalidStructName)
+        }
     }
 
     fn deserialize_enum<V>(
@@ -461,21 +680,15 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
-    }
+        let Some((bytes, parameters)) = self.value else {
+            return visitor.visit_none();
+        };
 
-    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        todo!()
-    }
-
-    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        todo!()
+        if bytes == name.as_bytes() {
+            visitor.visit_enum(DeserializeParameters::new(parameters))
+        } else {
+            Err(ErrorSerde::InvalidEnumName)
+        }
     }
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -483,6 +696,26 @@ impl<'de, 'a> serde::de::Deserializer<'de> for DeserializeValue<'de, 'a> {
         V: serde::de::Visitor<'de>,
     {
         unimplemented!()
+    }
+
+    serde::forward_to_deserialize_any! {
+        identifier ignored_any
+    }
+}
+
+impl<'de, 'a> serde::de::SeqAccess<'de> for DeserializeValue<'de, 'a> {
+    type Error = ErrorSerde;
+
+    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+    where
+        T: serde::de::DeserializeSeed<'de>,
+    {
+        match self.value.take() {
+            Some(value) => seed
+                .deserialize(DeserializeValue::new(Some(value)))
+                .map(Some),
+            None => Ok(None),
+        }
     }
 }
 
@@ -517,6 +750,62 @@ impl<'de, 'a> serde::de::MapAccess<'de> for DeserializeParameters<'de, 'a> {
     }
 }
 
+impl<'de, 'a> serde::de::EnumAccess<'de> for DeserializeParameters<'de, 'a> {
+    type Error = ErrorSerde;
+    type Variant = Self;
+
+    fn variant_seed<V>(mut self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
+    where
+        V: serde::de::DeserializeSeed<'de>,
+    {
+        match self.parameters.next_key()? {
+            Some(key) => Ok((seed.deserialize(DeserializeKey::new(key))?, self)),
+            None => todo!(),
+        }
+    }
+}
+
+impl<'de, 'a> serde::de::VariantAccess<'de> for DeserializeParameters<'de, 'a> {
+    type Error = ErrorSerde;
+
+    fn unit_variant(self) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn newtype_variant_seed<T>(mut self, seed: T) -> Result<T::Value, Self::Error>
+    where
+        T: serde::de::DeserializeSeed<'de>,
+    {
+        seed.deserialize(DeserializeParameterValue::new(self.parameters.next_val()?))
+    }
+
+    fn tuple_variant<V>(mut self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        serde::de::Deserializer::deserialize_tuple(
+            DeserializeParameterValue::new(self.parameters.next_val()?),
+            len,
+            visitor,
+        )
+    }
+
+    fn struct_variant<V>(
+        mut self,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        serde::de::Deserializer::deserialize_map(
+            DeserializeParameterValue::new(self.parameters.next_val()?),
+            visitor,
+        )
+    }
+}
+
+#[derive(Default)]
 struct DeserializeParameterValue<'de> {
     value: ByteStr<'de>,
 }
@@ -696,7 +985,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        visitor.visit_unit()
     }
 
     fn deserialize_unit_struct<V>(
@@ -707,7 +996,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        visitor.visit_unit()
     }
 
     fn deserialize_newtype_struct<V>(
@@ -718,71 +1007,7 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
-    }
-
-    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        todo!()
-    }
-
-    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        todo!()
-    }
-
-    fn deserialize_tuple_struct<V>(
-        self,
-        name: &'static str,
-        len: usize,
-        visitor: V,
-    ) -> Result<V::Value, Self::Error>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        todo!()
-    }
-
-    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        todo!()
-    }
-
-    fn deserialize_struct<V>(
-        self,
-        name: &'static str,
-        fields: &'static [&'static str],
-        visitor: V,
-    ) -> Result<V::Value, Self::Error>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        todo!()
-    }
-
-    fn deserialize_enum<V>(
-        self,
-        name: &'static str,
-        variants: &'static [&'static str],
-        visitor: V,
-    ) -> Result<V::Value, Self::Error>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        todo!()
-    }
-
-    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        todo!()
+        visitor.visit_newtype_struct(self)
     }
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -792,7 +1017,9 @@ impl<'de> serde::de::Deserializer<'de> for DeserializeParameterValue<'de> {
         unimplemented!()
     }
 
-    serde::forward_to_deserialize_any! { identifier }
+    serde::forward_to_deserialize_any! {
+        seq tuple tuple_struct map struct enum identifier ignored_any
+    }
 }
 
 #[cfg(test)]
@@ -1208,6 +1435,206 @@ mod test {
                 field_1: Some(true),
                 field_2: None,
                 field_3: None
+            })
+        )
+    }
+
+    #[test]
+    fn deserialize_headers_value_unit() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Headers {
+            #[serde(rename = "Field-Value")]
+            field_value: (),
+        }
+
+        let mut lines = *b"Field-Value: \r\n\r\n";
+
+        let headers = from_mut_bytes(&mut lines);
+
+        assert_eq!(headers, Ok(Headers { field_value: () }))
+    }
+
+    #[test]
+    fn deserialize_headers_value_unit_struct() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Value;
+
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Headers {
+            #[serde(rename = "Field-Value")]
+            field_value: Value,
+        }
+
+        let mut lines = *b"Field-Value: Value\r\n\r\n";
+
+        let headers = from_mut_bytes(&mut lines);
+
+        assert_eq!(headers, Ok(Headers { field_value: Value }))
+    }
+
+    #[test]
+    fn deserialize_headers_value_newtype_struct() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        #[repr(transparent)]
+        struct Height(u8);
+
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Headers {
+            #[serde(rename = "Field-Value")]
+            field_value: Height,
+        }
+
+        let mut lines = *b"Field-Value: 42\r\n\r\n";
+
+        let headers = from_mut_bytes(&mut lines);
+
+        assert_eq!(
+            headers,
+            Ok(Headers {
+                field_value: Height(42)
+            })
+        )
+    }
+
+    #[test]
+    fn deserialize_headers_value_seq() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Headers<'a> {
+            #[serde(rename = "Field-Value")]
+            #[serde(borrow)]
+            field_value: Vec<&'a str>,
+        }
+
+        let mut lines = *b"Field-Value: \"Hello, World\"\r\n\r\n";
+
+        let headers = from_mut_bytes(&mut lines);
+
+        assert_eq!(
+            headers,
+            Ok(Headers {
+                field_value: vec!["Hello, World"]
+            })
+        )
+    }
+
+    #[test]
+    fn deserialize_headers_value_tuple_simple() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Headers {
+            #[serde(rename = "Field-Value")]
+            field_value: (u8,),
+        }
+
+        let mut lines = *b"Field-Value: 42\r\n\r\n";
+
+        let headers = from_mut_bytes(&mut lines);
+
+        assert_eq!(headers, Ok(Headers { field_value: (42,) }))
+    }
+
+    #[test]
+    fn deserialize_headers_value_tuple_struct() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Tupple(u8);
+
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Headers {
+            #[serde(rename = "Field-Value")]
+            field_value: Tupple,
+        }
+
+        let mut lines = *b"Field-Value: 42\r\n\r\n";
+
+        let headers = from_mut_bytes(&mut lines);
+
+        assert_eq!(
+            headers,
+            Ok(Headers {
+                field_value: Tupple(42,)
+            })
+        )
+    }
+
+    #[test]
+    fn deserialize_headers_value_map() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Headers<'a> {
+            #[serde(rename = "Field-Value")]
+            #[serde(borrow)]
+            field_value: std::collections::HashMap<&'a str, usize>,
+        }
+
+        let mut lines = *b"Field-Value: ; a=1; b=2; c=3\r\n\r\n";
+
+        let headers = from_mut_bytes(&mut lines);
+
+        assert_eq!(
+            headers,
+            Ok(Headers {
+                field_value: std::collections::HashMap::from([("a", 1), ("b", 2), ("c", 3)])
+            })
+        )
+    }
+
+    #[test]
+    fn deserialize_headers_value_struct() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        #[serde(rename = "data")]
+        struct Data {
+            a: usize,
+            b: usize,
+            c: usize,
+        }
+
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Headers {
+            #[serde(rename = "Field-Value")]
+            field_value: Data,
+        }
+
+        let mut lines = *b"Field-Value: data; a=1; b=2; c=3\r\n\r\n";
+
+        let headers = from_mut_bytes(&mut lines);
+
+        assert_eq!(
+            headers,
+            Ok(Headers {
+                field_value: Data { a: 1, b: 2, c: 3 }
+            })
+        )
+    }
+
+    #[test]
+    fn deserialize_headers_value_enum() {
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        #[serde(rename = "data")]
+        enum Data {
+            #[serde(rename = "a")]
+            A(usize),
+            #[serde(rename = "b")]
+            B(usize),
+        }
+
+        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+        struct Headers {
+            #[serde(rename = "Field-1")]
+            field_1: Data,
+            #[serde(rename = "Field-2")]
+            field_2: Data,
+        }
+
+        let mut lines = *b"\
+            Field-1: data; a=1\r\n\
+            Field-2: data; b=2\r\n\
+            \r\n";
+
+        let headers = from_mut_bytes(&mut lines);
+
+        assert_eq!(
+            headers,
+            Ok(Headers {
+                field_1: Data::A(1),
+                field_2: Data::B(2)
             })
         )
     }

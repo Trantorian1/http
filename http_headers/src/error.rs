@@ -1,9 +1,9 @@
 // TODO: combine all error types into a single error enum
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ErrorSerde {
-    EmptyValue,
-    InvalidSeq(&'static str),
-    InvalidValue(&'static str),
+    InvalidStructName,
+    InvalidEnumName,
+    ExpectedEmptyBytes,
 
     Arithmetic(lexical_core::Error),
     Utf8Error(std::str::Utf8Error),
