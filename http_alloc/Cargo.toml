@@ -1,0 +1,17 @@
+[package]
+name = "http_alloc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+nightly = []
+
+[dependencies]
+# Allocation
+region = { workspace = true }
+allocator-api2 = { workspace = true }
