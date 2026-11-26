@@ -44,6 +44,7 @@
           devenv = libpkgs.mkEnv {
             packages = with pkgs; [
               cargo-bolero
+              gcc
 
               kani-flake'.packages.kani
               (kani-flake'.packages.rust-bin.override {
