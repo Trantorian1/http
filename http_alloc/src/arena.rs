@@ -1,3 +1,33 @@
+//! Fixed-size arena bump allocator. Supports in-place growth for collections.
+//!
+//! # Example
+//!
+//! ```rust
+//! # #[cfg(feature = "nightly")]
+//! # use std::alloc::AllocError;
+//! # #[cfg(feature = "nightly")]
+//! # use std::alloc::Allocator;
+//! # #[cfg(feature = "nightly")]
+//! # use std::vec::Vec;
+//! #
+//! # #[cfg(not(feature = "nightly"))]
+//! # use allocator_api2::alloc::AllocError;
+//! # #[cfg(not(feature = "nightly"))]
+//! # use allocator_api2::alloc::Allocator;
+//! # #[cfg(not(feature = "nightly"))]
+//! # use allocator_api2::vec::Vec;
+//! #
+//! use http_alloc::arena::Arena;
+//!
+//! let arena = Arena::new(std::mem::size_of::<char>() * 4).unwrap();
+//! let mut vec = Vec::new_in(arena);
+//!
+//! vec.push('a');
+//! vec.push('b');
+//! vec.push('c');
+//! vec.push('d');
+//! ```
+
 #[cfg(feature = "nightly")]
 use std::alloc::AllocError;
 #[cfg(feature = "nightly")]
@@ -8,12 +38,77 @@ use allocator_api2::alloc::AllocError;
 #[cfg(not(feature = "nightly"))]
 use allocator_api2::alloc::Allocator;
 
+/// A fixed-size arena allocator.
+///
+/// # In-place growth
+///
+/// As long as the memory block being extend is at the head of the arena, it will be grown in-place.
+/// This is particularly useful for collections like `Vec`, which would otherwise pollute the arena
+/// with copies of their contents on each subsequent growth.
+///
+/// ```rust
+/// # #[cfg(feature = "nightly")]
+/// # use std::alloc::AllocError;
+/// # #[cfg(feature = "nightly")]
+/// # use std::alloc::Allocator;
+/// # #[cfg(feature = "nightly")]
+/// # use std::vec::Vec;
+/// #
+/// # #[cfg(not(feature = "nightly"))]
+/// # use allocator_api2::alloc::AllocError;
+/// # #[cfg(not(feature = "nightly"))]
+/// # use allocator_api2::alloc::Allocator;
+/// # #[cfg(not(feature = "nightly"))]
+/// # use allocator_api2::vec::Vec;
+/// #
+/// use http_alloc::arena::Arena;
+///
+/// let arena = Arena::new(std::mem::size_of::<char>() * 4).unwrap();
+/// let mut vec = Vec::new_in(arena);
+///
+/// // Vec does not allocate upfront, allocation takes place on first push.
+/// vec.push('a');
+/// vec.push('b');
+/// vec.push('c');
+/// vec.push('d');
+///
+/// assert_eq!(vec.capacity(), 4);
+/// let ptr = vec.as_ptr();
+///
+/// // Now that `vec` has reached capacity it will try and grow to fit new
+/// // elements.
+/// vec.push('e');
+/// vec.push('f');
+/// vec.push('g');
+/// vec.push('h');
+///
+/// // Capacity doubles on each re-allocation.
+/// assert_eq!(vec.capacity(), 8);
+///
+/// // Because `vec` was at the head of the arena it could be grown it place,
+/// // meaning the address to its inner buffer didn't change and its contents
+/// // weren't copied
+/// assert_eq!(vec.as_ptr(), ptr);
+/// ```
 pub struct Arena {
     alloc: region::Allocation,
     head: std::cell::Cell<std::ptr::NonNull<u8>>,
 }
 
 impl Arena {
+    /// Tries to initialize a new arena, allocating _at least_ `size` bytes of space.
+    ///
+    /// # Allocation
+    ///
+    /// The amount of bytes allocated is rounded up to the nearest multiple of the OS' page size.
+    ///
+    /// # Errors
+    ///
+    /// If the allocation fails.
+    ///
+    /// # Panics
+    ///
+    /// If `size` is 0.
     pub fn new(size: usize) -> Result<Self, std::io::Error> {
         assert_ne!(size, 0);
 
@@ -31,15 +126,7 @@ impl Arena {
         })
     }
 
-    pub fn available(&self) -> usize {
-        let range = self.alloc.as_range();
-        let head = self.head.get().addr().get();
-
-        assert!(range.contains(&head));
-
-        range.end - head
-    }
-
+    /// Returns the total amount of memory the arena has access to.
     pub fn capacity(&self) -> usize {
         self.alloc.len()
     }
@@ -264,6 +351,14 @@ unsafe impl Allocator for Arena {
     }
 }
 
+impl std::fmt::Debug for Arena {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set()
+            .entry(&self.alloc.as_ptr_range::<u8>())
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod test {
     #[cfg(feature = "nightly")]
@@ -427,7 +522,7 @@ mod test {
         let arena = Arena::new(1).unwrap();
 
         let mut vec = Vec::<u8, _>::new_in(&arena);
-        assert_matches!(vec.try_reserve(arena.available() + 1), Err(_));
+        assert_matches!(vec.try_reserve(arena.capacity() + 1), Err(_));
     }
 
     #[test]
@@ -447,7 +542,7 @@ mod test {
 
         assert_eq!(vec.capacity(), 4);
 
-        assert_matches!(vec.try_reserve(arena.available() + 1), Err(_));
+        assert_matches!(vec.try_reserve(arena.capacity() + 1), Err(_));
     }
 }
 
