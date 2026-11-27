@@ -12,6 +12,8 @@ default = []
 nightly = []
 
 [dependencies]
-# Allocation
-region = { workspace = true }
-allocator-api2 = { workspace = true }
+region.workspace = true
+allocator-api2.workspace = true
+
+[dev-dependencies]
+macro_util.workspace = true
