@@ -158,6 +158,8 @@ impl Arena {
     }
 }
 
+/// SAFETY: Arena's memory is already allocated up-front and is checked for alignment and overflow
+/// before being returned.
 unsafe impl Allocator for Arena {
     fn allocate(
         &self,
@@ -172,14 +174,12 @@ unsafe impl Allocator for Arena {
         let alloc_align = cell.align_offset(layout_alloc.align());
         let alloc_len = layout_alloc.size();
 
-        let alloc_start = match head.checked_add(alloc_align) {
-            Some(addr) => addr,
-            None => return Err(AllocError),
+        let Some(alloc_start) = head.checked_add(alloc_align) else {
+            return Err(AllocError);
         };
 
-        let alloc_stop = match alloc_start.checked_add(layout_alloc.size()) {
-            Some(addr) => addr,
-            None => return Err(AllocError),
+        let Some(alloc_stop) = alloc_start.checked_add(layout_alloc.size()) else {
+            return Err(AllocError);
         };
 
         assert_ne!(alloc_start, 0);
@@ -192,14 +192,12 @@ unsafe impl Allocator for Arena {
         let size_align = alloc_stop_ptr.align_offset(size_layout.align());
         let size_len = size_layout.size();
 
-        let size_start = match alloc_stop.checked_add(size_align) {
-            Some(addr) => addr,
-            None => return Err(AllocError),
+        let Some(size_start) = alloc_stop.checked_add(size_align) else {
+            return Err(AllocError);
         };
 
-        let size_stop = match size_start.checked_add(size_len) {
-            Some(addr) => addr,
-            None => return Err(AllocError),
+        let Some(size_stop) = size_start.checked_add(size_len) else {
+            return Err(AllocError);
         };
 
         assert_ne!(size_start, 0);
@@ -282,9 +280,8 @@ unsafe impl Allocator for Arena {
             let ptr = cell.as_ptr();
             let head = ptr.addr();
 
-            let alloc_stop = match head.checked_add(len_new - len_old) {
-                Some(addr) => addr,
-                None => return Err(AllocError),
+            let Some(alloc_stop) = head.checked_add(len_new - len_old) else {
+                return Err(AllocError);
             };
 
             assert!(self.alloc.as_range().contains(&head));
@@ -294,14 +291,12 @@ unsafe impl Allocator for Arena {
             let size_align = size_layout.align();
             let size_len = size_layout.size();
 
-            let size_start = match alloc_stop.checked_add(size_align) {
-                Some(addr) => addr,
-                None => return Err(AllocError),
+            let Some(size_start) = alloc_stop.checked_add(size_align) else {
+                return Err(AllocError);
             };
 
-            let size_stop = match size_start.checked_add(size_len) {
-                Some(addr) => addr,
-                None => return Err(AllocError),
+            let Some(size_stop) = size_start.checked_add(size_len) else {
+                return Err(AllocError);
             };
 
             assert_ne!(size_start, 0);
@@ -561,8 +556,9 @@ mod validate {
         };
     }
 
-    const MAX_SIZE: std::cell::LazyCell<usize> = std::cell::LazyCell::new(|| region::page::size());
     const MAX_LEN: usize = 1_000;
+
+    static MAX_SIZE: std::sync::LazyLock<usize> = std::sync::LazyLock::new(region::page::size);
 
     #[test]
     fn model() {
