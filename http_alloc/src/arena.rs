@@ -130,8 +130,7 @@ unsafe impl Allocator for Arena {
             )
         };
 
-        let start = self.alloc.as_ptr::<u8>().addr();
-        if head_new.as_ptr().addr() - start > self.alloc.len() {
+        if !self.alloc.as_range().contains(&head_new.addr().get()) {
             return Err(AllocError);
         }
 
@@ -229,8 +228,7 @@ unsafe impl Allocator for Arena {
             // value.
             let head_new = unsafe { std::ptr::NonNull::new_unchecked(size_stop_ptr) };
 
-            let start = self.alloc.as_ptr::<u8>().addr();
-            if head_new.as_ptr().addr() - start > self.alloc.len() {
+            if !self.alloc.as_range().contains(&head_new.addr().get()) {
                 return Err(AllocError);
             }
 
@@ -450,5 +448,138 @@ mod test {
         assert_eq!(vec.capacity(), 4);
 
         assert_matches!(vec.try_reserve(arena.available() + 1), Err(_));
+    }
+}
+
+#[cfg(test)]
+mod validate {
+    use super::*;
+
+    macro_rules! trust_me {
+        ($expr:expr) => {
+            // SAFETY: trust me bro
+            unsafe { $expr }
+        };
+        ($tt:tt) => {
+            // SAFETY: trust me bro
+            unsafe { $tt }
+        };
+    }
+
+    const MAX_SIZE: std::cell::LazyCell<usize> = std::cell::LazyCell::new(|| region::page::size());
+    const MAX_LEN: usize = 1_000;
+
+    #[test]
+    fn model() {
+        bolero::check!()
+            .with_type::<Vec<Operation>>()
+            .with_max_len(MAX_LEN)
+            .for_each(|operations| {
+                let arena = Arena::new(1).unwrap();
+                let mut allocations = Allocations::new();
+
+                for op in operations {
+                    match op {
+                        Operation::Alloc { size } => {
+                            allocations.allocate(*size, &arena);
+                        },
+
+                        Operation::Grow { size, idx } => {
+                            if allocations.is_empty() {
+                                allocations.allocate(*size, &arena);
+                            } else {
+                                allocations.grow(*size, *idx, &arena);
+                            }
+                        },
+
+                        Operation::Free { idx } => {
+                            if !allocations.is_empty() {
+                                allocations.free(*idx, &arena);
+                            }
+                        },
+                    }
+                }
+
+                for AllocInfo { ptr, layout } in allocations.0 {
+                    trust_me! { arena.deallocate(ptr, layout) }
+                }
+            });
+    }
+
+    #[derive(Debug, bolero::TypeGenerator)]
+    enum Operation {
+        Alloc {
+            #[generator(bolero::produce::<usize>().with().bounds(..*MAX_SIZE))]
+            size: usize,
+        },
+
+        Grow {
+            #[generator(bolero::produce::<usize>().with().bounds(..*MAX_SIZE))]
+            size: usize,
+            #[generator(bolero::produce::<usize>().with().bounds(..MAX_LEN))]
+            idx: usize,
+        },
+
+        Free {
+            #[generator(bolero::produce::<usize>().with().bounds(..MAX_LEN))]
+            idx: usize,
+        },
+    }
+
+    #[derive(Debug)]
+    struct Allocations(Vec<AllocInfo>);
+
+    #[derive(Debug)]
+    struct AllocInfo {
+        ptr: std::ptr::NonNull<u8>,
+        layout: std::alloc::Layout,
+    }
+
+    impl Allocations {
+        fn new() -> Self {
+            Self(Vec::with_capacity(MAX_LEN))
+        }
+
+        fn allocate(&mut self, size: usize, arena: &Arena) {
+            let layout = std::alloc::Layout::array::<u8>(size).unwrap();
+
+            if let Ok(ptr) = arena.allocate(layout) {
+                self.0.push(AllocInfo {
+                    ptr: ptr.cast::<u8>(),
+                    layout,
+                });
+            }
+        }
+
+        fn grow(&mut self, size: usize, idx: usize, arena: &Arena) {
+            let pick = self.pick(idx);
+            let alloc = &self.0[pick];
+            let layout = std::alloc::Layout::array::<u8>(alloc.layout.size() + size).unwrap();
+
+            if let Ok(ptr) = trust_me! { arena.grow(alloc.ptr, alloc.layout, layout) } {
+                self.0[pick] = AllocInfo {
+                    ptr: ptr.cast::<u8>(),
+                    layout,
+                };
+            }
+        }
+
+        fn free(&mut self, idx: usize, arena: &Arena) {
+            let pick = self.pick(idx);
+            let alloc = &self.0[pick];
+
+            trust_me! { arena.deallocate(alloc.ptr, alloc.layout) };
+
+            self.0.remove(pick);
+        }
+
+        fn pick(&self, idx: usize) -> usize {
+            assert!(!self.is_empty());
+            idx % self.0.len()
+        }
+
+        fn is_empty(&self) -> bool {
+            self.0.is_empty()
+        }
     }
 }
