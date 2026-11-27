@@ -67,7 +67,7 @@ impl Arena {
         assert!(self.alloc.as_range().contains(&head_prev));
 
         // SAFETY: head_prev contains the previous head of the arena, which can never be null.
-        unsafe { std::ptr::NonNull::new_unchecked(head_prev as *mut u8) }
+        unsafe { std::ptr::NonNull::new_unchecked(head.as_ptr().with_addr(head_prev)) }
     }
 }
 
@@ -77,7 +77,8 @@ unsafe impl Allocator for Arena {
         layout_alloc: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, AllocError> {
         let cell = self.head.get();
-        let head = cell.as_ptr().addr();
+        let ptr = cell.as_ptr();
+        let head = ptr.addr();
 
         assert!(self.alloc.as_range().contains(&head));
 
@@ -85,41 +86,47 @@ unsafe impl Allocator for Arena {
         let alloc_len = layout_alloc.size();
 
         let alloc_start = match head.checked_add(alloc_align) {
-            Some(ptr) => ptr,
+            Some(addr) => addr,
             None => return Err(AllocError),
         };
 
         let alloc_stop = match alloc_start.checked_add(layout_alloc.size()) {
-            Some(ptr) => ptr,
+            Some(addr) => addr,
             None => return Err(AllocError),
         };
 
         assert_ne!(alloc_start, 0);
         assert_ne!(alloc_stop, 0);
 
+        let alloc_start_ptr = ptr.with_addr(alloc_start);
+        let alloc_stop_ptr = ptr.with_addr(alloc_stop);
+
         let size_layout = std::alloc::Layout::new::<usize>();
-        let size_align = (alloc_stop as *mut u8).align_offset(size_layout.align());
+        let size_align = alloc_stop_ptr.align_offset(size_layout.align());
         let size_len = size_layout.size();
 
         let size_start = match alloc_stop.checked_add(size_align) {
-            Some(ptr) => ptr,
+            Some(addr) => addr,
             None => return Err(AllocError),
         };
 
         let size_stop = match size_start.checked_add(size_len) {
-            Some(ptr) => ptr,
+            Some(addr) => addr,
             None => return Err(AllocError),
         };
 
         assert_ne!(size_start, 0);
         assert_ne!(size_stop, 0);
 
+        let size_start_ptr = ptr.with_addr(size_start).cast::<usize>();
+        let size_stop_ptr = ptr.with_addr(size_stop);
+
         // SAFETY: the arena's backing array was successfully initialized and therefore cannot be
         // null, and the checked math above ensure that we cannot wrap-around back to a null value.
         let (alloc, head_new) = unsafe {
             (
-                std::ptr::NonNull::new_unchecked(alloc_start as *mut u8),
-                std::ptr::NonNull::new_unchecked(size_stop as *mut u8),
+                std::ptr::NonNull::new_unchecked(alloc_start_ptr),
+                std::ptr::NonNull::new_unchecked(size_stop_ptr),
             )
         };
 
@@ -130,7 +137,7 @@ unsafe impl Allocator for Arena {
 
         // SAFETY: size_start is ensured to be aligned before the write and the above check ensure
         // it lies withing allocated memory.
-        unsafe { std::ptr::write(size_start as *mut usize, head) };
+        unsafe { std::ptr::write(size_start_ptr, head) };
 
         assert!(self.alloc.as_range().contains(&alloc_start));
         assert!(self.alloc.as_range().contains(&alloc_stop));
@@ -185,9 +192,12 @@ unsafe impl Allocator for Arena {
         // the arena, we grow it in-place. This is important so that dynamically sized collections
         // like `Vec` don't end up polluting the arena on each size capacity increase.
         if alloc_start == ptr_prev.addr().get() && layout_old.align() == layout_new.align() {
-            let head = self.head.get().as_ptr() as usize;
+            let cell = self.head.get();
+            let ptr = cell.as_ptr();
+            let head = ptr.addr();
+
             let alloc_stop = match head.checked_add(len_new - len_old) {
-                Some(ptr) => ptr,
+                Some(addr) => addr,
                 None => return Err(AllocError),
             };
 
@@ -199,22 +209,25 @@ unsafe impl Allocator for Arena {
             let size_len = size_layout.size();
 
             let size_start = match alloc_stop.checked_add(size_align) {
-                Some(ptr) => ptr,
+                Some(addr) => addr,
                 None => return Err(AllocError),
             };
 
             let size_stop = match size_start.checked_add(size_len) {
-                Some(ptr) => ptr,
+                Some(addr) => addr,
                 None => return Err(AllocError),
             };
 
             assert_ne!(size_start, 0);
             assert_ne!(size_stop, 0);
 
+            let size_start_ptr = ptr.with_addr(size_start).cast::<usize>();
+            let size_stop_ptr = ptr.with_addr(size_stop);
+
             // SAFETY: the arena's backing array was successfully initialized and therefore cannot
             // be null, and the checked math above ensure that we cannot wrap-around back to a null
             // value.
-            let head_new = unsafe { std::ptr::NonNull::new_unchecked(size_stop as *mut u8) };
+            let head_new = unsafe { std::ptr::NonNull::new_unchecked(size_stop_ptr) };
 
             let start = self.alloc.as_ptr::<u8>().addr();
             if head_new.as_ptr().addr() - start > self.alloc.len() {
@@ -223,7 +236,7 @@ unsafe impl Allocator for Arena {
 
             // SAFETY: size_start is ensured to be aligned before the write and the above check
             // ensure it lies withing allocated memory.
-            unsafe { std::ptr::write(size_start as *mut usize, head_prev.addr().get()) };
+            unsafe { std::ptr::write(size_start_ptr, head_prev.addr().get()) };
 
             assert!(self.alloc.as_range().contains(&alloc_stop));
             assert!(self.alloc.as_range().contains(&size_start));

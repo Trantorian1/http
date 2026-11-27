@@ -52,6 +52,7 @@
                   "rust-analyzer"
                   "rust-src"
                   "rustfmt"
+                  "miri"
                 ];
               })
             ];
